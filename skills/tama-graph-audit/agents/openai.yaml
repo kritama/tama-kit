@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tama Graph Audit"
+  short_description: "Trace and audit Tama graph networks"
+  default_prompt: "Use $tama-graph-audit to trace this Tama Terraform graph and report incomplete or unsafe wiring."

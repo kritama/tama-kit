@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "routed-conversation-artifact",
+      "skill": "tama-graph-builder",
+      "prompt": "Add a routed inventory-search behavior to an existing Tama messaging root. The component calls a search action and can return either plain text or an artifact through shared root reply chains.",
+      "invariants": [
+        "Inventories the existing messaging, router, listener, component, and reply topology before editing",
+        "Adds a semantic forwardable class, router path, directional bridges, reactive node, and listener filter",
+        "Adds tooling and post-tool routing with terminals for plain and artifact outcomes",
+        "Attaches an artifact-specific path directive to the shared root artifact thought",
+        "Does not duplicate the shared root reply chain"
+      ]
+    },
+    {
+      "id": "direct-forwarded-action",
+      "skill": "tama-graph-builder",
+      "prompt": "Build a Tama search surface where every user message is forwarded to a component that creates a UI search artifact. No conversational reply is required.",
+      "invariants": [
+        "Chooses direct forwarding instead of a router",
+        "Creates only the root-to-component and component-to-UI bridges required by the graph",
+        "Treats the external artifact action as the terminal",
+        "Does not invent a component-to-root bridge or reply chain"
+      ]
+    },
+    {
+      "id": "parallel-ingestion-domain",
+      "skill": "tama-graph-builder",
+      "prompt": "Extend an existing product-details ingestion network with an independently operable service-details domain. It needs credits, keywords, nested children, generated description and setting embeddings, processed indexing, and manual reruns.",
+      "invariants": [
+        "Builds a parity matrix before implementation",
+        "Uses independent classes, actions, relations, crawlers, nodes, and index preload contracts",
+        "Includes fan-out crawlers, extraction, spread, relation building, awaited enrichment, and embeddings",
+        "Includes reactive and explicit nodes plus class-level path activation",
+        "Includes processed indexing with queue, preloader, stable document ID, and pruning",
+        "Does not couple the new domain to the existing domain for convenience"
+      ]
+    },
+    {
+      "id": "audit-missing-control-edges",
+      "skill": "tama-graph-audit",
+      "prompt": "Audit a routed Tama component whose artifact return path exists, but artifact rendering is wrong and class-level reprocessing never starts.",
+      "invariants": [
+        "Separates execution paths from control edges",
+        "Checks path directives and their target thoughts",
+        "Checks class-processing thought paths for path activations",
+        "Reports exact evidence, impact, and smallest remediation without editing"
+      ]
+    },
+    {
+      "id": "safe-route-removal",
+      "skill": "tama-graph-builder",
+      "prompt": "Remove an obsolete routed behavior and rename its replacement chain without recreating the remote chain or damaging the shared reply flow.",
+      "invariants": [
+        "Traces upstream router outputs and downstream shared consumers",
+        "Removes prompt outputs, paths, filters, directives, and handlers in dependency order",
+        "Uses a moved block for the address-only chain rename",
+        "Preserves shared root reply resources",
+        "Requires plan review for deletes and replacements"
+      ]
+    },
+    {
+      "id": "runtime-boundary",
+      "skill": "tama-graph-audit",
+      "prompt": "Verify whether a processed indexing graph is complete and whether indexing is working in production using only Terraform source.",
+      "invariants": [
+        "Can prove or disprove static processed-event wiring",
+        "Checks corpus, preload, action, queue, bridge, pruning, and stable identity",
+        "Reports credentials, workers, remote indexes, mappings, and successful execution as runtime unknowns",
+        "Does not claim production success from static Terraform"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tama Graph Builder"
+  short_description: "Build and safely manage Tama graph networks"
+  default_prompt: "Use $tama-graph-builder to design or change a complete Tama Terraform graph."
