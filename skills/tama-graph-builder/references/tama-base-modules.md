@@ -3,6 +3,10 @@
 Inspect the exact installed module source and version before using any helper.
 This catalog explains selection; it is not a versioned interface specification.
 
+The root `upmaru/base/tama` module is the global foundation, not one of the
+optional helper modules below. Establish it once before selecting helpers; see
+[global foundation](global-foundation.md).
+
 | Module | Use for | Key contract |
 |---|---|---|
 | `messaging` | Root conversational surface | Creates a root space and messaging classes such as actor, thread, user-message, and response. |

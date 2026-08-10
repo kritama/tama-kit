@@ -2,6 +2,18 @@
   "version": 1,
   "cases": [
     {
+      "id": "bootstrap-global-foundation",
+      "skill": "tama-graph-builder",
+      "prompt": "Start a new standalone Tama Terraform graph with a messaging surface, model provider, and router in an otherwise empty repository.",
+      "invariants": [
+        "Establishes exactly one root upmaru/base/tama global foundation before dependent graph modules",
+        "Pins a root-module version verified for the target provider and repository instead of copying an unrelated helper version",
+        "Uses installed global outputs for the global space, shared schemas, and corpora instead of recreating them",
+        "Adds explicit foundation dependencies only where output references do not infer them",
+        "Checks ownership and plan impact before creating global resources in an existing environment"
+      ]
+    },
+    {
       "id": "routed-conversation-artifact",
       "skill": "tama-graph-builder",
       "prompt": "Add a routed inventory-search behavior to an existing Tama messaging root. The component calls a search action and can return either plain text or an artifact through shared root reply chains.",

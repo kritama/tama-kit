@@ -1,6 +1,6 @@
 ---
 name: tama-graph-audit
-description: Trace, map, review, and diagnose Tama Terraform graph networks without editing them. Use when auditing or debugging Tama routing, direct forwarding, component handoffs, reply flows, ingestion, indexing, reprocessing, spaces, classes, bridges, listeners, chains, nodes, thoughts, tools, directives, activations, sources, or incomplete and unreachable behavior.
+description: Trace, map, review, and diagnose Tama Terraform graph networks without editing them. Use when auditing or debugging Tama global foundations, routing, direct forwarding, component handoffs, reply flows, ingestion, indexing, reprocessing, spaces, classes, bridges, listeners, chains, nodes, thoughts, tools, directives, activations, sources, or incomplete and unreachable behavior.
 ---
 
 # Tama Graph Audit
@@ -12,15 +12,16 @@ graph unless the user explicitly requests fixes.
 ## Discover and scope
 
 1. Read repository instructions and locate the smallest Terraform slice that owns the reported behavior.
-2. Inspect `.terraform.lock.hcl`, `.terraform/modules/modules.json`, and the installed helper-module source rather than treating a module call as an opaque complete pipeline.
-3. Write the execution trace and the supporting control trace:
+2. Identify which Terraform state owns the global foundation. Inspect the installed root `upmaru/base/tama` module and every global output consumed by the graph.
+3. Inspect `.terraform.lock.hcl`, `.terraform/modules/modules.json`, and the installed helper-module source rather than treating a module call as an opaque complete pipeline.
+4. Write the execution trace and the supporting control trace:
 
 ```text
 execution: trigger -> class -> node -> chain -> thought/tool -> class/action -> terminal
 control:   listener/filter | bridge | directive | activation | preload | queue | pruning
 ```
 
-4. Mark every branch, cross-space edge, external side effect, and lifecycle state.
+5. Mark every branch, cross-space edge, external side effect, and lifecycle state.
 
 ## Apply graph invariants
 

@@ -3,7 +3,8 @@
 Tama Builder is a domain-neutral Codex plugin for building, changing, and
 auditing Tama Terraform graph networks. It covers routed conversations, direct
 forwarded actions, shared replies, ingestion, enrichment, embeddings, indexing,
-batch reprocessing, and Terraform-safe graph migration.
+batch reprocessing, the required global foundation, and Terraform-safe graph
+migration.
 
 ## Included skills
 
