@@ -13,6 +13,8 @@
     "developerName": "Upmaru",
     "category": "Developer Tools",
     "capabilities": ["Read", "Write"],
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/icon.svg",
     "defaultPrompt": [
       "Bootstrap and build a Tama graph from my product requirements.",
       "Safely extend or migrate this Tama graph.",

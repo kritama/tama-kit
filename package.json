@@ -11,7 +11,8 @@
   "bugs": {
     "url": "https://github.com/upmaru/tama-builder/issues"
   },
-  "files": [".codex-plugin/", "skills/", "README.md"],
+  "license": "Apache-2.0",
+  "files": [".codex-plugin/", "assets/", "skills/", "README.md"],
   "publishConfig": {
     "access": "public"
   }
