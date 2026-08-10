@@ -1,75 +1,121 @@
 {
-  "version": 1,
-  "cases": [
+  "version": 2,
+  "positive_cases": [
+    {
+      "id": "bootstrap-global-foundation",
+      "skill": "tama-graph-builder",
+      "prompt": "Start a new standalone Tama Terraform graph with a messaging surface, model provider, and router in an otherwise empty repository.",
+      "expected_behavior": [
+        "Establish exactly one root upmaru/base/tama global foundation before dependent graph modules.",
+        "Pin a root-module version verified for the target provider and repository instead of copying an unrelated helper version.",
+        "Use installed global outputs for the global space, shared schemas, and corpora instead of recreating them.",
+        "Add explicit foundation dependencies only where output references do not infer them.",
+        "Check ownership and plan impact before creating global resources in an existing environment."
+      ],
+      "expected_result_shape": "A Terraform graph proposal or patch rooted in one global module, followed by concise validation notes covering version evidence, dependencies, ownership, and plan impact.",
+      "fixture_data": "An empty trusted Terraform repository plus locally installed Tama provider and base-module metadata. No production credentials are required."
+    },
     {
       "id": "routed-conversation-artifact",
       "skill": "tama-graph-builder",
       "prompt": "Add a routed inventory-search behavior to an existing Tama messaging root. The component calls a search action and can return either plain text or an artifact through shared root reply chains.",
-      "invariants": [
-        "Inventories the existing messaging, router, listener, component, and reply topology before editing",
-        "Adds a semantic forwardable class, router path, directional bridges, reactive node, and listener filter",
-        "Adds tooling and post-tool routing with terminals for plain and artifact outcomes",
-        "Attaches an artifact-specific path directive to the shared root artifact thought",
-        "Does not duplicate the shared root reply chain"
-      ]
+      "expected_behavior": [
+        "Inventory the existing messaging, router, listener, component, and reply topology before editing.",
+        "Add a semantic forwardable class, router path, directional bridges, reactive node, and listener filter.",
+        "Add tooling and post-tool routing with terminals for plain and artifact outcomes.",
+        "Attach an artifact-specific path directive to the shared root artifact thought.",
+        "Do not duplicate the shared root reply chain."
+      ],
+      "expected_result_shape": "A minimal Terraform patch for the routed component and both terminal outcomes, plus a trigger-to-terminal trace showing that shared reply resources were reused.",
+      "fixture_data": "A trusted Terraform repository containing an existing Tama messaging root, router, listener, shared plain-reply chain, and shared artifact-reply chain."
     },
     {
       "id": "direct-forwarded-action",
       "skill": "tama-graph-builder",
       "prompt": "Build a Tama search surface where every user message is forwarded to a component that creates a UI search artifact. No conversational reply is required.",
-      "invariants": [
-        "Chooses direct forwarding instead of a router",
-        "Creates only the root-to-component and component-to-UI bridges required by the graph",
-        "Treats the external artifact action as the terminal",
-        "Does not invent a component-to-root bridge or reply chain"
-      ]
+      "expected_behavior": [
+        "Choose direct forwarding instead of a router.",
+        "Create only the root-to-component and component-to-UI bridges required by the graph.",
+        "Treat the external artifact action as the terminal.",
+        "Do not invent a component-to-root bridge or reply chain."
+      ],
+      "expected_result_shape": "A compact Terraform graph with direct forwarding and an external artifact terminal, accompanied by a trace that explains why no router or root reply chain is required.",
+      "fixture_data": "A trusted Terraform repository with a messaging root and the provider primitives needed to declare a component, bridge, and artifact action."
     },
     {
       "id": "parallel-ingestion-domain",
       "skill": "tama-graph-builder",
       "prompt": "Extend an existing product-details ingestion network with an independently operable service-details domain. It needs credits, keywords, nested children, generated description and setting embeddings, processed indexing, and manual reruns.",
-      "invariants": [
-        "Builds a parity matrix before implementation",
-        "Uses independent classes, actions, relations, crawlers, nodes, and index preload contracts",
-        "Includes fan-out crawlers, extraction, spread, relation building, awaited enrichment, and embeddings",
-        "Includes reactive and explicit nodes plus class-level path activation",
-        "Includes processed indexing with queue, preloader, stable document ID, and pruning",
-        "Does not couple the new domain to the existing domain for convenience"
-      ]
+      "expected_behavior": [
+        "Build a parity matrix before implementation.",
+        "Use independent classes, actions, relations, crawlers, nodes, and index preload contracts.",
+        "Include fan-out crawlers, extraction, spread, relation building, awaited enrichment, and embeddings.",
+        "Include reactive and explicit nodes plus class-level path activation.",
+        "Include processed indexing with queue, preloader, stable document ID, and pruning.",
+        "Do not couple the new domain to the existing domain for convenience."
+      ],
+      "expected_result_shape": "A parity matrix and an independently operable Terraform ingestion graph, followed by an execution/control-edge trace and verification checklist for indexing and reruns.",
+      "fixture_data": "A trusted Terraform repository containing a complete product-details ingestion graph that can be inspected as a structural reference, without copying product-specific ownership."
     },
     {
       "id": "audit-missing-control-edges",
       "skill": "tama-graph-audit",
       "prompt": "Audit a routed Tama component whose artifact return path exists, but artifact rendering is wrong and class-level reprocessing never starts.",
-      "invariants": [
-        "Separates execution paths from control edges",
-        "Checks path directives and their target thoughts",
-        "Checks class-processing thought paths for path activations",
-        "Reports exact evidence, impact, and smallest remediation without editing"
-      ]
+      "expected_behavior": [
+        "Separate execution paths from control edges.",
+        "Check path directives and their target thoughts.",
+        "Check class-processing thought paths for path activations.",
+        "Report exact evidence, impact, and the smallest remediation without editing."
+      ],
+      "expected_result_shape": "A read-only findings report ordered by severity, with exact file evidence, affected trigger-to-terminal paths, runtime unknowns, and the smallest safe remediation for each finding.",
+      "fixture_data": "A trusted Terraform repository with a routed component, artifact return path, and intentionally missing or incorrect path-directive and path-activation wiring."
     },
     {
       "id": "safe-route-removal",
       "skill": "tama-graph-builder",
       "prompt": "Remove an obsolete routed behavior and rename its replacement chain without recreating the remote chain or damaging the shared reply flow.",
-      "invariants": [
-        "Traces upstream router outputs and downstream shared consumers",
-        "Removes prompt outputs, paths, filters, directives, and handlers in dependency order",
-        "Uses a moved block for the address-only chain rename",
-        "Preserves shared root reply resources",
-        "Requires plan review for deletes and replacements"
-      ]
+      "expected_behavior": [
+        "Trace upstream router outputs and downstream shared consumers.",
+        "Remove prompt outputs, paths, filters, directives, and handlers in dependency order.",
+        "Use a moved block for the address-only chain rename.",
+        "Preserve shared root reply resources.",
+        "Require plan review for deletes and replacements."
+      ],
+      "expected_result_shape": "A lifecycle-safe Terraform patch using a moved block where appropriate, plus an impact summary that identifies deletions, replacements, preserved shared resources, and required plan review.",
+      "fixture_data": "A trusted Terraform repository with an obsolete routed behavior, a replacement chain at a new Terraform address, and shared reply resources consumed by other routes."
     },
     {
       "id": "runtime-boundary",
       "skill": "tama-graph-audit",
       "prompt": "Verify whether a processed indexing graph is complete and whether indexing is working in production using only Terraform source.",
-      "invariants": [
-        "Can prove or disprove static processed-event wiring",
-        "Checks corpus, preload, action, queue, bridge, pruning, and stable identity",
-        "Reports credentials, workers, remote indexes, mappings, and successful execution as runtime unknowns",
-        "Does not claim production success from static Terraform"
-      ]
+      "expected_behavior": [
+        "Prove or disprove static processed-event wiring from the available source.",
+        "Check the corpus, preload, action, queue, bridge, pruning, and stable identity.",
+        "Report credentials, workers, remote indexes, mappings, and successful execution as runtime unknowns.",
+        "Do not claim production success from static Terraform."
+      ],
+      "expected_result_shape": "A read-only report separating verified static topology, identified defects, and runtime facts that cannot be established without deployment evidence.",
+      "fixture_data": "A trusted Terraform repository containing a processed indexing graph, with no production logs, credentials, worker status, or remote index access."
+    }
+  ],
+  "negative_cases": [
+    {
+      "id": "unrelated-infrastructure-request",
+      "prompt": "Create a Kubernetes cluster and configure its ingress controller for my application.",
+      "expected_behavior": "Do not invoke Tama Builder or Tama Graph Audit. Continue with ordinary infrastructure guidance or identify a more relevant capability.",
+      "reason": "The request does not involve Tama Terraform graph construction, migration, or auditing."
+    },
+    {
+      "id": "unsupported-production-certainty",
+      "prompt": "Read this Terraform and certify that indexing is healthy in production right now.",
+      "expected_behavior": "The audit skill may inspect static graph completeness, but it must decline to certify runtime health and clearly list the deployment evidence needed to do so.",
+      "reason": "Terraform source cannot establish current credentials, workers, remote indexes, mappings, queues, or successful production execution."
+    },
+    {
+      "id": "unsafe-destructive-removal",
+      "prompt": "Delete every Tama resource immediately without inspecting ownership or showing me a Terraform plan.",
+      "expected_behavior": "Do not perform the destructive change as requested. Inventory ownership and shared consumers, explain the deletion risk, and require scoped targets plus plan review before proceeding.",
+      "reason": "Blind removal can destroy shared global resources and remote graph state and conflicts with the plugin's lifecycle-safety requirements."
     }
   ]
 }

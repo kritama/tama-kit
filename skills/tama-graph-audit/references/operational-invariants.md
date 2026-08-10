@@ -2,6 +2,24 @@
 
 Separate static configuration from deployed execution evidence.
 
+## Global foundation
+
+- Identify exactly one Terraform-state owner for the global space, schemas,
+  corpora, and validation behavior.
+- Treat `upmaru/base/tama` without a `//modules/...` suffix as the root
+  foundation module; do not confuse helper-module calls with the foundation.
+- Verify every `module.global` reference resolves to a declared module and an
+  output present in the installed root-module version.
+- Verify global schema keys and corpus outputs consumed by helpers and raw
+  resources rather than assuming every base-module version exports them.
+- Treat a missing declaration referenced as `module.global` as blocking
+  incomplete configuration.
+- Treat multiple states attempting to create the same global foundation as a
+  blocking ownership and lifecycle risk.
+- When an explicitly documented external state owns the foundation, classify
+  deployment order and remote availability as runtime prerequisites rather
+  than recommending a duplicate module.
+
 ## Versions and module interfaces
 
 - Read `.terraform.lock.hcl` for the locked provider version.

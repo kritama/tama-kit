@@ -1,9 +1,30 @@
 {
   "name": "@upmaru/tama-builder",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "A Codex plugin for building, managing, and auditing Tama Terraform graph networks.",
   "keywords": ["codex-plugin", "tama", "terraform", "agents", "graphs", "pipelines", "ingestion"],
-  "files": [".codex-plugin/", "skills/", "README.md"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/upmaru/tama-builder.git"
+  },
+  "homepage": "https://github.com/upmaru/tama-builder#readme",
+  "bugs": {
+    "url": "https://github.com/upmaru/tama-builder/issues"
+  },
+  "license": "Apache-2.0",
+  "files": [
+    ".codex-plugin/",
+    "assets/",
+    "evals/",
+    "scripts/",
+    "skills/",
+    "submission/",
+    "README.md"
+  ],
+  "scripts": {
+    "validate:submission": "python3 -B scripts/validate_submission.py",
+    "build:submission": "python3 -B scripts/build_submission_zip.py"
+  },
   "publishConfig": {
     "access": "public"
   }

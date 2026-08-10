@@ -1,6 +1,6 @@
 {
   "name": "tama-builder",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Build, manage, and audit complete Tama Terraform graph networks.",
   "author": {
     "name": "Upmaru"
@@ -8,13 +8,21 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Tama Builder",
-    "shortDescription": "Build, manage, and audit Tama graph networks",
-    "longDescription": "Design, extend, migrate, remove, and audit complete Tama Terraform graphs for conversations, direct actions, ingestion, indexing, and reprocessing.",
+    "shortDescription": "Build and audit Tama graphs",
+    "longDescription": "Bootstrap, design, extend, migrate, remove, and audit complete Tama Terraform graphs for global foundations, conversations, direct actions, ingestion, indexing, and reprocessing.",
     "developerName": "Upmaru",
     "category": "Developer Tools",
-    "capabilities": ["Read", "Write"],
+    "capabilities": [
+      "Build and modify Tama Terraform graphs",
+      "Audit Tama graph wiring and lifecycle safety"
+    ],
+    "websiteURL": "https://upmaru.com",
+    "privacyPolicyURL": "https://upmaru.com/privacy",
+    "termsOfServiceURL": "https://upmaru.com/terms",
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/icon.svg",
     "defaultPrompt": [
-      "Build a Tama graph from my product requirements.",
+      "Bootstrap and build a Tama graph from my product requirements.",
       "Safely extend or migrate this Tama graph.",
       "Audit this Tama graph for incomplete or unsafe wiring."
     ]

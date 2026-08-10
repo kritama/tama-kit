@@ -20,6 +20,22 @@ MODULE_RE = re.compile(r'^\s*module\s+"([^"]+)"\s*\{')
 ASSIGNMENT_RE = re.compile(r'^\s*(source|version)\s*=\s*"([^"]+)"')
 PROVIDER_RE = re.compile(r'provider\s+"([^"]+)"\s*\{(.*?)\n\}', re.DOTALL)
 LOCK_VALUE_RE = re.compile(r'^\s*(version|constraints)\s*=\s*"([^"]+)"', re.MULTILINE)
+GLOBAL_REFERENCE_RE = re.compile(r'\bmodule\.global\b')
+
+
+def is_registry_global_source(source: str | None) -> bool:
+    if not source:
+        return False
+    return source.removeprefix("registry.terraform.io/") == "upmaru/base/tama"
+
+
+def is_global_foundation_call(call: dict[str, Any]) -> bool:
+    source = call["source"]
+    normalized = source.removeprefix("registry.terraform.io/") if source else ""
+    is_registry_helper = normalized.startswith("upmaru/base/tama//modules/")
+    return is_registry_global_source(source) or (
+        call["name"] == "global" and not is_registry_helper
+    )
 
 
 def terraform_files(root: Path) -> list[Path]:
@@ -33,9 +49,12 @@ def terraform_files(root: Path) -> list[Path]:
 def parse_declared_blocks(root: Path, files: list[Path]) -> dict[str, Any]:
     counts: Counter[str] = Counter()
     module_calls: list[dict[str, Any]] = []
+    global_reference_count = 0
 
     for path in files:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        text = path.read_text(encoding="utf-8", errors="replace")
+        global_reference_count += len(GLOBAL_REFERENCE_RE.findall(text))
+        lines = text.splitlines()
         index = 0
         while index < len(lines):
             line = lines[index]
@@ -77,6 +96,7 @@ def parse_declared_blocks(root: Path, files: list[Path]) -> dict[str, Any]:
     return {
         "block_counts": dict(sorted(counts.items())),
         "module_calls": module_calls,
+        "global_reference_count": global_reference_count,
     }
 
 
@@ -136,17 +156,62 @@ def build_inventory(root: Path) -> dict[str, Any]:
         call["installed_version"] = match.get("version") if match else None
         call["installed_directory"] = match.get("directory") if match else None
 
+    global_calls = [
+        call
+        for call in declared["module_calls"]
+        if is_global_foundation_call(call)
+    ]
+    if not global_calls:
+        global_status = "missing"
+    elif len(global_calls) == 1:
+        global_status = "present"
+    else:
+        global_status = "multiple"
+
     warnings = []
     if not (root / ".terraform.lock.hcl").exists():
         warnings.append("No .terraform.lock.hcl was found.")
     if not installed:
         warnings.append("No .terraform/modules/modules.json was found; modules may be uninitialized.")
+    if global_status == "missing":
+        warnings.append(
+            "No global foundation module was found; verify whether this state or an external state owns it."
+        )
+    elif global_status == "multiple":
+        warnings.append(
+            "Multiple global foundation candidates were found; verify that exactly one Terraform state owns the Tama global foundation."
+        )
+    if declared["global_reference_count"] and not any(
+        call["name"] == "global" for call in global_calls
+    ):
+        warnings.append(
+            "The configuration references module.global but does not declare that module address."
+        )
+    for call in global_calls:
+        if is_registry_global_source(call["source"]) and not call["declared_version"]:
+            warnings.append(
+                f"module.{call['name']} uses the registry global foundation without an explicit version pin."
+            )
+        if (
+            call["declared_version"]
+            and call["installed_version"]
+            and call["declared_version"] != call["installed_version"]
+        ):
+            warnings.append(
+                f"module.{call['name']} declares global foundation version "
+                f"{call['declared_version']} but {call['installed_version']} is installed."
+            )
 
     return {
         "repository": str(root),
         "terraform_file_count": len(files),
         "provider_locks": parse_provider_locks(root),
         "declared": declared,
+        "global_foundation": {
+            "status": global_status,
+            "module_calls": global_calls,
+            "module_global_reference_count": declared["global_reference_count"],
+        },
         "installed_module_count": len(installed),
         "installed_modules": installed,
         "warnings": warnings,
@@ -187,6 +252,21 @@ def print_text(inventory: dict[str, Any], show_all_modules: bool) -> None:
             f"  {call['file']}:{call['line']} module.{call['name']} "
             f"source={source} declared={declared} installed={installed}"
         )
+
+    foundation = inventory["global_foundation"]
+    print(f"\nGlobal foundation: {foundation['status']}")
+    for call in foundation["module_calls"]:
+        source = call["source"] or "dynamic-or-local"
+        declared = call["declared_version"] or "local-or-unpinned"
+        installed = call["installed_version"] or "not-matched"
+        print(
+            f"  {call['file']}:{call['line']} module.{call['name']} "
+            f"source={source} declared={declared} installed={installed}"
+        )
+    print(
+        "  module.global references: "
+        f"{foundation['module_global_reference_count']}"
+    )
 
     print(f"\nInstalled modules: {inventory['installed_module_count']}")
     if show_all_modules:

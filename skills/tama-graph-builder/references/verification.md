@@ -5,6 +5,8 @@ success.
 
 ## Execution checks
 
+- Exactly one Terraform state owns the required global foundation, or an explicit external-foundation contract is documented.
+- Every global space, schema, and corpus reference resolves to an output present in the pinned root-module version.
 - Every trigger selects the intended class, state, node, chain, or activation.
 - Node and chain ownership agree with the intended space.
 - Thought indexes and outputs form an executable sequence.

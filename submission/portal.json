@@ -1,0 +1,22 @@
+{
+  "submissionType": "Skills only",
+  "listing": {
+    "websiteURL": "https://upmaru.com",
+    "privacyPolicyURL": "https://upmaru.com/privacy",
+    "termsOfServiceURL": "https://upmaru.com/terms",
+    "supportURL": "https://github.com/upmaru/tama-builder/issues"
+  },
+  "positiveCaseIds": [
+    "bootstrap-global-foundation",
+    "routed-conversation-artifact",
+    "direct-forwarded-action",
+    "parallel-ingestion-domain",
+    "audit-missing-control-edges"
+  ],
+  "negativeCaseIds": [
+    "unrelated-infrastructure-request",
+    "unsupported-production-certainty",
+    "unsafe-destructive-removal"
+  ],
+  "releaseNotes": "Initial public release of Tama Builder, a skills-only plugin for building, changing, and auditing Tama Terraform graph networks. It includes global foundation setup, conversation and action graphs, ingestion and indexing workflows, lifecycle-safe migrations, repository inspection, and read-only graph audits."
+}
