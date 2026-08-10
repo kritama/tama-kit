@@ -1,6 +1,6 @@
 {
   "name": "@upmaru/tama-builder",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "A Codex plugin for building, managing, and auditing Tama Terraform graph networks.",
   "keywords": ["codex-plugin", "tama", "terraform", "agents", "graphs", "pipelines", "ingestion"],
   "repository": {
