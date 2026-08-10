@@ -8,11 +8,17 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Tama Builder",
-    "shortDescription": "Build, manage, and audit Tama graph networks",
+    "shortDescription": "Build and audit Tama graphs",
     "longDescription": "Bootstrap, design, extend, migrate, remove, and audit complete Tama Terraform graphs for global foundations, conversations, direct actions, ingestion, indexing, and reprocessing.",
     "developerName": "Upmaru",
     "category": "Developer Tools",
-    "capabilities": ["Read", "Write"],
+    "capabilities": [
+      "Build and modify Tama Terraform graphs",
+      "Audit Tama graph wiring and lifecycle safety"
+    ],
+    "websiteURL": "https://upmaru.com",
+    "privacyPolicyURL": "https://upmaru.com/privacy",
+    "termsOfServiceURL": "https://upmaru.com/terms",
     "composerIcon": "./assets/icon.svg",
     "logo": "./assets/icon.svg",
     "defaultPrompt": [

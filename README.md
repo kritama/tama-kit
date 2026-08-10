@@ -57,6 +57,24 @@ runtime unknowns with exact evidence.
 ## Development
 
 Memovee-derived forward-test cases live in `evals/cases.json`; public skill
-references remain domain-neutral. Before public npm publication, choose a
-license and add final repository, homepage, and publisher metadata to the
-plugin manifest.
+references remain domain-neutral. Validate the stricter public-directory
+metadata and review cases with:
+
+```bash
+npm run validate:submission
+```
+
+Build the clean skills-only ZIP for the OpenAI plugin submission portal with:
+
+```bash
+npm run build:submission
+```
+
+The archive is written to `dist/tama-builder-<version>.zip`. Portal test cases
+remain in `evals/cases.json` because they are review materials rather than
+plugin runtime files. Copy-ready listing URLs, selected review cases, and
+initial release notes live in `submission/portal.json`.
+
+## License
+
+Tama Builder is licensed under the [Apache License 2.0](LICENSE).
