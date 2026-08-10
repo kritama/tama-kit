@@ -1,0 +1,22 @@
+{
+  "name": "upmaru",
+  "interface": {
+    "displayName": "Upmaru"
+  },
+  "plugins": [
+    {
+      "name": "tama-builder",
+      "source": {
+        "source": "npm",
+        "package": "@upmaru/tama-builder",
+        "version": "latest",
+        "registry": "https://registry.npmjs.org"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
