@@ -96,6 +96,62 @@
       ],
       "expected_result_shape": "A read-only report separating verified static topology, identified defects, and runtime facts that cannot be established without deployment evidence.",
       "fixture_data": "A trusted Terraform repository containing a processed indexing graph, with no production logs, credentials, worker status, or remote index access."
+    },
+    {
+      "id": "structured-generation-context",
+      "skill": "tama-graph-builder",
+      "prompt": "Add a structured Tama model-generation thought with system instructions plus entity and concept inputs. The installed runtime uses the Contexts.Corpus marker contract.",
+      "expected_behavior": [
+        "Create separate system instructions and a user prompt for the structured generation thought.",
+        "Put the corpus marker on a standalone line in the user prompt.",
+        "Connect the entity and concept inputs with the correct input types and corpora.",
+        "Verify that the active contexts materialize a user message containing the runtime corpora.",
+        "Do not treat declared context inputs or a system-only prompt as proof of a valid provider payload."
+      ],
+      "expected_result_shape": "A minimal Terraform patch for the structured generation contexts and inputs, plus validation notes tracing runtime corpora into the final user message.",
+      "fixture_data": "A trusted Terraform repository with an existing model-backed thought and an installed Tama version whose context source shows the standalone corpus-marker contract."
+    },
+    {
+      "id": "queue-loaded-after-worker-boot",
+      "skill": "tama-graph-audit",
+      "prompt": "Audit a Tama entity that remains processing with no Flow even though its reactive node exists. The entity queue was provisioned after the worker node started.",
+      "expected_behavior": [
+        "Separate valid reactive graph topology from running worker queue availability.",
+        "Inspect the entity job queue, worker queue subscriptions or node roles, and provisioning versus worker-start timestamps.",
+        "Inspect the installed runtime to determine whether queues are resolved only at boot.",
+        "Recommend a worker reload or restart followed by consumption evidence when boot-time queue resolution is confirmed.",
+        "Do not invent a missing Flow node solely because no Flow record exists."
+      ],
+      "expected_result_shape": "A read-only runtime diagnosis that identifies the boot-time queue-loading prerequisite, distinguishes it from graph defects, and names the evidence needed after restart.",
+      "fixture_data": "A trusted Terraform graph plus entity job records, worker configuration, boot logs, and queue provisioning timestamps."
+    },
+    {
+      "id": "deterministic-json-action-envelope",
+      "skill": "tama-graph-builder",
+      "prompt": "Fix a deterministic tama/actions/caller POST that reaches an OpenAPI endpoint without Content-Type because its module input currently renders the source entity as raw JSON.",
+      "expected_behavior": [
+        "Inspect the installed Tama request builder and the action's OpenAPI request body contract.",
+        "Create or select an action-specific corpus that nests the HTTP payload under the top-level body key.",
+        "Preserve the raw JSON corpus when it is still used by model contexts or other consumers.",
+        "Point only the deterministic caller module input at the action-envelope corpus.",
+        "Verify the plan does not replace the source class, action, thought, or unrelated corpora."
+      ],
+      "expected_result_shape": "A minimal Terraform patch adding an action-envelope corpus and redirecting the caller input, plus validation notes proving the rendered JSON body and lifecycle-safe plan.",
+      "fixture_data": "A trusted Terraform repository, installed Tama request-builder source, an OpenAPI JSON POST action, and a persisted action-call showing no body or Content-Type."
+    },
+    {
+      "id": "consolidate-handoff-initializers",
+      "skill": "tama-graph-builder",
+      "prompt": "Fix a partially applied Tama graph where several import initializers in each thought were changed to the same handoff class and Terraform now receives a duplicate class-and-reference error.",
+      "expected_behavior": [
+        "Inspect Terraform state to identify which initializer address already owns the handoff anchor for each thought.",
+        "Preserve each successful address and index instead of selecting a new winner from source order.",
+        "Combine origin entities, forwarded concepts, and relation lookups into one ordered resources list for each thought and handoff anchor.",
+        "Remove sibling imports that duplicate the same thought, class, and reference tuple.",
+        "Verify imported entities and concepts still match the context and module-input corpora that consume them."
+      ],
+      "expected_result_shape": "A lifecycle-safe Terraform patch with one import initializer per thought and handoff anchor, plus a reconciliation plan identifying retained and removed addresses without applying it.",
+      "fixture_data": "A trusted Terraform repository and a local Terraform state produced by a partial apply, with some initializer class updates committed remotely and others rejected by Tama's composite unique constraint."
     }
   ],
   "negative_cases": [

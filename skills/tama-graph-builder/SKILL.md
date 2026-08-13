@@ -41,7 +41,7 @@ contract does not require a root reply.
 3. Add or reuse semantic handoff classes; route thoughts to classes, not directly to chains or spaces.
 4. Create every bridge in the direction of its actual cross-space handoff. Do not add an unused reverse bridge.
 5. Bind each trigger to the correct reactive, explicit, listener-filtered, lifecycle-state, or path-activated execution mode.
-6. Create ordered thoughts plus their contexts, inputs, processors, tools, queues, preloads, pruning, directives, and paths.
+6. Create ordered thoughts plus their contexts, inputs, processors, tools, queues, preloads, pruning, directives, and paths. Consolidate resources that share one thought, initializer anchor class, and reference into a single initializer. For structured model generation, verify that the active contexts materialize a user message carrying the runtime corpora; a system-only context is incomplete even when context inputs exist. For deterministic action callers, render the complete request-argument envelope expected by the installed runtime.
 7. Give every branch an intentional terminal, including empty, failure, clarification, and asynchronous outcomes.
 8. Keep shared reply generation in the root messaging space when that is the repository architecture. Attach branch-specific prompts with path directives rather than cloning reply chains.
 9. For sibling domain graphs, use a parity matrix but preserve independent class IDs, actions, relations, and lifecycle controls.

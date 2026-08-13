@@ -22,6 +22,12 @@ success.
 - Every path activation names the intended explicit processing chain.
 - Every delegated thought targets a compatible shared thought.
 - Context inputs and module inputs use the correct corpus and input type.
+- Each thought has at most one initializer for a given class and reference; a single import initializer combines all resource requests for its anchor.
+- Initializer class IDs match resources present before initialization, while imported resources match the corpora of modules that consume them.
+- Every deterministic action caller's rendered corpus matches the runtime request-argument envelope; required `path`, `query`, and `body` values are nested under those exact top-level keys.
+- JSON actions prove that the rendered `body` becomes the HTTP JSON payload and receives the expected content type.
+- Every structured generation thought materializes at least one user message; system-only contexts are incomplete when the runtime requires a user message.
+- Runtime corpora are inserted into the final provider messages. For marker-based Tama versions, the user prompt contains a standalone `{{ corpus }}` marker.
 - Awaited relations, preloaded relations, and thread-focus relations have consistent producers and consumers.
 
 ## Operational checks
@@ -30,6 +36,7 @@ success.
 - Deterministic callers receive a stable corpus and identifier.
 - Retries are bounded and safe for the action's idempotency.
 - Queue and priority match the expected workload.
+- When the installed runtime resolves worker queues at boot, queues provisioned after startup are followed by an explicit worker reload or restart and consumption evidence.
 - Pruning and version-retention behavior are deliberate.
 - Source identity validation and rate limits are configured without committed secrets.
 - External credentials, workers, APIs, indexes, and deployed listeners remain runtime prerequisites unless execution evidence is available.

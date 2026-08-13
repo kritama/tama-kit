@@ -40,6 +40,9 @@ modules to their contained resources and external edges.
 - Reactive and explicit nodes are distinguished and both exist when automatic processing and manual reruns are required.
 - Awaited relations have upstream producers and bounded failure behavior.
 - Generated and embedded concepts use the intended entity or concept corpora.
+- Deterministic action caller corpora render the complete request-argument envelope expected by the installed runtime, including required `path`, `query`, and `body` keys.
+- Every structured model-generation thought materializes a user message carrying the runtime corpora when required by the installed Tama version.
+- System-only contexts and declared context inputs are not proof that structured generation receives a valid user message or provider payload.
 
 ## Indexing and reprocessing
 
@@ -58,5 +61,7 @@ modules to their contained resources and external edges.
 - Every trigger reaches a terminal without relying on an undeclared edge.
 - A loaded seed, preload, or prior record is input rather than proof of completed work.
 - Tool-specific inputs and initializers target the intended tool rather than only its parent thought.
+- Thought initializers are unique by thought, anchor class, and reference; repeated imports for one anchor are consolidated into one ordered `resources` list.
+- An initializer class selects a resource present before initialization. Imported entity and concept classes are verified separately against their downstream context or module-input corpora.
 - Space-processor changes account for every chain sharing that space.
 - Class-operation resources agree with the node lifecycle states they are intended to drive.
