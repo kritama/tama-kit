@@ -6,6 +6,7 @@ success.
 ## Execution checks
 
 - Exactly one Terraform state owns the required global foundation, or an explicit external-foundation contract is documented.
+- Every decoded schema passed to `tama_class.schema_json` has non-empty top-level `title` and `description` strings; nested property descriptions do not satisfy the class metadata contract.
 - Every global space, schema, and corpus reference resolves to an output present in the pinned root-module version.
 - Every trigger selects the intended class, state, node, chain, or activation.
 - Node and chain ownership agree with the intended space.
@@ -56,6 +57,11 @@ Run repository-specific checks first. Otherwise use the narrowest safe commands:
 terraform fmt -check -recursive
 terraform validate
 ```
+
+`terraform validate` does not necessarily call Tama's remote class-schema
+validator. Add or run a repository check that decodes every `tama_class`
+schema source and rejects missing or blank top-level `title` and `description`
+fields before an apply.
 
 Run `terraform init` only when required to install the declared provider and
 modules. Run `terraform plan` only with approved configuration. Never use

@@ -112,6 +112,20 @@
       "fixture_data": "A trusted Terraform repository with an existing model-backed thought and an installed Tama version whose context source shows the standalone corpus-marker contract."
     },
     {
+      "id": "raw-class-schema-metadata",
+      "skill": "tama-graph-builder",
+      "prompt": "Add several raw tama_class resources whose JSON schemas are loaded from local files, and make the deployment fail before apply if a class schema is incomplete.",
+      "expected_behavior": [
+        "Give every class schema non-empty top-level title and description strings.",
+        "Do not treat descriptions nested under properties as class metadata.",
+        "Add or use a pre-apply repository check that decodes every tama_class schema source.",
+        "Reject missing or blank top-level class descriptions before Terraform calls Tama.",
+        "Do not rely on terraform validate alone to exercise Tama's remote schema validation."
+      ],
+      "expected_result_shape": "A minimal Terraform and schema patch plus a local pre-apply check proving that every Tama class schema contains the required top-level metadata.",
+      "fixture_data": "A trusted Terraform repository with raw tama_class resources and local JSON schema files, including one schema that has property descriptions but no top-level description."
+    },
+    {
       "id": "queue-loaded-after-worker-boot",
       "skill": "tama-graph-audit",
       "prompt": "Audit a Tama entity that remains processing with no Flow even though its reactive node exists. The entity queue was provisioned after the worker node started.",

@@ -45,7 +45,7 @@ contract does not require a root reply.
 7. Give every branch an intentional terminal, including empty, failure, clarification, and asynchronous outcomes.
 8. Keep shared reply generation in the root messaging space when that is the repository architecture. Attach branch-specific prompts with path directives rather than cloning reply chains.
 9. For sibling domain graphs, use a parity matrix but preserve independent class IDs, actions, relations, and lifecycle controls.
-10. Update prompts, schemas, listener filters, documentation, and tests in the same change as their Terraform edges.
+10. Update prompts, schemas, listener filters, documentation, and tests in the same change as their Terraform edges. Every JSON schema passed to `tama_class.schema_json` must include non-empty top-level `title` and `description` fields; property-level descriptions do not satisfy this class contract. Check the decoded schemas before apply because ordinary Terraform validation may not exercise Tama's remote schema validation.
 
 ## Manage existing graphs safely
 
@@ -63,6 +63,6 @@ Read [verification](references/verification.md), then:
 
 1. Trace every changed trigger to every terminal.
 2. Verify global foundation ownership, required outputs, routing, bridges, handlers, control edges, operational controls, and lifecycle intent.
-3. Run repository checks, `terraform fmt -check -recursive`, and `terraform validate` when available.
+3. Run repository checks, including a decoded-schema check for every `tama_class`, then run `terraform fmt -check -recursive` and `terraform validate` when available.
 4. Review an approved `terraform plan` for destructive changes when the task changes existing addresses or data-bearing resources.
 5. Report the graph delta, assumptions, validation, runtime prerequisites, and any unverified external behavior.

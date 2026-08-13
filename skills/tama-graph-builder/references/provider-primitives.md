@@ -256,6 +256,13 @@ operation when behavior depends on an operation contract beyond a node's basic
 `on` state. Before changing a schema or operation, trace every corpus, prompt,
 action, path, relation, preload, and external index that consumes it.
 
+Every decoded JSON schema supplied through `tama_class.schema_json` must have
+non-empty top-level `title` and `description` strings. A `description` nested
+under `properties` does not describe the class and does not meet this
+requirement. Tama can reject an otherwise valid Terraform configuration with a
+remote `Schema Error` during apply, so enforce the class metadata locally before
+deployment rather than relying on `terraform validate` alone.
+
 ### `tama_thought_tool_input` and `tama_thought_tool_initializer`
 
 Use tool inputs and tool initializers when an individual action requires data
