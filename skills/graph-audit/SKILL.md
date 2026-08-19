@@ -1,13 +1,40 @@
 ---
-name: tama-graph-audit
-description: Trace, map, review, and diagnose Tama Terraform graph networks without editing them. Use when auditing or debugging Tama global foundations, routing, direct forwarding, component handoffs, reply flows, ingestion, indexing, reprocessing, spaces, classes, bridges, listeners, chains, nodes, thoughts, tools, directives, activations, sources, or incomplete and unreachable behavior.
+name: graph-audit
+description: Trace, map, review, and diagnose Tama Terraform graph networks and their runtime thread, flow, and step behavior without editing them. Use when auditing graph configuration or investigating a user-reported Tama execution problem, including global foundations, routing, direct forwarding, component handoffs, reply flows, ingestion, indexing, reprocessing, spaces, classes, bridges, listeners, chains, nodes, thoughts, tools, directives, activations, sources, or incomplete and unreachable behavior.
 ---
 
-# Tama Graph Audit
+# Graph Audit
 
 Audit the static graph from each trigger to its terminal outcomes. Establish
 what Terraform proves and separate that from runtime behavior. Do not edit the
 graph unless the user explicitly requests fixes.
+
+## Keep repository source authoritative
+
+Treat the target graph repository's Terraform source as the source of truth for
+the intended graph configuration. This includes its `.tf` files, installed
+module source, and provider lockfile. Terraform state and plans are deployment
+evidence, not substitutes for source configuration.
+Do not use a Tama MCP graph or configuration projection to replace repository
+inspection or to infer the intended topology.
+
+Use the configured Tama MCP as bounded runtime evidence for investigating the
+problem described in the user's comment: inspect the relevant thread, enumerate
+its steps, follow referenced flows and steps, and fetch referenced artifacts
+only when needed. The comment is the symptom or hypothesis that scopes the
+investigation; it is not proof of the cause.
+
+Keep these conclusions separate:
+
+- **Configured intent:** what the repository source declares.
+- **Observed execution:** what MCP runtime records show for the selected thread, flow, steps, and artifacts.
+- **Diagnosis:** the evidence-backed explanation that relates the observed execution to the configured intent.
+
+When runtime evidence differs from source, report the disagreement as possible
+deployment or source drift. State exactly what each side shows. Do not silently
+treat the deployed MCP projection as the current graph definition, and do not
+claim that source is deployed without plan, apply, state, version, or equivalent
+deployment evidence.
 
 ## Discover and scope
 
@@ -22,6 +49,10 @@ control:   listener/filter | bridge | directive | activation | preload | queue |
 ```
 
 5. Mark every branch, cross-space edge, external side effect, and lifecycle state.
+
+When the request includes a thread, flow, step, artifact, or user comment about
+runtime behavior, read [runtime diagnosis](references/runtime-diagnosis.md) and
+correlate the bounded MCP evidence with this source-derived trace.
 
 ## Apply graph invariants
 
@@ -43,6 +74,10 @@ For each finding, provide:
 - Broken contract: missing or inconsistent trigger, execution edge, control edge, terminal, or lifecycle guarantee.
 - Impact: what cannot trigger, route, process, reply, persist, reprocess, or be observed.
 - Smallest safe remediation.
+
+Label every cited fact as repository source, Terraform state or plan, MCP runtime
+evidence, user report, or inference. A remediation changes repository source;
+runtime data may justify it but does not redefine the graph.
 
 Classify the overall path as:
 

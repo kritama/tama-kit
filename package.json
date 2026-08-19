@@ -1,9 +1,10 @@
 {
-  "name": "@upmaru/tama-builder",
-  "version": "0.2.3",
-  "description": "A Codex plugin for building, managing, and auditing Tama Terraform graph networks.",
+  "name": "@upmaru/tama-kit",
+  "version": "0.3.0",
+  "description": "A ChatGPT and Codex plugin for building, managing, and auditing Tama Terraform graph networks.",
   "keywords": [
     "codex-plugin",
+    "mcp",
     "tama",
     "terraform",
     "agents",
@@ -13,13 +14,16 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/upmaru/tama-builder.git"
+    "url": "git+https://github.com/upmaru/tama-kit.git"
   },
-  "homepage": "https://github.com/upmaru/tama-builder#readme",
+  "homepage": "https://github.com/upmaru/tama-kit#readme",
   "bugs": {
-    "url": "https://github.com/upmaru/tama-builder/issues"
+    "url": "https://github.com/upmaru/tama-kit/issues"
   },
   "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
   "files": [
     ".codex-plugin/",
     "assets/",
@@ -27,11 +31,16 @@
     "scripts/",
     "skills/",
     "submission/",
-    "README.md"
+    "README.md",
+    "!**/__pycache__/**",
+    "!**/*.py[cod]"
   ],
   "scripts": {
-    "validate:submission": "python3 -B scripts/validate_submission.py",
-    "build:submission": "python3 -B scripts/build_submission_zip.py"
+    "configure:mcp": "node scripts/configure-mcp-plugin.mjs",
+    "validate:submission": "node scripts/validate-submission.mjs",
+    "validate:review": "node scripts/validate-submission.mjs --review-ready",
+    "build:submission": "node scripts/build-submission-zip.mjs",
+    "test": "node --test"
   },
   "publishConfig": {
     "access": "public"

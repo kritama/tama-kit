@@ -1,22 +1,37 @@
 ---
-name: tama-graph-builder
+name: graph-builder
 description: Bootstrap, design, build, extend, migrate, replace, reprocess, and safely remove Tama Terraform graph networks. Use when starting a Tama Terraform repository or creating or changing Tama global foundations, conversations, routers, direct message handlers, component handoffs, background processors, crawlers, ingestion networks, indexing flows, spaces, classes, chains, nodes, thoughts, tools, paths, directives, listeners, sources, or lifecycle wiring.
 ---
 
-# Tama Graph Builder
+# Graph Builder
 
 Translate a requested outcome or graph change into a complete, state-aware Tama
 network. Follow the target repository's conventions and installed versions. Do
 not assume a Memovee, search, movie, or other product domain.
 
+Treat the target graph repository's Terraform source as the source of truth for
+the intended graph configuration. A configured Tama MCP may provide runtime
+evidence from threads, flows, steps, and artifacts, but it does not replace
+inspection of `.tf` files, installed modules, provider locks, state, or plans.
+If runtime evidence conflicts with source, report possible deployment or source
+drift and resolve that boundary before designing a graph change. Never copy an
+MCP graph or configuration projection into Terraform as though it were the
+authoritative definition.
+
 ## Discover the repository
 
 1. Read repository instructions such as `AGENTS.md` and inspect the closest complete graph.
-2. Run `python3 scripts/inspect_tama_repository.py <repository>` to inventory the global foundation, provider locks, installed modules, declared module calls, and Tama block types.
+2. Run `node scripts/inspect-tama-repository.mjs <repository>` to inventory the global foundation, provider locks, installed modules, declared module calls, and Tama block types.
 3. Read [global foundation](references/global-foundation.md). Identify the owner and installed version of the global space, schemas, corpora, and validation chain before designing dependent resources.
 4. Inspect `.terraform/modules/modules.json` and the installed module source for every helper being added or changed. If modules are not installed, follow the repository's approved `terraform init` workflow.
 5. Inspect relevant schemas, actions, specifications, sources, queues, models, prompts, corpora, and external terminals.
 6. Read [graph contract](references/graph-contract.md) and record the current path plus the requested delta before editing.
+
+When a user comment or runtime failure motivates the change, use the comment to
+scope the symptom and use only bounded MCP runtime evidence to test it. Derive
+the current graph and every proposed edit from repository source. Distinguish a
+source defect from stale deployment, runtime failure, bad input, and external
+system behavior before editing.
 
 ## Select the graph shape
 

@@ -3,7 +3,7 @@
   "positive_cases": [
     {
       "id": "bootstrap-global-foundation",
-      "skill": "tama-graph-builder",
+      "skill": "graph-builder",
       "prompt": "Start a new standalone Tama Terraform graph with a messaging surface, model provider, and router in an otherwise empty repository.",
       "expected_behavior": [
         "Establish exactly one root upmaru/base/tama global foundation before dependent graph modules.",
@@ -17,7 +17,7 @@
     },
     {
       "id": "routed-conversation-artifact",
-      "skill": "tama-graph-builder",
+      "skill": "graph-builder",
       "prompt": "Add a routed inventory-search behavior to an existing Tama messaging root. The component calls a search action and can return either plain text or an artifact through shared root reply chains.",
       "expected_behavior": [
         "Inventory the existing messaging, router, listener, component, and reply topology before editing.",
@@ -31,7 +31,7 @@
     },
     {
       "id": "direct-forwarded-action",
-      "skill": "tama-graph-builder",
+      "skill": "graph-builder",
       "prompt": "Build a Tama search surface where every user message is forwarded to a component that creates a UI search artifact. No conversational reply is required.",
       "expected_behavior": [
         "Choose direct forwarding instead of a router.",
@@ -44,7 +44,7 @@
     },
     {
       "id": "parallel-ingestion-domain",
-      "skill": "tama-graph-builder",
+      "skill": "graph-builder",
       "prompt": "Extend an existing product-details ingestion network with an independently operable service-details domain. It needs credits, keywords, nested children, generated description and setting embeddings, processed indexing, and manual reruns.",
       "expected_behavior": [
         "Build a parity matrix before implementation.",
@@ -59,7 +59,7 @@
     },
     {
       "id": "audit-missing-control-edges",
-      "skill": "tama-graph-audit",
+      "skill": "graph-audit",
       "prompt": "Audit a routed Tama component whose artifact return path exists, but artifact rendering is wrong and class-level reprocessing never starts.",
       "expected_behavior": [
         "Separate execution paths from control edges.",
@@ -72,7 +72,7 @@
     },
     {
       "id": "safe-route-removal",
-      "skill": "tama-graph-builder",
+      "skill": "graph-builder",
       "prompt": "Remove an obsolete routed behavior and rename its replacement chain without recreating the remote chain or damaging the shared reply flow.",
       "expected_behavior": [
         "Trace upstream router outputs and downstream shared consumers.",
@@ -86,7 +86,7 @@
     },
     {
       "id": "runtime-boundary",
-      "skill": "tama-graph-audit",
+      "skill": "graph-audit",
       "prompt": "Verify whether a processed indexing graph is complete and whether indexing is working in production using only Terraform source.",
       "expected_behavior": [
         "Prove or disprove static processed-event wiring from the available source.",
@@ -98,8 +98,22 @@
       "fixture_data": "A trusted Terraform repository containing a processed indexing graph, with no production logs, credentials, worker status, or remote index access."
     },
     {
+      "id": "runtime-comment-source-authority",
+      "skill": "graph-audit",
+      "prompt": "A user comment says a reply step in thread thread-123 followed the wrong branch. Diagnose it using the configured Tama MCP and the memovee-tama Terraform repository. The MCP graph projection appears newer than the checked-out .tf files.",
+      "expected_behavior": [
+        "Treat the repository Terraform source and installed module contracts as the authority for intended graph configuration.",
+        "Use the user comment as the symptom to scope a bounded inspection of the relevant thread, flow, steps, and referenced artifacts.",
+        "Keep configured intent, observed MCP execution, and diagnosis separate.",
+        "Report the mismatch between source and runtime projection as possible deployment or source drift.",
+        "Do not replace the source-derived topology with the MCP graph projection or recommend a Terraform edit until the evidence identifies a source defect."
+      ],
+      "expected_result_shape": "A read-only diagnosis organized as user report, configured intent from Terraform, observed bounded MCP execution, evidence-backed diagnosis, possible drift, and remaining runtime or deployment unknowns.",
+      "fixture_data": "A trusted memovee-tama-style repository containing .tf graph configuration plus containment-checked MCP access to one identified thread and its flows, steps, and referenced artifacts."
+    },
+    {
       "id": "structured-generation-context",
-      "skill": "tama-graph-builder",
+      "skill": "graph-builder",
       "prompt": "Add a structured Tama model-generation thought with system instructions plus entity and concept inputs. The installed runtime uses the Contexts.Corpus marker contract.",
       "expected_behavior": [
         "Create separate system instructions and a user prompt for the structured generation thought.",
@@ -113,7 +127,7 @@
     },
     {
       "id": "raw-class-schema-metadata",
-      "skill": "tama-graph-builder",
+      "skill": "graph-builder",
       "prompt": "Add several raw tama_class resources whose JSON schemas are loaded from local files, and make the deployment fail before apply if a class schema is incomplete.",
       "expected_behavior": [
         "Give every class schema non-empty top-level title and description strings.",
@@ -127,7 +141,7 @@
     },
     {
       "id": "queue-loaded-after-worker-boot",
-      "skill": "tama-graph-audit",
+      "skill": "graph-audit",
       "prompt": "Audit a Tama entity that remains processing with no Flow even though its reactive node exists. The entity queue was provisioned after the worker node started.",
       "expected_behavior": [
         "Separate valid reactive graph topology from running worker queue availability.",
@@ -141,7 +155,7 @@
     },
     {
       "id": "deterministic-json-action-envelope",
-      "skill": "tama-graph-builder",
+      "skill": "graph-builder",
       "prompt": "Fix a deterministic tama/actions/caller POST that reaches an OpenAPI endpoint without Content-Type because its module input currently renders the source entity as raw JSON.",
       "expected_behavior": [
         "Inspect the installed Tama request builder and the action's OpenAPI request body contract.",
@@ -155,7 +169,7 @@
     },
     {
       "id": "consolidate-handoff-initializers",
-      "skill": "tama-graph-builder",
+      "skill": "graph-builder",
       "prompt": "Fix a partially applied Tama graph where several import initializers in each thought were changed to the same handoff class and Terraform now receives a duplicate class-and-reference error.",
       "expected_behavior": [
         "Inspect Terraform state to identify which initializer address already owns the handoff anchor for each thought.",
@@ -172,7 +186,7 @@
     {
       "id": "unrelated-infrastructure-request",
       "prompt": "Create a Kubernetes cluster and configure its ingress controller for my application.",
-      "expected_behavior": "Do not invoke Tama Builder or Tama Graph Audit. Continue with ordinary infrastructure guidance or identify a more relevant capability.",
+      "expected_behavior": "Do not invoke Tama Kit's Graph Builder or Graph Audit skills. Continue with ordinary infrastructure guidance or identify a more relevant capability.",
       "reason": "The request does not involve Tama Terraform graph construction, migration, or auditing."
     },
     {
