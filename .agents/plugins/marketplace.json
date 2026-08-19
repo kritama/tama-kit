@@ -5,10 +5,10 @@
   },
   "plugins": [
     {
-      "name": "tama-builder",
+      "name": "tama-kit",
       "source": {
         "source": "npm",
-        "package": "@upmaru/tama-builder",
+        "package": "@upmaru/tama-kit",
         "version": "latest",
         "registry": "https://registry.npmjs.org"
       },

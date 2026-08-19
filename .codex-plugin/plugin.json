@@ -1,13 +1,23 @@
 {
-  "name": "tama-builder",
-  "version": "0.2.3",
+  "name": "tama-kit",
+  "version": "0.3.0",
   "description": "Build, manage, and audit complete Tama Terraform graph networks.",
   "author": {
-    "name": "Upmaru"
+    "name": "Upmaru",
+    "url": "https://upmaru.com"
   },
+  "homepage": "https://github.com/upmaru/tama-kit#readme",
+  "repository": "https://github.com/upmaru/tama-kit",
+  "license": "Apache-2.0",
+  "keywords": [
+    "tama",
+    "terraform",
+    "mcp",
+    "graphs"
+  ],
   "skills": "./skills/",
   "interface": {
-    "displayName": "Tama Builder",
+    "displayName": "Tama Kit",
     "shortDescription": "Build and audit Tama graphs",
     "longDescription": "Bootstrap, design, extend, migrate, remove, and audit complete Tama Terraform graphs for global foundations, conversations, direct actions, ingestion, indexing, and reprocessing.",
     "developerName": "Upmaru",

@@ -10,7 +10,7 @@ concurrency:
 
 jobs:
   publish:
-    if: github.repository == 'upmaru/tama-builder'
+    if: github.repository == 'upmaru/tama-kit'
     runs-on: ubuntu-latest
     environment: npm
 
@@ -38,13 +38,19 @@ jobs:
           test "$package_version" = "$plugin_version"
           test "$GITHUB_REF_NAME" = "v$package_version"
 
-      - name: Validate Python inspector
-        run: python3 -B skills/tama-graph-builder/scripts/inspect_tama_repository.py --help
+      - name: Validate JavaScript inspector
+        run: node skills/graph-builder/scripts/inspect-tama-repository.mjs --help
+
+      - name: Run Node test suite
+        run: npm test
 
       - name: Validate public submission metadata
         run: npm run validate:submission
 
-      - name: Build public submission archive
+      - name: Validate Template MCP review readiness
+        run: npm run validate:review
+
+      - name: Build plugin distribution archive
         run: npm run build:submission
 
       - name: Validate package contents

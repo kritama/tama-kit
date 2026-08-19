@@ -1,10 +1,16 @@
 {
-  "submissionType": "Skills only",
+  "submissionType": "MCP and Skills",
+  "mcpServer": {
+    "urlMode": "Template",
+    "templateMcpServerURL": "https://{host}/mcp",
+    "exampleMcpServerURL": "https://staging-tama.memovee.com/mcp",
+    "authentication": "OAuth 2.1"
+  },
   "listing": {
     "websiteURL": "https://upmaru.com",
     "privacyPolicyURL": "https://upmaru.com/privacy",
     "termsOfServiceURL": "https://upmaru.com/terms",
-    "supportURL": "https://github.com/upmaru/tama-builder/issues"
+    "supportURL": "https://github.com/upmaru/tama-kit/issues"
   },
   "positiveCaseIds": [
     "bootstrap-global-foundation",
@@ -18,5 +24,5 @@
     "unsupported-production-certainty",
     "unsafe-destructive-removal"
   ],
-  "releaseNotes": "Initial public release of Tama Builder, a skills-only plugin for building, changing, and auditing Tama Terraform graph networks. It includes global foundation setup, conversation and action graphs, ingestion and indexing workflows, lifecycle-safe migrations, repository inspection, and read-only graph audits."
+  "releaseNotes": "Tama Kit combines workspace-specific Tama MCP access with skills for building, changing, and auditing Tama Terraform graph networks. It includes global foundation setup, conversation and action graphs, ingestion and indexing workflows, lifecycle-safe migrations, repository inspection, and read-only graph audits."
 }
