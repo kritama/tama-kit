@@ -9,6 +9,8 @@ Terraform-safe graph migration.
 
 ## Installation
 
+### Codex
+
 Tama Kit is distributed as a plugin containing the
 `graph-builder` and `graph-audit` skills. The plugin is downloaded
 from npm through the Upmaru marketplace; installing the npm package by itself
@@ -44,6 +46,35 @@ To confirm the plugin is installed:
 ```bash
 codex plugin list
 ```
+
+### OpenCode
+
+OpenCode loads Agent Skills directly; it does not use the Codex plugin
+manifest. Install both Tama Kit skills globally with the Skills CLI:
+
+```bash
+npx skills add upmaru/tama-kit \
+  --agent opencode \
+  --global \
+  --yes
+```
+
+For a project-only installation, run the same command from the project root
+without `--global`:
+
+```bash
+npx skills add upmaru/tama-kit \
+  --agent opencode \
+  --yes
+```
+
+Start a new OpenCode session after installation, then ask it to use
+`graph-builder` or `graph-audit`. You may install just one of the two skills
+by adding `--skill graph-builder` or `--skill graph-audit`. These steps install
+only the skills; configure your workspace-specific Tama MCP server separately
+when runtime inspection is needed. See the [Skills CLI](https://github.com/vercel-labs/skills),
+OpenCode's official [Agent Skills](https://opencode.ai/docs/skills/), and
+[MCP servers](https://opencode.ai/docs/mcp-servers/) documentation.
 
 ## Included skills
 

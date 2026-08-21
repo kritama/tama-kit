@@ -1,6 +1,6 @@
 {
   "name": "@upmaru/tama-kit",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "description": "A ChatGPT and Codex plugin for building, managing, and auditing Tama Terraform graph networks.",
   "keywords": [
     "codex-plugin",
