@@ -29,6 +29,11 @@ success.
 - JSON actions prove that the rendered `body` becomes the HTTP JSON payload and receives the expected content type.
 - Every structured generation thought materializes at least one user message; system-only contexts are incomplete when the runtime requires a user message.
 - Runtime corpora are inserted into the final provider messages. For marker-based Tama versions, the user prompt contains a standalone `{{ corpus }}` marker.
+- Every trusted context value required by a model-generated tool call is owned by a `tama_thought_tool_modifier` attached to that exact tool, rather than requested from the model through a prompt or placeholder.
+- Every thought-tool modifier target resolves to a concrete `/path`, `/query`, or `/body` leaf in the action's effective callable schema, and its metadata source is supported by the installed Tama version.
+- Modifier indexes and targets are unique per thought tool; no target is an ancestor or descendant of another modifier target.
+- `on_missing_parent` matches whether the target's containing branch is required or optional, and `on_missing_source` fails closed whenever the trusted value is required.
+- Any provisioning-order edge that makes a prompt depend on its modifiers is acyclic; module-owned thoughts that would create a prompt/module/modifier cycle retain the module graph and document the runtime ordering prerequisite.
 - Awaited relations, preloaded relations, and thread-focus relations have consistent producers and consumers.
 
 ## Operational checks

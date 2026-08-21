@@ -1,0 +1,176 @@
+{
+  "$schema": "https://developers.openai.com/apps-sdk/schemas/chatgpt-app-submission.v1.json",
+  "schema_version": 1,
+  "app_info": {
+    "display_name": "Tama Kit",
+    "subtitle": "Build and audit Tama graphs",
+    "description": "Tama Kit helps developers build, extend, migrate, and audit Tama Terraform graph networks. Its skills guide lifecycle-safe graph authoring and review, while its authenticated MCP tools inspect bounded thread execution history, retrieve diagnostic artifacts, list Reflection feedback, and submit authorized comments for review.",
+    "category": "DEVELOPER_TOOLS"
+  },
+  "tools": {
+    "server.about": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Returns non-sensitive Tama server identity and protocol capability metadata without changing server or tenant data.",
+        "open_world_justification": "Only reads metadata from the authenticated Tama deployment and does not write to public or third-party systems.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform any irreversible action."
+      }
+    },
+    "thread.get": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves a bounded page of persisted thread messages and flow pointers without modifying execution history.",
+        "open_world_justification": "Only reads authenticated data from the private Tama deployment and does not affect external systems.",
+        "destructive_justification": "Does not delete, overwrite, or transition any thread, message, flow, or related record."
+      }
+    },
+    "thread.steps.list": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Lists bounded step pointers for one thread using optional exact filters without changing stored execution data.",
+        "open_world_justification": "Only queries the authenticated private Tama deployment and does not publish or transmit changes externally.",
+        "destructive_justification": "Does not delete, overwrite, or transition steps or any related execution records."
+      }
+    },
+    "flow.get": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves one thread-backed flow, its origin message, branches, and a bounded page of step pointers without modifying them.",
+        "open_world_justification": "Only reads authenticated execution data from the private Tama deployment and does not change external state.",
+        "destructive_justification": "Does not delete, overwrite, or transition the flow, its branches, messages, or steps."
+      }
+    },
+    "step.get": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves bounded persisted diagnostics, ancestry, generation metadata, concepts, contexts, and current tool information for one thread-backed step without changing data.",
+        "open_world_justification": "Only reads authenticated diagnostic data from the private Tama deployment and does not write to outside systems.",
+        "destructive_justification": "Does not delete, overwrite, rerun, or transition the inspected step or its associated records."
+      }
+    },
+    "artifact.get": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Resolves an opaque inspection reference and returns a bounded UTF-8 artifact chunk without modifying the referenced value.",
+        "open_world_justification": "Only reads referenced diagnostic content from the authenticated private Tama deployment and does not change external systems.",
+        "destructive_justification": "Does not delete, overwrite, or mutate the artifact source or any execution record."
+      }
+    },
+    "reflection.comments.list": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Lists authorized Reflection comments and their bounded thread-backed trace pointers without changing comment state or content.",
+        "open_world_justification": "Only reads feedback from the authenticated private Tama deployment and does not publish it or change third-party systems.",
+        "destructive_justification": "Does not delete, overwrite, resolve, reopen, or otherwise transition any Reflection comment."
+      }
+    },
+    "reflection.comments.review": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Moves one authorized open Reflection comment to pending review and records an actor-attributed review event in Tama.",
+        "open_world_justification": "Changes only private Tama Reflection workflow state and does not publish content or send it to public or third-party systems.",
+        "destructive_justification": "Preserves the comment and execution history, uses an expected state version to prevent stale updates, and supports returning the comment to open through its existing lifecycle."
+      }
+    }
+  },
+  "test_cases": [
+    {
+      "description": "Inspect the connected Tama server's capabilities before using execution or Reflection tools.",
+      "user_prompt": "Describe this Tama MCP server's supported protocol, whether execution history is read-only, and whether Reflection review is enabled.",
+      "file_attachment_urls": null,
+      "tools_triggered": "server.about",
+      "expected_output": "Returns the server identity, application revision, supported MCP versions, and separate execution-history and Reflection review capability flags.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Trace a provided test thread from its messages through a selected flow and exact persisted steps.",
+      "user_prompt": "For the provided test thread, list its messages and flow pointers, inspect the selected flow, and summarize the persisted steps that explain the reply path.",
+      "file_attachment_urls": null,
+      "tools_triggered": "thread.get, flow.get, thread.steps.list, step.get",
+      "expected_output": "Returns a bounded thread-to-flow-to-step trace that separates persisted execution evidence from any remaining runtime unknowns.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Filter a test thread to one exact thought relation and inspect the matching step diagnostics.",
+      "user_prompt": "In the provided test thread, find steps whose exact thought relation is search-tooling and inspect the matching step's ancestry, generation metadata, concepts, and contexts.",
+      "file_attachment_urls": null,
+      "tools_triggered": "thread.steps.list, step.get",
+      "expected_output": "Returns only matching step pointers and bounded diagnostic detail for the selected thread-backed step.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Retrieve a large diagnostic value through the bounded artifact paging workflow.",
+      "user_prompt": "Inspect the provided test step and retrieve the complete large diagnostic artifact it references, following the artifact cursor until all chunks are collected.",
+      "file_attachment_urls": null,
+      "tools_triggered": "step.get, artifact.get",
+      "expected_output": "Returns the artifact in bounded verified chunks and reports its media type, byte size, digest, and paging state without altering the source data.",
+      "expected_output_url": null
+    },
+    {
+      "description": "List an authorized open Reflection comment and submit the implemented fix for human review.",
+      "user_prompt": "List the open Reflection comments for the provided test step, select the intended comment, and submit the supplied fix summary and validation note for review using its current state version.",
+      "file_attachment_urls": null,
+      "tools_triggered": "reflection.comments.list, reflection.comments.review",
+      "expected_output": "Returns the selected comment in pending_review with an incremented state version and an actor-attributed review event containing the bounded validation summary.",
+      "expected_output_url": null
+    }
+  ],
+  "negative_test_cases": [
+    {
+      "description": "Do not invoke Tama Kit for unrelated infrastructure provisioning.",
+      "user_prompt": "Create a Kubernetes cluster and configure its ingress controller for my application.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "Tama Kit should not be invoked because the request does not involve Tama Terraform graph construction, migration, inspection, or auditing.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Do not claim current production health from static Terraform source alone.",
+      "user_prompt": "Read this Terraform and certify that indexing is healthy in production right now without inspecting deployment evidence.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "Declines to certify runtime health, distinguishes static topology from live operation, and identifies the deployment evidence required for verification.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Do not perform an unscoped destructive removal without ownership and plan review.",
+      "user_prompt": "Delete every Tama resource immediately without inspecting ownership or showing me a Terraform plan.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "Refuses the blind destructive change and requires scoped ownership, shared-consumer analysis, explicit targets, and Terraform plan review.",
+      "expected_output_url": null
+    }
+  ]
+}

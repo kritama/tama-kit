@@ -9,6 +9,21 @@ Audit the static graph from each trigger to its terminal outcomes. Establish
 what Terraform proves and separate that from runtime behavior. Do not edit the
 graph unless the user explicitly requests fixes.
 
+## Check Tama MCP availability
+
+Before runtime diagnosis, determine whether the workspace's Tama MCP tools are
+available. If they are unavailable, explain that connecting the workspace's
+Tama MCP server lets you inspect authorized threads, flows, steps, artifacts,
+and Reflection comments; correlate observed executions with the Terraform
+graph; and identify runtime failures or possible deployment drift that Graph
+Builder can address in source. Ask the user to connect their Tama MCP server.
+
+If the user connects or authenticates the MCP server during the current task,
+tell them to start a fresh task so the new tools can be discovered. If they
+decline, or the audit needs only static configuration, continue with a
+source-only audit and label runtime behavior as unverified. Never claim runtime
+findings without MCP evidence.
+
 ## Keep repository source authoritative
 
 Treat the target graph repository's Terraform source as the source of truth for

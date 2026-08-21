@@ -112,6 +112,21 @@
       "fixture_data": "A trusted memovee-tama-style repository containing .tf graph configuration plus containment-checked MCP access to one identified thread and its flows, steps, and referenced artifacts."
     },
     {
+      "id": "reflection-comment-resolution-handoff",
+      "skill": "graph-builder",
+      "prompt": "Load the open Reflection comments for step step-123 from the configured Tama MCP, diagnose the graph issue from this Terraform repository, implement and validate the fix, then send the fixed comment for review.",
+      "expected_behavior": [
+        "List open comments with the narrowest step filter and retain each selected comment ID, current state version, references, and trace pointers.",
+        "Treat Terraform source as configured intent and use only the bounded thread, flow, step, and artifact records needed to establish the source defect.",
+        "Implement the smallest supported source fix and run the relevant repository and regression checks without applying Terraform.",
+        "Leave any comment open when its defect was not fixed, validation failed, or source-versus-runtime drift remains unresolved.",
+        "Announce the mutation, then call reflection.comments.review for each independently fixed comment using its current state version and a bounded implementation-and-validation summary.",
+        "Verify the returned comment is pending_review with an incremented state version and distinguish review handoff from deployment or human acceptance."
+      ],
+      "expected_result_shape": "A source-derived diagnosis and minimal Terraform patch, validation evidence, and a per-comment review result showing either a verified pending_review transition or the explicit reason it remained open.",
+      "fixture_data": "A trusted Terraform graph repository plus authorized Tama MCP access to one open Reflection comment, its thread-backed execution records, and reflection.comments.review."
+    },
+    {
       "id": "structured-generation-context",
       "skill": "graph-builder",
       "prompt": "Add a structured Tama model-generation thought with system instructions plus entity and concept inputs. The installed runtime uses the Contexts.Corpus marker contract.",
@@ -124,6 +139,21 @@
       ],
       "expected_result_shape": "A minimal Terraform patch for the structured generation contexts and inputs, plus validation notes tracing runtime corpora into the final user message.",
       "fixture_data": "A trusted Terraform repository with an existing model-backed thought and an installed Tama version whose context source shows the standalone corpus-marker contract."
+    },
+    {
+      "id": "trusted-thought-tool-modifier",
+      "skill": "graph-builder",
+      "prompt": "Update an agentic Tama tooling thought so the authenticated actor ID is copied from execution context into a required /path/user_id argument for one tool and an optional /body/search/scope/user_id argument for another. The agent must not choose either user ID.",
+      "expected_behavior": [
+        "Inspect the installed Tama provider and effective callable schemas before configuring modifier targets.",
+        "Attach a separate tama_thought_tool_modifier to each exact thought tool and source actor_identifier from trusted metadata.",
+        "Use on_missing_parent error for the required path object and skip for the genuinely optional nested body branch.",
+        "Use on_missing_source error because authenticated actor identity is required.",
+        "Do not ask the model to emit the modifier-owned user_id fields or add prompt placeholders for them.",
+        "Verify unique indexes, non-overlapping targets, and acyclic provisioning order."
+      ],
+      "expected_result_shape": "A minimal Terraform patch with thought-tool-owned modifiers plus validation notes covering callable-schema compatibility, missing-value policy, model-schema ownership, and deployment ordering.",
+      "fixture_data": "A trusted Terraform repository with two existing tama_thought_tool resources, action schemas containing the stated path and optional body leaves, and an installed Tama/provider version that supports thought-tool modifiers."
     },
     {
       "id": "raw-class-schema-metadata",

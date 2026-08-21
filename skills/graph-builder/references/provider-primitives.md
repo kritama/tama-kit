@@ -218,6 +218,66 @@ Attach an action to a thought. Confirm the action's specification, method, path,
 input corpus, output handling, and owning space bridge when it causes an
 external side effect.
 
+### `tama_thought_tool_modifier`
+
+Use a thought-tool modifier when an agent-selected tool call needs a trusted
+runtime value copied into one structured action argument. The modifier belongs
+to one `tama_thought_tool`; it is not a general prompt context, an
+`tama_action_modifier`, or a `tama_motor_modifier`.
+
+Inspect the installed provider and Tama runtime before adding the resource.
+Current Tama modifiers accept a metadata source whose path is one of
+`actor_identifier`, `origin_entity_identifier`, or `current_timestamp`. The
+`target` is an RFC 6901 JSON Pointer into the action argument envelope and must
+start under `/path`, `/query`, or `/body`. It must resolve to a concrete,
+map-traversable leaf in the effective callable schema; do not target arrays,
+dynamic/composed schema branches, `_context`, or a value outside the action
+contract.
+
+For example, bind the authenticated actor to a required action path parameter:
+
+```hcl
+resource "tama_thought_tool_modifier" "get-profile-actor" {
+  thought_tool_id   = tama_thought_tool.get-profile.id
+  index             = 0
+  target            = "/path/user_id"
+  on_missing_parent = "error"
+  on_missing_source = "error"
+
+  source {
+    type = "metadata"
+    path = "actor_identifier"
+  }
+}
+```
+
+Choose the missing-value policies from the action contract:
+
+- Use `on_missing_parent = "error"` when the containing `path`, `query`, or
+  body object must exist for a valid call.
+- Use `on_missing_parent = "skip"` when the containing branch is genuinely
+  optional. For example, a modifier targeting `/body/search/scope/user_id` can
+  skip when the agent omits the optional `search.scope` object.
+- Use `on_missing_source = "error"` for required identity, origin, or time
+  values. Use `"skip"` only when executing without that value is valid and
+  safe.
+
+The runtime removes modifier-owned leaves from the model-facing tool schema,
+discards any model-supplied value at those targets, injects trusted metadata,
+and then validates the complete effective arguments before building the
+request. Do not ask the model to supply the owned field, add a placeholder for
+it, or copy it through a prompt or corpus. The target's parent structure still
+comes from the tool call, which is why `on_missing_parent` is a deliberate
+product decision rather than boilerplate.
+
+Use stable, unique indexes for multiple modifiers on one thought tool and do
+not configure duplicate, ancestor, or descendant targets. If a prompt update
+assumes that modifiers are already provisioned, add an acyclic Terraform
+ordering edge such as a prompt `depends_on` the modifiers. Do not introduce a
+cycle when a module consumes the prompt and exposes the thought ID used by the
+tool; in that shape, preserve the module dependency graph and call out the
+deployment-order prerequisite explicitly.
+
 ### `tama_thought_pruning`
 
 Control retained thought versions for repeated processing. Indexing and other
