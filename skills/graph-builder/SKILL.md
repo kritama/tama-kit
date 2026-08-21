@@ -1,6 +1,6 @@
 ---
 name: graph-builder
-description: Bootstrap, design, build, extend, migrate, replace, reprocess, and safely remove Tama Terraform graph networks. Use when starting a Tama Terraform repository or creating or changing Tama global foundations, conversations, routers, direct message handlers, component handoffs, background processors, crawlers, ingestion networks, indexing flows, spaces, classes, chains, nodes, thoughts, tools, paths, directives, listeners, sources, or lifecycle wiring.
+description: Bootstrap, design, build, extend, migrate, replace, reprocess, and safely remove Tama Terraform graph networks. Use when starting a Tama Terraform repository, fixing a runtime problem reported in a Reflection comment, or creating or changing Tama global foundations, conversations, routers, direct message handlers, component handoffs, background processors, crawlers, ingestion networks, indexing flows, spaces, classes, chains, nodes, thoughts, tools, thought-tool modifiers, paths, directives, listeners, sources, or lifecycle wiring.
 ---
 
 # Graph Builder
@@ -31,7 +31,10 @@ When a user comment or runtime failure motivates the change, use the comment to
 scope the symptom and use only bounded MCP runtime evidence to test it. Derive
 the current graph and every proposed edit from repository source. Distinguish a
 source defect from stale deployment, runtime failure, bad input, and external
-system behavior before editing.
+system behavior before editing. When the request is to fix or resolve a
+Reflection comment, read [Reflection comment resolution](references/reflection-comment-resolution.md)
+and carry each successfully fixed comment through its authorized review
+handoff.
 
 ## Select the graph shape
 
@@ -41,7 +44,7 @@ Read only the references that match the request:
 - For routed conversations, shared reply chains, direct forwarding, or action terminals, read [conversation graphs](references/conversation-graphs.md).
 - For crawlers, extraction, relations, generation, embeddings, indexing, or batch reprocessing, read [ingestion and indexing](references/ingestion-and-indexing.md).
 - For helper-module selection, read [Tama base modules](references/tama-base-modules.md).
-- For raw resources and control edges, read [provider primitives](references/provider-primitives.md).
+- For raw resources, control edges, or trusted context-to-tool argument injection, read [provider primitives](references/provider-primitives.md).
 - For replacement, removal, renaming, or schema changes, read [lifecycle and migrations](references/lifecycle-and-migrations.md).
 
 Do not force every conversation through a router. Choose a router only when the
@@ -56,7 +59,7 @@ contract does not require a root reply.
 3. Add or reuse semantic handoff classes; route thoughts to classes, not directly to chains or spaces.
 4. Create every bridge in the direction of its actual cross-space handoff. Do not add an unused reverse bridge.
 5. Bind each trigger to the correct reactive, explicit, listener-filtered, lifecycle-state, or path-activated execution mode.
-6. Create ordered thoughts plus their contexts, inputs, processors, tools, queues, preloads, pruning, directives, and paths. Consolidate resources that share one thought, initializer anchor class, and reference into a single initializer. For structured model generation, verify that the active contexts materialize a user message carrying the runtime corpora; a system-only context is incomplete even when context inputs exist. For deterministic action callers, render the complete request-argument envelope expected by the installed runtime.
+6. Create ordered thoughts plus their contexts, inputs, processors, tools, tool modifiers, queues, preloads, pruning, directives, and paths. Consolidate resources that share one thought, initializer anchor class, and reference into a single initializer. For model-generated tool calls that require trusted execution metadata, attach `tama_thought_tool_modifier` to the exact thought tool and keep the modifier-owned leaf out of the agent's responsibility. For structured model generation, verify that the active contexts materialize a user message carrying the runtime corpora; a system-only context is incomplete even when context inputs exist. For deterministic action callers, render the complete request-argument envelope expected by the installed runtime.
 7. Give every branch an intentional terminal, including empty, failure, clarification, and asynchronous outcomes.
 8. Keep shared reply generation in the root messaging space when that is the repository architecture. Attach branch-specific prompts with path directives rather than cloning reply chains.
 9. For sibling domain graphs, use a parity matrix but preserve independent class IDs, actions, relations, and lifecycle controls.
@@ -81,3 +84,4 @@ Read [verification](references/verification.md), then:
 3. Run repository checks, including a decoded-schema check for every `tama_class`, then run `terraform fmt -check -recursive` and `terraform validate` when available.
 4. Review an approved `terraform plan` for destructive changes when the task changes existing addresses or data-bearing resources.
 5. Report the graph delta, assumptions, validation, runtime prerequisites, and any unverified external behavior.
+6. For an authorized Reflection comment resolution, submit only the comments whose fixes passed validation to `pending_review`, then verify and report each returned transition.
