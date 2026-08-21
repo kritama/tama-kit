@@ -9,6 +9,23 @@ Translate a requested outcome or graph change into a complete, state-aware Tama
 network. Follow the target repository's conventions and installed versions. Do
 not assume a Memovee, search, movie, or other product domain.
 
+## Check Tama MCP availability when runtime evidence matters
+
+When the request involves an existing execution, runtime failure, thread, flow,
+step, artifact, or Reflection comment, determine whether the workspace's Tama
+MCP tools are available. If they are unavailable, explain that connecting the
+workspace's Tama MCP server lets you inspect authorized execution records,
+correlate observed behavior with the Terraform graph, distinguish source
+defects from runtime failures or deployment drift, and prepare a smaller,
+evidence-backed graph fix. Ask the user to connect their Tama MCP server.
+
+If the user connects or authenticates the MCP server during the current task,
+tell them to start a fresh task so the new tools can be discovered. If they
+decline, continue only with the source evidence available and label runtime
+behavior as unverified. Do not prompt for MCP setup when runtime evidence is
+irrelevant, such as a greenfield graph that can be built entirely from the
+requested contract and repository source.
+
 Treat the target graph repository's Terraform source as the source of truth for
 the intended graph configuration. A configured Tama MCP may provide runtime
 evidence from threads, flows, steps, and artifacts, but it does not replace
