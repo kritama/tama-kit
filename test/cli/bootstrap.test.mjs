@@ -157,6 +157,30 @@ test("bootstrap preserves an existing global foundation address", () => {
   assert.ok(!plan.operations.some((operation) => operation.path.endsWith("main.tf")));
 });
 
+test("bootstrap preserves a Tama foundation declared in root Terraform JSON", () => {
+  const root = project();
+  mkdirSync(join(root, "tama"));
+  writeFileSync(
+    join(root, "tama", "foundation.tf.json"),
+    `${JSON.stringify(
+      {
+        module: {
+          foundation: {
+            source: "upmaru/base/tama",
+            version: "0.5.5",
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const plan = planFor(root);
+  assert.equal(plan.terraform.foundation, "preserved");
+  assert.ok(!plan.operations.some((operation) => operation.path.endsWith("main.tf")));
+});
+
 test("bootstrap does not mistake an unrelated module.global for Tama's foundation", () => {
   const root = project();
   mkdirSync(join(root, "tama"));
