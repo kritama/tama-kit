@@ -1,3 +1,5 @@
+// @ts-check
+
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -5,6 +7,8 @@ import { join } from "node:path";
 import { ownershipError } from "../errors.mjs";
 import { operationForContent } from "./files.mjs";
 import { DEFAULTS } from "./constants.mjs";
+
+/** @typedef {import("../types.mjs").EnvironmentPlan} EnvironmentPlan */
 
 const REQUIRED_ENVIRONMENT_VARIABLES = [
   "POSTGRES_USER",
@@ -27,10 +31,12 @@ const REQUIRED_ENVIRONMENT_VARIABLES = [
   "TAMA_BASE_URL",
 ];
 
+/** @param {number} [bytes] */
 function token(bytes = 32) {
   return randomBytes(bytes).toString("base64url");
 }
 
+/** @param {string} content @returns {Map<string, string>} */
 function parseEnvironment(content) {
   const values = new Map();
   for (const line of content.split(/\r?\n/u)) {
@@ -42,6 +48,7 @@ function parseEnvironment(content) {
   return values;
 }
 
+/** @param {string} content @param {Record<string, string | number>} updates */
 function updateEnvironment(content, updates) {
   const remaining = new Map(Object.entries(updates));
   const lines = content.split(/\r?\n/u).map((line) => {
@@ -62,6 +69,7 @@ function updateEnvironment(content, updates) {
   return `${lines.join("\n")}\n`;
 }
 
+/** @param {Map<string, string>} values @param {string} filename */
 function validateEnvironment(values, filename) {
   const missing = REQUIRED_ENVIRONMENT_VARIABLES.filter((name) => !values.get(name));
   if (missing.length > 0) {
@@ -72,6 +80,7 @@ function validateEnvironment(values, filename) {
   }
 }
 
+/** @param {number} port */
 function newEnvironment(port) {
   const postgresPassword = token(24);
   return [
@@ -103,6 +112,7 @@ function newEnvironment(port) {
   ].join("\n");
 }
 
+/** @param {Map<string, string>} values */
 function postgresEnvironment(values) {
   const required = ["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"];
   for (const name of required) {
@@ -117,6 +127,7 @@ function postgresEnvironment(values) {
   ].join("\n");
 }
 
+/** @param {string} root @param {number} [requestedPort] @returns {EnvironmentPlan} */
 export function planEnvironment(root, requestedPort) {
   const filename = join(root, ".tama.env");
   if (!existsSync(filename)) {

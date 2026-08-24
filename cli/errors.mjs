@@ -1,3 +1,8 @@
+// @ts-check
+
+/** @typedef {import("./types.mjs").CLIErrorDetails} CLIErrorDetails */
+/** @typedef {import("./types.mjs").ExitCode} ExitCode */
+
 export const EXIT_CODES = Object.freeze({
   SUCCESS: 0,
   EXECUTION: 1,
@@ -9,6 +14,10 @@ export const EXIT_CODES = Object.freeze({
 });
 
 export class CLIError extends Error {
+  /**
+   * @param {string} message
+   * @param {{category?: string, exitCode?: ExitCode, details?: CLIErrorDetails}} [options]
+   */
   constructor(message, { category = "execution", exitCode = EXIT_CODES.EXECUTION, details } = {}) {
     super(message);
     this.name = "CLIError";
@@ -18,10 +27,12 @@ export class CLIError extends Error {
   }
 }
 
+/** @param {string} message */
 export function usageError(message) {
   return new CLIError(message, { category: "usage", exitCode: EXIT_CODES.USAGE });
 }
 
+/** @param {string} message @param {CLIErrorDetails} [details] */
 export function ambiguityError(message, details) {
   return new CLIError(message, {
     category: "ambiguity",
@@ -30,6 +41,7 @@ export function ambiguityError(message, details) {
   });
 }
 
+/** @param {string} message @param {CLIErrorDetails} [details] */
 export function ownershipError(message, details) {
   return new CLIError(message, {
     category: "ownership",
@@ -38,6 +50,7 @@ export function ownershipError(message, details) {
   });
 }
 
+/** @param {string} message @param {CLIErrorDetails} [details] */
 export function prerequisiteError(message, details) {
   return new CLIError(message, {
     category: "prerequisite",
@@ -46,6 +59,7 @@ export function prerequisiteError(message, details) {
   });
 }
 
+/** @param {string} message @param {CLIErrorDetails} [details] */
 export function startupError(message, details) {
   return new CLIError(message, {
     category: "startup",

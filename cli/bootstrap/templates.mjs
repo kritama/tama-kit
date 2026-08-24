@@ -1,7 +1,13 @@
+// @ts-check
+
 import { readFileSync } from "node:fs";
 
 const TEMPLATE_ROOT = new URL("../templates/bootstrap/", import.meta.url);
 
+/**
+ * @param {string} name
+ * @param {Record<string, string | number>} [replacements]
+ */
 export function renderTemplate(name, replacements = {}) {
   let content = readFileSync(new URL(name, TEMPLATE_ROOT), "utf8");
   for (const [key, value] of Object.entries(replacements)) {

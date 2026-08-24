@@ -6,8 +6,8 @@ The project root owns the Docker Compose runtime. From the project root, start
 Tama and its PostgreSQL dependency with:
 
 ```bash
-docker compose up -d tama
-docker compose ps
+{{COMPOSE_UP_COMMAND}}
+{{COMPOSE_PS_COMMAND}}
 ```
 
 Tama is available at <http://localhost:{{PORT}}/>. To complete the supported

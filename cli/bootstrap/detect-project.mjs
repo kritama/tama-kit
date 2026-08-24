@@ -1,9 +1,16 @@
+// @ts-check
+
 import { existsSync, lstatSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { ambiguityError, ownershipError, usageError } from "../errors.mjs";
 import { COMPOSE_FILENAMES } from "./constants.mjs";
 
+/** @typedef {import("../types.mjs").BootstrapPlanOptions} BootstrapPlanOptions */
+/** @typedef {import("../types.mjs").FrameworkDetection} FrameworkDetection */
+/** @typedef {import("../types.mjs").ProjectInspection} ProjectInspection */
+
+/** @param {string} directory */
 function isDirectory(directory) {
   try {
     return statSync(directory).isDirectory();
@@ -12,6 +19,7 @@ function isDirectory(directory) {
   }
 }
 
+/** @param {string} start */
 function nearestGitRoot(start) {
   let current = resolve(start);
   while (true) {
@@ -26,6 +34,7 @@ function nearestGitRoot(start) {
   }
 }
 
+/** @param {string} filename @param {RegExp} pattern */
 function includesPattern(filename, pattern) {
   try {
     return pattern.test(readFileSync(filename, "utf8"));
@@ -34,6 +43,7 @@ function includesPattern(filename, pattern) {
   }
 }
 
+/** @param {string} root @returns {FrameworkDetection} */
 export function detectFramework(root) {
   const evidence = [];
   const gemfile = join(root, "Gemfile");
@@ -59,7 +69,10 @@ export function detectFramework(root) {
     evidence.push("package.json exists");
     try {
       const manifest = JSON.parse(readFileSync(packagePath, "utf8"));
-      const dependencies = { ...manifest.dependencies, ...manifest.devDependencies };
+      const dependencies = /** @type {Record<string, unknown>} */ ({
+        ...manifest.dependencies,
+        ...manifest.devDependencies,
+      });
       for (const [name, label] of [
         ["next", "Next.js"],
         ["@tanstack/start", "TanStack Start"],
@@ -79,6 +92,7 @@ export function detectFramework(root) {
   return { framework: "generic", evidence: ["no supported framework signature matched"] };
 }
 
+/** @param {BootstrapPlanOptions} options @returns {ProjectInspection} */
 export function inspectProject({ cwd, targetPath, composePath }) {
   const explicitTarget = targetPath !== undefined;
   const requested = resolve(cwd, targetPath ?? ".");

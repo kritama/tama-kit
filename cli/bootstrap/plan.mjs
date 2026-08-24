@@ -1,6 +1,9 @@
+// @ts-check
+
 import { join } from "node:path";
 
 import { BOOTSTRAP_SCHEMA_VERSION, DEFAULTS } from "./constants.mjs";
+import { formatComposePsCommand, formatComposeUpCommand } from "./compose-command.mjs";
 import { planRootCompose } from "./compose.mjs";
 import { inspectProject } from "./detect-project.mjs";
 import { planEnvironment } from "./environment.mjs";
@@ -9,10 +12,22 @@ import { planGitignore } from "./gitignore.mjs";
 import { renderTemplate } from "./templates.mjs";
 import { planTerraform } from "./terraform.mjs";
 
+/** @typedef {import("../types.mjs").BootstrapPlan} BootstrapPlan */
+/** @typedef {import("../types.mjs").BootstrapPlanOptions} BootstrapPlanOptions */
+/** @typedef {import("../types.mjs").FileOperation} FileOperation */
+/** @typedef {import("../types.mjs").PublicBootstrapPlan} PublicBootstrapPlan */
+
+/**
+ * @param {string} filename
+ * @param {string} templateName
+ * @param {Record<string, string | number>} replacements
+ * @returns {FileOperation}
+ */
 function managedTemplate(filename, templateName, replacements) {
   return operationForContent(filename, renderTemplate(templateName, replacements));
 }
 
+/** @param {BootstrapPlanOptions} options @returns {BootstrapPlan} */
 export function createBootstrapPlan(options) {
   const inspection = inspectProject(options);
   const environment = planEnvironment(inspection.root, options.port);
@@ -22,6 +37,7 @@ export function createBootstrapPlan(options) {
     POSTGRES_IMAGE: DEFAULTS.postgresImage,
   };
 
+  /** @type {FileOperation[]} */
   const operations = [environment.operation, environment.postgresOperation];
   operations.push(
     managedTemplate(join(inspection.root, ".tama.env.example"), "tama-env.example", {
@@ -49,6 +65,8 @@ export function createBootstrapPlan(options) {
   operations.push(
     managedTemplate(join(inspection.tamaDirectory, "README.md"), "README.md", {
       PORT: environment.port,
+      COMPOSE_UP_COMMAND: formatComposeUpCommand(inspection.selectedCompose),
+      COMPOSE_PS_COMMAND: formatComposePsCommand(inspection.selectedCompose),
     }),
   );
 
@@ -70,6 +88,7 @@ export function createBootstrapPlan(options) {
   };
 }
 
+/** @param {BootstrapPlan} plan @returns {PublicBootstrapPlan} */
 export function publicPlan(plan) {
   return {
     schemaVersion: plan.schemaVersion,

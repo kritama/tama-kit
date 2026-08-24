@@ -1,3 +1,5 @@
+// @ts-check
+
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -7,6 +9,11 @@ import { ownershipError } from "../errors.mjs";
 import { operationForContent } from "./files.mjs";
 import { renderTemplate } from "./templates.mjs";
 
+/** @typedef {import("../types.mjs").TerraformPlan} TerraformPlan */
+/** @typedef {import("../types.mjs").TerraformVersions} TerraformVersions */
+/** @typedef {{name: string, source: string | null}} ModuleCall */
+
+/** @param {string} directory @returns {string[]} */
 function terraformFiles(directory) {
   if (!existsSync(directory)) {
     return [];
@@ -16,6 +23,12 @@ function terraformFiles(directory) {
     .map((entry) => join(directory, entry.name));
 }
 
+/** @param {ModuleCall} call */
+function isTamaFoundationCall(call) {
+  return call.source?.replace(/^registry\.terraform\.io\//u, "") === "upmaru/base/tama";
+}
+
+/** @param {string} directory @param {TerraformVersions} versions @returns {TerraformPlan} */
 export function planTerraform(directory, versions) {
   const existingFiles = terraformFiles(directory);
   if (existingFiles.length === 0) {
@@ -38,13 +51,16 @@ export function planTerraform(directory, versions) {
   }
 
   const inventory = buildInventory(directory, { recursive: false });
-  if (inventory.global_foundation.status === "multiple") {
+  const foundationCalls = /** @type {ModuleCall[]} */ (
+    inventory.declared.module_calls
+  ).filter(isTamaFoundationCall);
+  if (foundationCalls.length > 1) {
     throw ownershipError(
       `multiple Tama global foundations found in existing Terraform root: ${directory}`,
-      { moduleCalls: inventory.global_foundation.module_calls },
+      { moduleCalls: foundationCalls },
     );
   }
-  if (inventory.global_foundation.status === "present") {
+  if (foundationCalls.length === 1) {
     return { foundation: "preserved", operations: [] };
   }
 

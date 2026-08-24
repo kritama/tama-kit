@@ -1,7 +1,17 @@
+// @ts-check
+
 import { execFileSync, spawn } from "node:child_process";
 
 import { prerequisiteError, startupError } from "../errors.mjs";
 
+/** @typedef {import("../types.mjs").BootstrapPlan} BootstrapPlan */
+
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {import("node:child_process").SpawnOptions} [options]
+ * @returns {Promise<void>}
+ */
 function runProcess(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, options);
@@ -16,7 +26,18 @@ function runProcess(command, args, options = {}) {
   });
 }
 
+/** @param {unknown} error @param {string} code */
+function hasErrorCode(error, code) {
+  return error instanceof Error && "code" in error && error.code === code;
+}
+
+/** @param {unknown} error */
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function assertComposeVersion() {
+  /** @type {string} */
   let output;
   try {
     output = execFileSync("docker", ["compose", "version", "--short"], {
@@ -24,7 +45,7 @@ function assertComposeVersion() {
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
   } catch (error) {
-    if (error.code === "ENOENT") {
+    if (hasErrorCode(error, "ENOENT")) {
       throw prerequisiteError("Docker Compose 2.20.0 or newer is required");
     }
     throw prerequisiteError("Docker Compose 2.20.0 or newer is required and could not be detected");
@@ -39,6 +60,7 @@ function assertComposeVersion() {
   }
 }
 
+/** @param {BootstrapPlan} plan @param {{quiet?: boolean}} [options] */
 export async function validateCompose(plan, { quiet = true } = {}) {
   assertComposeVersion();
   try {
@@ -51,16 +73,18 @@ export async function validateCompose(plan, { quiet = true } = {}) {
       },
     );
   } catch (error) {
-    if (error.code === "ENOENT") {
+    if (hasErrorCode(error, "ENOENT")) {
       throw prerequisiteError("Docker Compose is required to validate the generated integration");
     }
-    throw prerequisiteError(`Docker Compose validation failed: ${error.message}`);
+    throw prerequisiteError(`Docker Compose validation failed: ${errorMessage(error)}`);
   }
 }
 
+/** @param {number} port @param {number} [timeoutMs] @returns {Promise<string>} */
 async function waitForHealth(port, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs;
   const url = `http://localhost:${port}/`;
+  /** @type {Error | undefined} */
   let lastError;
   while (Date.now() < deadline) {
     try {
@@ -70,7 +94,7 @@ async function waitForHealth(port, timeoutMs = 60_000) {
       }
       lastError = new Error(`HTTP ${response.status}`);
     } catch (error) {
-      lastError = error;
+      lastError = error instanceof Error ? error : new Error(String(error));
     }
     await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
@@ -79,6 +103,7 @@ async function waitForHealth(port, timeoutMs = 60_000) {
   );
 }
 
+/** @param {BootstrapPlan} plan @returns {Promise<string>} */
 export async function startCompose(plan) {
   try {
     await runProcess(
@@ -87,7 +112,7 @@ export async function startCompose(plan) {
       { cwd: plan.root, stdio: "inherit" },
     );
   } catch (error) {
-    throw startupError(`Docker Compose startup failed: ${error.message}`);
+    throw startupError(`Docker Compose startup failed: ${errorMessage(error)}`);
   }
   return waitForHealth(plan.port);
 }

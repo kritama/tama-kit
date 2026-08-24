@@ -1,8 +1,19 @@
+// @ts-check
+
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 
 import { ownershipError } from "../errors.mjs";
 import { MANAGED_MARKER } from "./constants.mjs";
 
+/** @typedef {import("../types.mjs").FileOperation} FileOperation */
+/** @typedef {import("../types.mjs").FileOperationOptions} FileOperationOptions */
+
+/**
+ * @param {string} filename
+ * @param {string} content
+ * @param {FileOperationOptions} [options]
+ * @returns {FileOperation}
+ */
 export function operationForContent(
   filename,
   content,

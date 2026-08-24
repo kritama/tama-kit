@@ -1,3 +1,5 @@
+// @ts-check
+
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -5,8 +7,13 @@ import { fileURLToPath } from "node:url";
 import { runBootstrap } from "./commands/bootstrap.mjs";
 import { CLIError, EXIT_CODES } from "./errors.mjs";
 
+/** @typedef {import("./types.mjs").CommandIO} CommandIO */
+/** @typedef {import("./types.mjs").ExitCode} ExitCode */
+
 const CLI_ROOT = dirname(fileURLToPath(import.meta.url));
-const PACKAGE = JSON.parse(readFileSync(resolve(CLI_ROOT, "../package.json"), "utf8"));
+const PACKAGE = /** @type {{version: string}} */ (
+  JSON.parse(readFileSync(resolve(CLI_ROOT, "../package.json"), "utf8"))
+);
 
 function usage() {
   return [
@@ -22,6 +29,7 @@ function usage() {
   ].join("\n");
 }
 
+/** @returns {CommandIO} */
 function defaultIO() {
   return {
     cwd: process.cwd(),
@@ -30,8 +38,13 @@ function defaultIO() {
   };
 }
 
+/**
+ * @param {string[]} argv
+ * @param {Partial<CommandIO>} [providedIO]
+ * @returns {Promise<ExitCode>}
+ */
 export async function run(argv, providedIO = {}) {
-  const io = { ...defaultIO(), ...providedIO };
+  const io = /** @type {CommandIO} */ ({ ...defaultIO(), ...providedIO });
   const [command, ...args] = argv;
 
   if (!command || command === "help" || command === "--help" || command === "-h") {

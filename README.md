@@ -127,13 +127,17 @@ runtime unknowns with exact evidence.
 ## Development
 
 The bundled maintenance utilities and Terraform inspector are dependency-free
-Node.js ES modules; no Python runtime is required.
+Node.js ES modules; no Python runtime is required. The CLI remains native ESM
+and uses JSDoc contracts with a no-emit TypeScript check, so development does
+not require a compiled `dist/` tree.
 
 Memovee-derived forward-test cases live in `evals/cases.json`; public skill
 references remain domain-neutral. Validate the public-directory metadata,
 Template MCP scaffold, and review cases with:
 
 ```bash
+npm run typecheck
+npm test
 npm run validate:submission
 ```
 

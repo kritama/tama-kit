@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -12,6 +13,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createBootstrapPlan } from "../../cli/bootstrap/plan.mjs";
+import { formatComposeUpCommand } from "../../cli/bootstrap/compose-command.mjs";
 import { applyOperations } from "../../cli/bootstrap/write.mjs";
 import { inspectProject } from "../../cli/bootstrap/detect-project.mjs";
 import { CLIError, EXIT_CODES } from "../../cli/errors.mjs";
@@ -87,6 +89,18 @@ test("bootstrap preserves an existing Compose comment and adds one include", () 
   assert.equal((content.match(/\.\/tama\/compose\.yaml/gu) ?? []).length, 1);
 });
 
+test("bootstrap preserves permissions when updating a user-owned Compose file", () => {
+  const root = project();
+  const composeFile = join(root, "compose.yaml");
+  writeFileSync(composeFile, "services: {}\n");
+  chmodSync(composeFile, 0o600);
+
+  const plan = planFor(root);
+  applyOperations(plan.operations);
+
+  assert.equal(statSync(composeFile).mode & 0o777, 0o600);
+});
+
 test("bootstrap resolves a managed include relative to a nested Compose file", () => {
   const root = project();
   mkdirSync(join(root, "deploy"));
@@ -97,6 +111,11 @@ test("bootstrap resolves a managed include relative to a nested Compose file", (
   assert.match(
     readFileSync(join(root, "deploy", "compose.yaml"), "utf8"),
     /- \.\.\/tama\/compose\.yaml/u,
+  );
+  assert.ok(
+    readFileSync(join(root, "tama", "README.md"), "utf8").includes(
+      formatComposeUpCommand(join(root, "deploy", "compose.yaml")),
+    ),
   );
 
   const second = planFor(root, { composePath: "deploy/compose.yaml" });
@@ -136,6 +155,20 @@ test("bootstrap preserves an existing global foundation address", () => {
   const plan = planFor(root);
   assert.equal(plan.terraform.foundation, "preserved");
   assert.ok(!plan.operations.some((operation) => operation.path.endsWith("main.tf")));
+});
+
+test("bootstrap does not mistake an unrelated module.global for Tama's foundation", () => {
+  const root = project();
+  mkdirSync(join(root, "tama"));
+  writeFileSync(
+    join(root, "tama", "main.tf"),
+    'module "global" {\n  source = "terraform-aws-modules/vpc/aws"\n  version = "6.0.1"\n}\n',
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) => error instanceof CLIError && error.exitCode === EXIT_CODES.OWNERSHIP,
+  );
 });
 
 test("bootstrap ignores global foundations declared only in nested Terraform modules", () => {
@@ -263,4 +296,11 @@ test("bootstrap appends ignore rules after a later secret-file negation", () => 
 
   const second = planFor(root);
   assert.ok(second.operations.every((operation) => operation.action === "unchanged"));
+});
+
+test("the next-step command includes and safely quotes the selected Compose file", () => {
+  assert.equal(
+    formatComposeUpCommand("/tmp/tama project's/deploy/compose.yaml"),
+    "docker compose -f '/tmp/tama project'\\''s/deploy/compose.yaml' up -d tama",
+  );
 });

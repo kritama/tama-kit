@@ -1,10 +1,30 @@
+// @ts-check
+
 import { parseArgs } from "node:util";
 import { relative } from "node:path";
 
 import { CLIError, EXIT_CODES, usageError } from "../errors.mjs";
+import { formatComposeUpCommand } from "../bootstrap/compose-command.mjs";
 import { createBootstrapPlan, publicPlan } from "../bootstrap/plan.mjs";
 import { startCompose, validateCompose } from "../bootstrap/start.mjs";
 import { applyOperations } from "../bootstrap/write.mjs";
+
+/** @typedef {import("../types.mjs").BootstrapPlan} BootstrapPlan */
+/** @typedef {import("../types.mjs").BootstrapResult} BootstrapResult */
+/** @typedef {import("../types.mjs").CommandIO} CommandIO */
+/** @typedef {import("../types.mjs").ExitCode} ExitCode */
+
+/**
+ * @typedef {object} BootstrapCommandOptions
+ * @property {string} [targetPath]
+ * @property {string} [composePath]
+ * @property {number} [port]
+ * @property {string} [image]
+ * @property {boolean} dryRun
+ * @property {boolean} start
+ * @property {boolean} json
+ * @property {boolean} help
+ */
 
 function usage() {
   return [
@@ -21,6 +41,7 @@ function usage() {
   ].join("\n");
 }
 
+/** @param {string | undefined} value */
 function parsePort(value) {
   if (value === undefined) {
     return undefined;
@@ -35,6 +56,7 @@ function parsePort(value) {
   return port;
 }
 
+/** @param {string | undefined} value */
 function validateImage(value) {
   if (value === undefined) {
     return undefined;
@@ -45,6 +67,7 @@ function validateImage(value) {
   return value;
 }
 
+/** @param {string[]} argv @returns {BootstrapCommandOptions} */
 function parse(argv) {
   let parsed;
   try {
@@ -63,7 +86,8 @@ function parse(argv) {
       strict: true,
     });
   } catch (error) {
-    throw usageError(`${error.message}\n\n${usage()}`);
+    const message = error instanceof Error ? error.message : String(error);
+    throw usageError(`${message}\n\n${usage()}`);
   }
   if (parsed.positionals.length > 1) {
     throw usageError(`expected at most one project path\n\n${usage()}`);
@@ -76,13 +100,18 @@ function parse(argv) {
     composePath: parsed.values.compose,
     port: parsePort(parsed.values.port),
     image: validateImage(parsed.values.image),
-    dryRun: parsed.values["dry-run"],
-    start: parsed.values.start,
-    json: parsed.values.json,
-    help: parsed.values.help,
+    dryRun: parsed.values["dry-run"] ?? false,
+    start: parsed.values.start ?? false,
+    json: parsed.values.json ?? false,
+    help: parsed.values.help ?? false,
   };
 }
 
+/**
+ * @param {BootstrapPlan} plan
+ * @param {{dryRun: boolean, started: boolean, healthUrl?: string}} status
+ * @returns {BootstrapResult}
+ */
 function resultEnvelope(plan, { dryRun, started, healthUrl }) {
   const result = publicPlan(plan);
   return {
@@ -94,6 +123,7 @@ function resultEnvelope(plan, { dryRun, started, healthUrl }) {
   };
 }
 
+/** @param {CommandIO} io @param {BootstrapResult} result */
 function printHuman(io, result) {
   io.stdout(`Tama Kit bootstrap (${result.mode})`);
   io.stdout(`Project: ${result.root}`);
@@ -121,13 +151,14 @@ function printHuman(io, result) {
     );
   } else if (result.mode !== "dry-run") {
     io.stdout("");
-    io.stdout("Next: docker compose up -d tama");
+    io.stdout(`Next: ${formatComposeUpCommand(result.composeFile)}`);
     io.stdout(
       "Setup: load .tama.env, then open http://localhost:${TAMA_PORT}/setup/root?token=${TAMA_SETUP_TOKEN}",
     );
   }
 }
 
+/** @param {string[]} argv @param {CommandIO} io @returns {Promise<ExitCode>} */
 async function executeBootstrap(argv, io) {
   const options = parse(argv);
   if (options.help) {
@@ -165,6 +196,7 @@ async function executeBootstrap(argv, io) {
   return EXIT_CODES.SUCCESS;
 }
 
+/** @param {string[]} argv @param {CommandIO} io @returns {Promise<ExitCode>} */
 export async function runBootstrap(argv, io) {
   const jsonRequested = argv.includes("--json");
   try {
