@@ -195,6 +195,28 @@ test("bootstrap does not mistake an unrelated module.global for Tama's foundatio
   );
 });
 
+test("bootstrap ignores nested source attributes when identifying a Terraform module", () => {
+  const root = project();
+  mkdirSync(join(root, "tama"));
+  writeFileSync(
+    join(root, "tama", "main.tf"),
+    [
+      'module "other" {',
+      "  settings = {",
+      '    source = "upmaru/base/tama"',
+      "  }",
+      '  source = "./other"',
+      "}",
+      "",
+    ].join("\n"),
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) => error instanceof CLIError && error.exitCode === EXIT_CODES.OWNERSHIP,
+  );
+});
+
 test("bootstrap ignores global foundations declared only in nested Terraform modules", () => {
   const root = project();
   mkdirSync(join(root, "tama", "modules", "unused"), { recursive: true });
@@ -307,6 +329,25 @@ test("bootstrap rejects missing required variables in a persisted environment", 
         error.details.variables.includes(name),
     );
   }
+});
+
+test("bootstrap rejects duplicate keys in a persisted environment", () => {
+  const root = project();
+  const first = planFor(root);
+  applyOperations(first.operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    `${readFileSync(filename, "utf8")}TAMA_BASE_URL=http://localhost:4000\n`,
+  );
+
+  assert.throws(
+    () => planFor(root, { port: 4567 }),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      error.details.variables.includes("TAMA_BASE_URL"),
+  );
 });
 
 test("bootstrap appends ignore rules after a later secret-file negation", () => {

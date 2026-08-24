@@ -91,7 +91,7 @@ function parseDeclaredBlocks(root, files) {
       while (index < lines.length && depth > 0) {
         const current = lines[index];
         const assignment = current.match(ASSIGNMENT_PATTERN);
-        if (assignment && !(assignment[1] in values)) {
+        if (depth === 1 && assignment && !(assignment[1] in values)) {
           values[assignment[1]] = assignment[2];
         }
         depth += [...current].filter((character) => character === "{").length;

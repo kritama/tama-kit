@@ -36,14 +36,25 @@ function token(bytes = 32) {
   return randomBytes(bytes).toString("base64url");
 }
 
-/** @param {string} content @returns {Map<string, string>} */
-function parseEnvironment(content) {
+/** @param {string} content @param {string} filename @returns {Map<string, string>} */
+function parseEnvironment(content, filename) {
   const values = new Map();
+  const duplicates = new Set();
   for (const line of content.split(/\r?\n/u)) {
     const match = line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/u);
     if (match) {
+      if (values.has(match[1])) {
+        duplicates.add(match[1]);
+      }
       values.set(match[1], match[2]);
     }
+  }
+  if (duplicates.size > 0) {
+    const names = [...duplicates].sort();
+    throw ownershipError(`${filename} contains duplicate environment variables: ${names.join(", ")}`, {
+      path: filename,
+      variables: names,
+    });
   }
   return values;
 }
@@ -133,6 +144,7 @@ export function planEnvironment(root, requestedPort) {
   if (!existsSync(filename)) {
     const port = requestedPort ?? DEFAULTS.port;
     const content = newEnvironment(port);
+    const values = parseEnvironment(content, filename);
     return {
       port,
       operation: operationForContent(filename, content, {
@@ -141,14 +153,14 @@ export function planEnvironment(root, requestedPort) {
       }),
       postgresOperation: operationForContent(
         join(root, ".tama.postgres.env"),
-        postgresEnvironment(parseEnvironment(content)),
+        postgresEnvironment(values),
         { sensitive: true, mode: 0o600 },
       ),
     };
   }
 
   const original = readFileSync(filename, "utf8");
-  const values = parseEnvironment(original);
+  const values = parseEnvironment(original, filename);
   const rawExistingPort = values.get("TAMA_PORT") ?? String(DEFAULTS.port);
   const existingPort = /^\d+$/u.test(rawExistingPort)
     ? Number.parseInt(rawExistingPort, 10)
@@ -167,7 +179,7 @@ export function planEnvironment(root, requestedPort) {
           TAMA_MCP_ALLOWED_ORIGINS: `http://localhost:${port}`,
           TAMA_BASE_URL: `http://localhost:${port}`,
         });
-  const updatedValues = parseEnvironment(content);
+  const updatedValues = parseEnvironment(content, filename);
   validateEnvironment(updatedValues, filename);
   return {
     port,
