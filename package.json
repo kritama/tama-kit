@@ -1,12 +1,14 @@
 {
   "name": "@upmaru/tama-kit",
   "version": "0.3.2",
-  "description": "A ChatGPT and Codex plugin for building, managing, and auditing Tama Terraform graph networks.",
+  "description": "Bootstrap local Tama runtimes and build, manage, and audit Tama Terraform graph networks.",
   "keywords": [
     "codex-plugin",
     "mcp",
     "tama",
     "terraform",
+    "docker-compose",
+    "bootstrap",
     "agents",
     "graphs",
     "pipelines",
@@ -24,9 +26,14 @@
   "engines": {
     "node": ">=20"
   },
+  "bin": {
+    "tama-kit": "./bin/tama-kit.mjs"
+  },
   "files": [
     ".codex-plugin/",
     "assets/",
+    "bin/",
+    "cli/",
     "evals/",
     "scripts/",
     "skills/",
@@ -44,5 +51,8 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "yaml": "2.9.0"
   }
 }

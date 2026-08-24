@@ -7,6 +7,44 @@ conversations, direct forwarded actions, shared replies, ingestion, enrichment,
 embeddings, indexing, batch reprocessing, the required global foundation, and
 Terraform-safe graph migration.
 
+## Bootstrap a local Tama runtime
+
+Tama Kit also ships a conventional CLI for adding a local Tama runtime and a
+starter Terraform root to an existing Rails, Phoenix, Node, or generic
+application repository:
+
+```bash
+npx @upmaru/tama-kit bootstrap
+```
+
+After a global npm installation, the equivalent command is:
+
+```bash
+tama-kit bootstrap
+```
+
+Bootstrap detects the project and its default Docker Compose file, creates a
+private `.tama.env`, adds managed Tama and PostgreSQL services, and generates a
+`tama/` Terraform root with one version-pinned `module "global"`. It preserves
+an existing global-foundation address and refuses ambiguous ownership rather
+than creating duplicate data-bearing resources.
+
+Inspect the proposed changes without writing:
+
+```bash
+npx @upmaru/tama-kit bootstrap --dry-run
+```
+
+Generate and start the local services:
+
+```bash
+npx @upmaru/tama-kit bootstrap --start
+```
+
+The first release uses Tama's supported interactive setup flow to create root
+and provisioner credentials. Bootstrap does not use the test-only provisioner
+path and never runs `terraform apply`.
+
 ## Installation
 
 ### Codex
