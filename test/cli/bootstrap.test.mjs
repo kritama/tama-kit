@@ -14,7 +14,10 @@ import test from "node:test";
 
 import { createBootstrapPlan } from "../../cli/bootstrap/plan.mjs";
 import { formatComposeUpCommand } from "../../cli/bootstrap/compose-command.mjs";
-import { applyOperations } from "../../cli/bootstrap/write.mjs";
+import {
+  applyOperations,
+  applyOperationsTransactionally,
+} from "../../cli/bootstrap/write.mjs";
 import { inspectProject } from "../../cli/bootstrap/detect-project.mjs";
 import { CLIError, EXIT_CODES } from "../../cli/errors.mjs";
 import { run } from "../../cli/index.mjs";
@@ -99,6 +102,28 @@ test("bootstrap preserves permissions when updating a user-owned Compose file", 
   applyOperations(plan.operations);
 
   assert.equal(statSync(composeFile).mode & 0o777, 0o600);
+});
+
+test("bootstrap rolls back every file change when post-write validation fails", async () => {
+  const root = project();
+  const composeFile = join(root, "compose.yaml");
+  const original = "services: {}\n";
+  writeFileSync(composeFile, original);
+  chmodSync(composeFile, 0o600);
+  const plan = planFor(root);
+
+  await assert.rejects(
+    () =>
+      applyOperationsTransactionally(plan.operations, () => {
+        throw new Error("invalid integrated Compose configuration");
+      }),
+    /invalid integrated Compose configuration/u,
+  );
+
+  assert.equal(readFileSync(composeFile, "utf8"), original);
+  assert.equal(statSync(composeFile).mode & 0o777, 0o600);
+  assert.equal(existsSync(join(root, ".tama.env")), false);
+  assert.equal(existsSync(join(root, "tama")), false);
 });
 
 test("bootstrap resolves a managed include relative to a nested Compose file", () => {
@@ -326,6 +351,25 @@ test("bootstrap rejects a persisted internal port that disagrees with Compose", 
       error instanceof CLIError &&
       error.exitCode === EXIT_CODES.OWNERSHIP &&
       error.details.variable === "PORT",
+  );
+});
+
+test("bootstrap rejects persisted public URLs that disagree with TAMA_PORT", () => {
+  const root = project();
+  const first = planFor(root);
+  applyOperations(first.operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8").replace(/^TAMA_PORT=4000$/mu, "TAMA_PORT=4567"),
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      error.details.variables.includes("TAMA_BASE_URL"),
   );
 });
 

@@ -6,8 +6,12 @@ import { relative } from "node:path";
 import { CLIError, EXIT_CODES, usageError } from "../errors.mjs";
 import { formatComposeUpCommand } from "../bootstrap/compose-command.mjs";
 import { createBootstrapPlan, publicPlan } from "../bootstrap/plan.mjs";
-import { startCompose, validateCompose } from "../bootstrap/start.mjs";
-import { applyOperations } from "../bootstrap/write.mjs";
+import {
+  startCompose,
+  validateCompose,
+  validateComposePrerequisite,
+} from "../bootstrap/start.mjs";
+import { applyOperationsTransactionally } from "../bootstrap/write.mjs";
 
 /** @typedef {import("../types.mjs").BootstrapPlan} BootstrapPlan */
 /** @typedef {import("../types.mjs").BootstrapResult} BootstrapResult */
@@ -176,8 +180,10 @@ async function executeBootstrap(argv, io) {
 
   let healthUrl;
   if (!options.dryRun) {
-    applyOperations(plan.operations);
-    await validateCompose(plan);
+    validateComposePrerequisite();
+    await applyOperationsTransactionally(plan.operations, () =>
+      validateCompose(plan, { checkPrerequisite: false }),
+    );
     if (options.start) {
       healthUrl = await startCompose(plan);
     }

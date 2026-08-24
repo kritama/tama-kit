@@ -36,7 +36,7 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function assertComposeVersion() {
+export function validateComposePrerequisite() {
   /** @type {string} */
   let output;
   try {
@@ -60,9 +60,17 @@ function assertComposeVersion() {
   }
 }
 
-/** @param {BootstrapPlan} plan @param {{quiet?: boolean}} [options] */
-export async function validateCompose(plan, { quiet = true } = {}) {
-  assertComposeVersion();
+/**
+ * @param {BootstrapPlan} plan
+ * @param {{quiet?: boolean, checkPrerequisite?: boolean}} [options]
+ */
+export async function validateCompose(
+  plan,
+  { quiet = true, checkPrerequisite = true } = {},
+) {
+  if (checkPrerequisite) {
+    validateComposePrerequisite();
+  }
   try {
     await runProcess(
       "docker",

@@ -80,8 +80,8 @@ function updateEnvironment(content, updates) {
   return `${lines.join("\n")}\n`;
 }
 
-/** @param {Map<string, string>} values @param {string} filename */
-function validateEnvironment(values, filename) {
+/** @param {Map<string, string>} values @param {string} filename @param {number} port */
+function validateEnvironment(values, filename, port) {
   const missing = REQUIRED_ENVIRONMENT_VARIABLES.filter((name) => !values.get(name));
   if (missing.length > 0) {
     throw ownershipError(
@@ -99,6 +99,29 @@ function validateEnvironment(values, filename) {
         expected: String(DEFAULTS.containerPort),
         actual: internalPort,
       },
+    );
+  }
+
+  const baseUrl = `http://localhost:${port}`;
+  const expectedUrls = {
+    TAMA_OAUTH_ISSUER: baseUrl,
+    TAMA_MCP_RESOURCE: `${baseUrl}/mcp`,
+    TAMA_BASE_URL: baseUrl,
+  };
+  const mismatches = Object.entries(expectedUrls)
+    .filter(([name, expected]) => values.get(name) !== expected)
+    .map(([name]) => name);
+  const allowedOrigins = values
+    .get("TAMA_MCP_ALLOWED_ORIGINS")
+    ?.split(",")
+    .map((origin) => origin.trim());
+  if (!allowedOrigins?.includes(baseUrl)) {
+    mismatches.push("TAMA_MCP_ALLOWED_ORIGINS");
+  }
+  if (mismatches.length > 0) {
+    throw ownershipError(
+      `${filename} has public URLs that do not match TAMA_PORT ${port}: ${mismatches.join(", ")}`,
+      { path: filename, variables: mismatches, port },
     );
   }
 }
@@ -157,7 +180,7 @@ export function planEnvironment(root, requestedPort) {
     const port = requestedPort ?? DEFAULTS.port;
     const content = newEnvironment(port);
     const values = parseEnvironment(content, filename);
-    validateEnvironment(values, filename);
+    validateEnvironment(values, filename, port);
     return {
       port,
       operation: operationForContent(filename, content, {
@@ -193,7 +216,7 @@ export function planEnvironment(root, requestedPort) {
           TAMA_BASE_URL: `http://localhost:${port}`,
         });
   const updatedValues = parseEnvironment(content, filename);
-  validateEnvironment(updatedValues, filename);
+  validateEnvironment(updatedValues, filename, port);
   return {
     port,
     operation: operationForContent(filename, content, {
