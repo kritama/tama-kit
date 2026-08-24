@@ -33,6 +33,7 @@ export function createBootstrapPlan(options) {
   const environment = planEnvironment(inspection.root, options.port);
   const replacements = {
     PORT: environment.port,
+    CONTAINER_PORT: DEFAULTS.containerPort,
     TAMA_IMAGE: options.image ?? DEFAULTS.tamaImage,
     POSTGRES_IMAGE: DEFAULTS.postgresImage,
   };

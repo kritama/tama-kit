@@ -89,6 +89,18 @@ function validateEnvironment(values, filename) {
       { path: filename, variables: missing },
     );
   }
+  const internalPort = values.get("PORT");
+  if (internalPort !== String(DEFAULTS.containerPort)) {
+    throw ownershipError(
+      `${filename} has an unsupported PORT: ${internalPort}; Tama must listen on ${DEFAULTS.containerPort} inside the generated container`,
+      {
+        path: filename,
+        variable: "PORT",
+        expected: String(DEFAULTS.containerPort),
+        actual: internalPort,
+      },
+    );
+  }
 }
 
 /** @param {number} port */
@@ -103,7 +115,7 @@ function newEnvironment(port) {
     `DATABASE_URL=ecto://tama:${postgresPassword}@tama-postgres/tama`,
     "",
     "PHX_HOST=localhost",
-    "PORT=4000",
+    `PORT=${DEFAULTS.containerPort}`,
     `TAMA_PORT=${port}`,
     `SECRET_KEY_BASE=${token(48)}`,
     `TAMA_VAULT_KEY=${randomBytes(32).toString("base64")}`,
@@ -145,6 +157,7 @@ export function planEnvironment(root, requestedPort) {
     const port = requestedPort ?? DEFAULTS.port;
     const content = newEnvironment(port);
     const values = parseEnvironment(content, filename);
+    validateEnvironment(values, filename);
     return {
       port,
       operation: operationForContent(filename, content, {

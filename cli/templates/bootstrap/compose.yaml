@@ -24,9 +24,9 @@ services:
       tama-postgres:
         condition: service_healthy
     ports:
-      - "{{PORT}}:4000"
+      - "{{PORT}}:{{CONTAINER_PORT}}"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:{{CONTAINER_PORT}}/"]
       interval: 5s
       timeout: 5s
       start_period: 10s

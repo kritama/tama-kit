@@ -310,6 +310,25 @@ test("bootstrap rejects an invalid persisted port instead of silently changing i
   );
 });
 
+test("bootstrap rejects a persisted internal port that disagrees with Compose", () => {
+  const root = project();
+  const first = planFor(root);
+  applyOperations(first.operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8").replace(/^PORT=4000$/mu, "PORT=5000"),
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      error.details.variable === "PORT",
+  );
+});
+
 test("bootstrap rejects missing required variables in a persisted environment", () => {
   for (const name of ["DATABASE_URL", "SECRET_KEY_BASE", "TAMA_VAULT_KEY"]) {
     const root = project();
