@@ -242,6 +242,29 @@ test("bootstrap ignores nested source attributes when identifying a Terraform mo
   );
 });
 
+test("bootstrap ignores Tama foundation modules inside HCL comments", () => {
+  const root = project();
+  mkdirSync(join(root, "tama"));
+  writeFileSync(
+    join(root, "tama", "main.tf"),
+    [
+      "/*",
+      'module "retired" {',
+      '  source  = "upmaru/base/tama"',
+      '  version = "0.5.5"',
+      "}",
+      "*/",
+      'resource "null_resource" "example" {}',
+      "",
+    ].join("\n"),
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) => error instanceof CLIError && error.exitCode === EXIT_CODES.OWNERSHIP,
+  );
+});
+
 test("bootstrap ignores global foundations declared only in nested Terraform modules", () => {
   const root = project();
   mkdirSync(join(root, "tama", "modules", "unused"), { recursive: true });
@@ -410,6 +433,28 @@ test("bootstrap rejects duplicate keys in a persisted environment", () => {
       error instanceof CLIError &&
       error.exitCode === EXIT_CODES.OWNERSHIP &&
       error.details.variables.includes("TAMA_BASE_URL"),
+  );
+});
+
+test("bootstrap rejects PostgreSQL credentials that disagree with DATABASE_URL", () => {
+  const root = project();
+  const first = planFor(root);
+  applyOperations(first.operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8").replace(
+      /^POSTGRES_PASSWORD=.*$/mu,
+      "POSTGRES_PASSWORD=different-password",
+    ),
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      error.details.variable === "DATABASE_URL",
   );
 });
 

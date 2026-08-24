@@ -56,6 +56,68 @@ function collectRootTerraformFiles(root) {
     .sort((left, right) => left.localeCompare(right, "en"));
 }
 
+function stripHclComments(text) {
+  let output = "";
+  let state = "code";
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    const next = text[index + 1];
+
+    if (state === "line-comment") {
+      if (character === "\n") {
+        output += "\n";
+        state = "code";
+      } else {
+        output += " ";
+      }
+      continue;
+    }
+
+    if (state === "block-comment") {
+      if (character === "*" && next === "/") {
+        output += "  ";
+        index += 1;
+        state = "code";
+      } else {
+        output += character === "\n" ? "\n" : " ";
+      }
+      continue;
+    }
+
+    if (state === "string") {
+      output += character;
+      if (character === "\\" && next !== undefined) {
+        output += next;
+        index += 1;
+      } else if (character === '"') {
+        state = "code";
+      }
+      continue;
+    }
+
+    if (character === '"') {
+      output += character;
+      state = "string";
+    } else if (character === "#") {
+      output += " ";
+      state = "line-comment";
+    } else if (character === "/" && next === "/") {
+      output += "  ";
+      index += 1;
+      state = "line-comment";
+    } else if (character === "/" && next === "*") {
+      output += "  ";
+      index += 1;
+      state = "block-comment";
+    } else {
+      output += character;
+    }
+  }
+
+  return output;
+}
+
 function parseDeclaredBlocks(root, files) {
   const counts = new Map();
   const moduleCalls = [];
@@ -63,7 +125,7 @@ function parseDeclaredBlocks(root, files) {
 
   const increment = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
   for (const path of files) {
-    const text = readFileSync(path, "utf8");
+    const text = stripHclComments(readFileSync(path, "utf8"));
     globalReferenceCount += [...text.matchAll(GLOBAL_REFERENCE_PATTERN)].length;
     const lines = text.split(/\r?\n/u);
     let index = 0;

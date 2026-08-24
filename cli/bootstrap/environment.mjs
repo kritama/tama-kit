@@ -80,6 +80,38 @@ function updateEnvironment(content, updates) {
   return `${lines.join("\n")}\n`;
 }
 
+/** @param {string} value @returns {string | null} */
+function decodeUrlComponent(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+}
+
+/** @param {Map<string, string>} values @param {string} filename */
+function validateDatabaseUrl(values, filename) {
+  let databaseUrl;
+  try {
+    databaseUrl = new URL(values.get("DATABASE_URL") ?? "");
+  } catch {
+    databaseUrl = null;
+  }
+
+  const valid =
+    databaseUrl?.protocol === "ecto:" &&
+    databaseUrl.hostname === "tama-postgres" &&
+    decodeUrlComponent(databaseUrl.username) === values.get("POSTGRES_USER") &&
+    decodeUrlComponent(databaseUrl.password) === values.get("POSTGRES_PASSWORD") &&
+    decodeUrlComponent(databaseUrl.pathname.replace(/^\//u, "")) === values.get("POSTGRES_DB");
+  if (!valid) {
+    throw ownershipError(
+      `${filename} has a DATABASE_URL that does not match the generated PostgreSQL credentials`,
+      { path: filename, variable: "DATABASE_URL" },
+    );
+  }
+}
+
 /** @param {Map<string, string>} values @param {string} filename @param {number} port */
 function validateEnvironment(values, filename, port) {
   const missing = REQUIRED_ENVIRONMENT_VARIABLES.filter((name) => !values.get(name));
@@ -89,6 +121,7 @@ function validateEnvironment(values, filename, port) {
       { path: filename, variables: missing },
     );
   }
+  validateDatabaseUrl(values, filename);
   const internalPort = values.get("PORT");
   if (internalPort !== String(DEFAULTS.containerPort)) {
     throw ownershipError(
