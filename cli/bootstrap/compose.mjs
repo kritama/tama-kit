@@ -1,11 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
+import { dirname, relative, sep } from "node:path";
 
 import { parseDocument } from "yaml";
 
 import { ambiguityError, ownershipError } from "../errors.mjs";
 import { operationForContent } from "./files.mjs";
 
-const INCLUDE_PATH = "./tama/compose.yaml";
 const OWNED_SERVICES = new Set(["tama", "tama-postgres"]);
 
 function normalizePath(value) {
@@ -36,8 +36,15 @@ function includePaths(entry) {
   return Array.isArray(entry.path) ? entry.path : [entry.path];
 }
 
-function hasTamaInclude(entry) {
-  return includePaths(entry).some((item) => normalizePath(item) === normalizePath(INCLUDE_PATH));
+function hasTamaInclude(entry, includePath) {
+  return includePaths(entry).some(
+    (item) => normalizePath(item) === normalizePath(includePath),
+  );
+}
+
+function relativeIncludePath(filename, managedComposeFilename) {
+  const path = relative(dirname(filename), managedComposeFilename).split(sep).join("/");
+  return path.startsWith(".") ? path : `./${path}`;
 }
 
 function checkServiceCollisions(compose, filename) {
@@ -54,7 +61,7 @@ function checkServiceCollisions(compose, filename) {
   }
 }
 
-export function planRootCompose(filename, newRootContent) {
+export function planRootCompose(filename, managedComposeFilename, newRootContent) {
   if (!existsSync(filename)) {
     return operationForContent(filename, newRootContent);
   }
@@ -67,7 +74,8 @@ export function planRootCompose(filename, newRootContent) {
   if (!Array.isArray(currentIncludes)) {
     throw ambiguityError(`Compose include must be a sequence: ${filename}`, { path: filename });
   }
-  const matches = currentIncludes.filter(hasTamaInclude);
+  const includePath = relativeIncludePath(filename, managedComposeFilename);
+  const matches = currentIncludes.filter((entry) => hasTamaInclude(entry, includePath));
   if (matches.length > 1) {
     throw ownershipError(`Compose file contains multiple Tama Kit includes: ${filename}`, {
       path: filename,
@@ -76,7 +84,7 @@ export function planRootCompose(filename, newRootContent) {
 
   const updated = [...currentIncludes];
   if (matches.length === 0) {
-    updated.push(INCLUDE_PATH);
+    updated.push(includePath);
   }
   document.set("include", updated);
   const content = String(document);

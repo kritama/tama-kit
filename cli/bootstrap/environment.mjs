@@ -6,6 +6,27 @@ import { ownershipError } from "../errors.mjs";
 import { operationForContent } from "./files.mjs";
 import { DEFAULTS } from "./constants.mjs";
 
+const REQUIRED_ENVIRONMENT_VARIABLES = [
+  "POSTGRES_USER",
+  "POSTGRES_PASSWORD",
+  "POSTGRES_DB",
+  "DATABASE_URL",
+  "PHX_HOST",
+  "PORT",
+  "TAMA_PORT",
+  "SECRET_KEY_BASE",
+  "TAMA_VAULT_KEY",
+  "TAMA_JWT_SECRET",
+  "TAMA_OAUTH_SIGNING_KEY",
+  "TAMA_OAUTH_SIGNING_KEY_ID",
+  "TAMA_SETUP_TOKEN",
+  "TAMA_DISABLE_CLUSTERING",
+  "TAMA_OAUTH_ISSUER",
+  "TAMA_MCP_RESOURCE",
+  "TAMA_MCP_ALLOWED_ORIGINS",
+  "TAMA_BASE_URL",
+];
+
 function token(bytes = 32) {
   return randomBytes(bytes).toString("base64url");
 }
@@ -39,6 +60,16 @@ function updateEnvironment(content, updates) {
     lines.push("", ...[...remaining].map(([name, value]) => `${name}=${value}`));
   }
   return `${lines.join("\n")}\n`;
+}
+
+function validateEnvironment(values, filename) {
+  const missing = REQUIRED_ENVIRONMENT_VARIABLES.filter((name) => !values.get(name));
+  if (missing.length > 0) {
+    throw ownershipError(
+      `${filename} must define non-empty runtime variables: ${missing.join(", ")}`,
+      { path: filename, variables: missing },
+    );
+  }
 }
 
 function newEnvironment(port) {
@@ -125,6 +156,8 @@ export function planEnvironment(root, requestedPort) {
           TAMA_MCP_ALLOWED_ORIGINS: `http://localhost:${port}`,
           TAMA_BASE_URL: `http://localhost:${port}`,
         });
+  const updatedValues = parseEnvironment(content);
+  validateEnvironment(updatedValues, filename);
   return {
     port,
     operation: operationForContent(filename, content, {
@@ -133,7 +166,7 @@ export function planEnvironment(root, requestedPort) {
     }),
     postgresOperation: operationForContent(
       join(root, ".tama.postgres.env"),
-      postgresEnvironment(parseEnvironment(content)),
+      postgresEnvironment(updatedValues),
       { sensitive: true, mode: 0o600 },
     ),
   };

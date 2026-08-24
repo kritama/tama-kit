@@ -49,6 +49,13 @@ function collectTerraformFiles(root, directory = root, files = []) {
   return files;
 }
 
+function collectRootTerraformFiles(root) {
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".tf"))
+    .map((entry) => join(root, entry.name))
+    .sort((left, right) => left.localeCompare(right, "en"));
+}
+
 function parseDeclaredBlocks(root, files) {
   const counts = new Map();
   const moduleCalls = [];
@@ -159,8 +166,8 @@ function parseInstalledModules(root) {
   });
 }
 
-export function buildInventory(root) {
-  const files = collectTerraformFiles(root);
+export function buildInventory(root, { recursive = true } = {}) {
+  const files = recursive ? collectTerraformFiles(root) : collectRootTerraformFiles(root);
   const declared = parseDeclaredBlocks(root, files);
   const installed = parseInstalledModules(root);
   const installedByKey = new Map(

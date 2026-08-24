@@ -37,7 +37,7 @@ export function planTerraform(directory, versions) {
     };
   }
 
-  const inventory = buildInventory(directory);
+  const inventory = buildInventory(directory, { recursive: false });
   if (inventory.global_foundation.status === "multiple") {
     throw ownershipError(
       `multiple Tama global foundations found in existing Terraform root: ${directory}`,

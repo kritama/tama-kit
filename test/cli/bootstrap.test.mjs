@@ -87,6 +87,22 @@ test("bootstrap preserves an existing Compose comment and adds one include", () 
   assert.equal((content.match(/\.\/tama\/compose\.yaml/gu) ?? []).length, 1);
 });
 
+test("bootstrap resolves a managed include relative to a nested Compose file", () => {
+  const root = project();
+  mkdirSync(join(root, "deploy"));
+  writeFileSync(join(root, "deploy", "compose.yaml"), "services: {}\n");
+
+  const first = planFor(root, { composePath: "deploy/compose.yaml" });
+  applyOperations(first.operations);
+  assert.match(
+    readFileSync(join(root, "deploy", "compose.yaml"), "utf8"),
+    /- \.\.\/tama\/compose\.yaml/u,
+  );
+
+  const second = planFor(root, { composePath: "deploy/compose.yaml" });
+  assert.ok(second.operations.every((operation) => operation.action === "unchanged"));
+});
+
 test("bootstrap rejects ambiguous Compose roots and unmanaged service collisions", () => {
   const ambiguous = project();
   writeFileSync(join(ambiguous, "compose.yaml"), "services: {}\n");
@@ -120,6 +136,21 @@ test("bootstrap preserves an existing global foundation address", () => {
   const plan = planFor(root);
   assert.equal(plan.terraform.foundation, "preserved");
   assert.ok(!plan.operations.some((operation) => operation.path.endsWith("main.tf")));
+});
+
+test("bootstrap ignores global foundations declared only in nested Terraform modules", () => {
+  const root = project();
+  mkdirSync(join(root, "tama", "modules", "unused"), { recursive: true });
+  writeFileSync(join(root, "tama", "main.tf"), 'resource "null_resource" "example" {}\n');
+  writeFileSync(
+    join(root, "tama", "modules", "unused", "main.tf"),
+    'module "global" {\n  source = "upmaru/base/tama"\n  version = "0.5.6"\n}\n',
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) => error instanceof CLIError && error.exitCode === EXIT_CODES.OWNERSHIP,
+  );
 });
 
 test("bootstrap refuses unknown ownership in an existing Terraform root", () => {
@@ -198,4 +229,38 @@ test("bootstrap rejects an invalid persisted port instead of silently changing i
     () => planFor(root),
     (error) => error instanceof CLIError && error.exitCode === EXIT_CODES.OWNERSHIP,
   );
+});
+
+test("bootstrap rejects missing required variables in a persisted environment", () => {
+  for (const name of ["DATABASE_URL", "SECRET_KEY_BASE", "TAMA_VAULT_KEY"]) {
+    const root = project();
+    const first = planFor(root);
+    applyOperations(first.operations);
+    const filename = join(root, ".tama.env");
+    writeFileSync(
+      filename,
+      readFileSync(filename, "utf8").replace(new RegExp(`^${name}=.*$`, "mu"), `${name}=`),
+    );
+
+    assert.throws(
+      () => planFor(root),
+      (error) =>
+        error instanceof CLIError &&
+        error.exitCode === EXIT_CODES.OWNERSHIP &&
+        error.details.variables.includes(name),
+    );
+  }
+});
+
+test("bootstrap appends ignore rules after a later secret-file negation", () => {
+  const root = project();
+  writeFileSync(join(root, ".gitignore"), ".tama.env\n!.tama.env\n");
+
+  const first = planFor(root);
+  applyOperations(first.operations);
+  const content = readFileSync(join(root, ".gitignore"), "utf8");
+  assert.ok(content.lastIndexOf(".tama.env") > content.lastIndexOf("!.tama.env"));
+
+  const second = planFor(root);
+  assert.ok(second.operations.every((operation) => operation.action === "unchanged"));
 });

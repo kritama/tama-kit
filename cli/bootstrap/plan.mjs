@@ -34,6 +34,7 @@ export function createBootstrapPlan(options) {
   operations.push(
     planRootCompose(
       inspection.selectedCompose,
+      join(inspection.tamaDirectory, "compose.yaml"),
       renderTemplate("root-compose.yaml"),
     ),
   );
