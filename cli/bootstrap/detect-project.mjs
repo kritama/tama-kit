@@ -1,6 +1,6 @@
 // @ts-check
 
-import { existsSync, lstatSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { ambiguityError, ownershipError, usageError } from "../errors.mjs";
@@ -112,6 +112,14 @@ export function inspectProject({ cwd, targetPath, composePath }) {
     }
     if (!existsSync(selectedCompose)) {
       throw usageError(`Compose file does not exist: ${selectedCompose}`);
+    }
+    const canonicalRoot = realpathSync(root);
+    const canonicalCompose = realpathSync(selectedCompose);
+    const canonicalRelative = relative(canonicalRoot, canonicalCompose);
+    const escapesCanonicalRoot =
+      canonicalRelative === ".." || canonicalRelative.startsWith(`..${sep}`);
+    if (escapesCanonicalRoot) {
+      throw usageError(`Compose file must resolve inside the project root: ${selectedCompose}`);
     }
   } else if (composeCandidates.length > 1) {
     throw ambiguityError(

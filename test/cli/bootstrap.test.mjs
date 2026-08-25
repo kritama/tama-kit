@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -174,6 +175,25 @@ test("bootstrap resolves a managed include relative to a nested Compose file", (
 
   const second = planFor(root, { composePath: "deploy/compose.yaml" });
   assert.ok(second.operations.every((operation) => operation.action === "unchanged"));
+});
+
+test("bootstrap rejects a Compose file that escapes through a symlinked directory", () => {
+  const root = project();
+  const external = project("tama-kit-external-compose-");
+  const externalCompose = join(external, "compose.yaml");
+  const original = "services: {}\n";
+  writeFileSync(externalCompose, original);
+  symlinkSync(external, join(root, "deploy"), "dir");
+
+  assert.throws(
+    () => planFor(root, { composePath: "deploy/compose.yaml" }),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.USAGE &&
+      /must resolve inside the project root/u.test(error.message),
+  );
+  assert.equal(readFileSync(externalCompose, "utf8"), original);
+  assert.equal(existsSync(join(root, ".tama.env")), false);
 });
 
 test("bootstrap rejects ambiguous Compose roots and unmanaged service collisions", () => {
