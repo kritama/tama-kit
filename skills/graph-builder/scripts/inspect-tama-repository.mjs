@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -92,7 +92,9 @@ function tokenizeHcl(text) {
     }
 
     if (character === "<" && next === "<") {
-      const header = text.slice(index).match(/^<<(-?)([A-Za-z_][A-Za-z0-9_-]*)[^\S\r\n]*(?:\r?\n|$)/u);
+      const header = text
+        .slice(index)
+        .match(/^<<(-?)([A-Za-z_][A-Za-z0-9_-]*)[^\S\r\n]*(?:\r?\n|$)/u);
       if (header) {
         const tokenLine = line;
         const indented = header[1] === "-";
@@ -243,7 +245,9 @@ function parseDeclaredBlocks(root, files) {
   }
 
   return {
-    block_counts: Object.fromEntries([...counts.entries()].sort(([left], [right]) => left.localeCompare(right, "en"))),
+    block_counts: Object.fromEntries(
+      [...counts.entries()].sort(([left], [right]) => left.localeCompare(right, "en")),
+    ),
     module_calls: moduleCalls,
     global_reference_count: globalReferenceCount,
   };
@@ -284,11 +288,7 @@ function parseInstalledModules(root) {
 
   return (payload.Modules ?? []).map((item) => {
     const directory = item.Dir ?? null;
-    const resolved = directory
-      ? isAbsolute(directory)
-        ? directory
-        : join(root, directory)
-      : root;
+    const resolved = directory ? (isAbsolute(directory) ? directory : join(root, directory)) : root;
     return {
       key: item.Key ?? "",
       source: item.Source ?? "",
@@ -314,7 +314,8 @@ export function buildInventory(root, { recursive = true } = {}) {
   }
 
   const globalCalls = declared.module_calls.filter(isGlobalFoundationCall);
-  const globalStatus = globalCalls.length === 0 ? "missing" : globalCalls.length === 1 ? "present" : "multiple";
+  const globalStatus =
+    globalCalls.length === 0 ? "missing" : globalCalls.length === 1 ? "present" : "multiple";
   const warnings = [];
   if (!existsSync(join(root, ".terraform.lock.hcl"))) {
     warnings.push("No .terraform.lock.hcl was found.");
@@ -323,19 +324,24 @@ export function buildInventory(root, { recursive = true } = {}) {
     warnings.push("No .terraform/modules/modules.json was found; modules may be uninitialized.");
   }
   if (globalStatus === "missing") {
-    warnings.push("No global foundation module was found; verify whether this state or an external state owns it.");
+    warnings.push(
+      "No global foundation module was found; verify whether this state or an external state owns it.",
+    );
   } else if (globalStatus === "multiple") {
-    warnings.push("Multiple global foundation candidates were found; verify that exactly one Terraform state owns the Tama global foundation.");
+    warnings.push(
+      "Multiple global foundation candidates were found; verify that exactly one Terraform state owns the Tama global foundation.",
+    );
   }
-  if (
-    declared.global_reference_count > 0 &&
-    !globalCalls.some((call) => call.name === "global")
-  ) {
-    warnings.push("The configuration references module.global but does not declare that module address.");
+  if (declared.global_reference_count > 0 && !globalCalls.some((call) => call.name === "global")) {
+    warnings.push(
+      "The configuration references module.global but does not declare that module address.",
+    );
   }
   for (const call of globalCalls) {
     if (isRegistryGlobalSource(call.source) && !call.declared_version) {
-      warnings.push(`module.${call.name} uses the registry global foundation without an explicit version pin.`);
+      warnings.push(
+        `module.${call.name} uses the registry global foundation without an explicit version pin.`,
+      );
     }
     if (
       call.declared_version &&

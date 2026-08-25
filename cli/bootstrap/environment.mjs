@@ -5,8 +5,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { ownershipError } from "../errors.mjs";
-import { operationForContent } from "./files.mjs";
 import { DEFAULTS } from "./constants.mjs";
+import { operationForContent } from "./files.mjs";
 
 /** @typedef {import("../types.mjs").EnvironmentPlan} EnvironmentPlan */
 
@@ -51,10 +51,13 @@ function parseEnvironment(content, filename) {
   }
   if (duplicates.size > 0) {
     const names = [...duplicates].sort();
-    throw ownershipError(`${filename} contains duplicate environment variables: ${names.join(", ")}`, {
-      path: filename,
-      variables: names,
-    });
+    throw ownershipError(
+      `${filename} contains duplicate environment variables: ${names.join(", ")}`,
+      {
+        path: filename,
+        variables: names,
+      },
+    );
   }
   return values;
 }

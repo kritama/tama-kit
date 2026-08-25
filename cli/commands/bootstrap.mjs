@@ -1,17 +1,12 @@
 // @ts-check
 
-import { parseArgs } from "node:util";
 import { relative } from "node:path";
-
-import { CLIError, EXIT_CODES, usageError } from "../errors.mjs";
+import { parseArgs } from "node:util";
 import { formatComposeUpCommand } from "../bootstrap/compose-command.mjs";
 import { createBootstrapPlan, publicPlan } from "../bootstrap/plan.mjs";
-import {
-  startCompose,
-  validateCompose,
-  validateComposePrerequisite,
-} from "../bootstrap/start.mjs";
+import { startCompose, validateCompose, validateComposePrerequisite } from "../bootstrap/start.mjs";
 import { applyOperationsTransactionally } from "../bootstrap/write.mjs";
+import { CLIError, EXIT_CODES, usageError } from "../errors.mjs";
 
 /** @typedef {import("../types.mjs").BootstrapPlan} BootstrapPlan */
 /** @typedef {import("../types.mjs").BootstrapResult} BootstrapResult */
@@ -65,7 +60,10 @@ function validateImage(value) {
   if (value === undefined) {
     return undefined;
   }
-  if (value.length === 0 || /[\s\x00-\x1f]/u.test(value)) {
+  const hasWhitespaceOrControl = [...value].some(
+    (character) => /\s/u.test(character) || character.charCodeAt(0) <= 0x1f,
+  );
+  if (value.length === 0 || hasWhitespaceOrControl) {
     throw usageError("image must be a non-empty container reference without whitespace");
   }
   return value;
@@ -151,13 +149,13 @@ function printHuman(io, result) {
     io.stdout("");
     io.stdout(`Tama is healthy at ${result.healthUrl}`);
     io.stdout(
-      "Setup: load .tama.env, then open http://localhost:${TAMA_PORT}/setup/root?token=${TAMA_SETUP_TOKEN}",
+      `Setup: load .tama.env, then open http://localhost:\${TAMA_PORT}/setup/root?token=\${TAMA_SETUP_TOKEN}`,
     );
   } else if (result.mode !== "dry-run") {
     io.stdout("");
     io.stdout(`Next: ${formatComposeUpCommand(result.composeFile)}`);
     io.stdout(
-      "Setup: load .tama.env, then open http://localhost:${TAMA_PORT}/setup/root?token=${TAMA_SETUP_TOKEN}",
+      `Setup: load .tama.env, then open http://localhost:\${TAMA_PORT}/setup/root?token=\${TAMA_SETUP_TOKEN}`,
     );
   }
 }

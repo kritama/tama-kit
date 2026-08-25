@@ -43,7 +43,13 @@
     "!**/*.py[cod]"
   ],
   "scripts": {
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
     "configure:mcp": "node scripts/configure-mcp-plugin.mjs",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write .",
     "typecheck": "tsc --project tsconfig.json",
     "validate:bootstrap": "node scripts/validate-bootstrap.mjs",
     "validate:bootstrap:runtime": "node scripts/validate-bootstrap.mjs --runtime",
@@ -59,6 +65,7 @@
     "yaml": "2.9.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.10",
     "@types/node": "20.19.43",
     "typescript": "7.0.2"
   }

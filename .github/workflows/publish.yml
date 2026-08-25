@@ -50,6 +50,9 @@ jobs:
       - name: Validate JavaScript inspector
         run: node skills/graph-builder/scripts/inspect-tama-repository.mjs --help
 
+      - name: Check formatting and lint
+        run: npm run check
+
       - name: Type-check CLI
         run: npm run typecheck
 

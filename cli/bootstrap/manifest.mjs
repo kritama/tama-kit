@@ -149,9 +149,12 @@ export function createManagedFilePlanner(root, tamaDirectory) {
       }
       const filename = join(root, path);
       if (!existsSync(filename) || lstatSync(filename).isSymbolicLink()) {
-        throw ownershipError(`managed file recorded by Tama Kit is missing or unsafe: ${filename}`, {
-          path: filename,
-        });
+        throw ownershipError(
+          `managed file recorded by Tama Kit is missing or unsafe: ${filename}`,
+          {
+            path: filename,
+          },
+        );
       }
       const actualDigest = contentDigest(readFileSync(filename, "utf8"));
       if (actualDigest !== digest) {

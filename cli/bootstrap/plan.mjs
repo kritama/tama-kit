@@ -1,10 +1,9 @@
 // @ts-check
 
 import { join, relative } from "node:path";
-
-import { BOOTSTRAP_SCHEMA_VERSION, DEFAULTS } from "./constants.mjs";
-import { formatComposePsCommand, formatComposeUpCommand } from "./compose-command.mjs";
 import { planRootCompose } from "./compose.mjs";
+import { formatComposePsCommand, formatComposeUpCommand } from "./compose-command.mjs";
+import { BOOTSTRAP_SCHEMA_VERSION, DEFAULTS } from "./constants.mjs";
 import { inspectProject } from "./detect-project.mjs";
 import { planEnvironment } from "./environment.mjs";
 import { planGitignore } from "./gitignore.mjs";
@@ -82,16 +81,11 @@ export function createBootstrapPlan(options) {
   }
   const projectComposePath = relative(inspection.root, inspection.selectedCompose);
   operations.push(
-    managedTemplate(
-      managedFiles.plan,
-      join(inspection.tamaDirectory, "README.md"),
-      "README.md",
-      {
-        PORT: environment.port,
-        COMPOSE_UP_COMMAND: formatComposeUpCommand(projectComposePath),
-        COMPOSE_PS_COMMAND: formatComposePsCommand(projectComposePath),
-      },
-    ),
+    managedTemplate(managedFiles.plan, join(inspection.tamaDirectory, "README.md"), "README.md", {
+      PORT: environment.port,
+      COMPOSE_UP_COMMAND: formatComposeUpCommand(projectComposePath),
+      COMPOSE_PS_COMMAND: formatComposePsCommand(projectComposePath),
+    }),
   );
   operations.push(managedFiles.manifestOperation());
 

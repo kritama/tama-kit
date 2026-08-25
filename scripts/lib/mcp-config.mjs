@@ -1,5 +1,5 @@
-import { BlockList, isIP } from "node:net";
 import { readFileSync, writeFileSync } from "node:fs";
+import { BlockList, isIP } from "node:net";
 
 const PLACEHOLDER_PATTERN = /\{([A-Za-z][A-Za-z0-9_]*)\}/g;
 const NON_PUBLIC_IPV4_PREFIXES = new Set([

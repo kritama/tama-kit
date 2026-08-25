@@ -1,5 +1,6 @@
 // @ts-check
 
+import { randomBytes } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -12,7 +13,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, sep } from "node:path";
-import { randomBytes } from "node:crypto";
 
 import { contentDigest } from "./files.mjs";
 

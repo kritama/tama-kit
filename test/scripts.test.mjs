@@ -7,10 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { configure } from "../scripts/configure-mcp-plugin.mjs";
 import { createDeterministicZip } from "../scripts/lib/deterministic-zip.mjs";
-import {
-  validatePublicExampleUrl,
-  validateTemplateMatch,
-} from "../scripts/lib/mcp-config.mjs";
+import { validatePublicExampleUrl, validateTemplateMatch } from "../scripts/lib/mcp-config.mjs";
 import { validateRepository } from "../scripts/validate-submission.mjs";
 import { buildInventory } from "../skills/graph-builder/scripts/inspect-tama-repository.mjs";
 
@@ -44,10 +41,7 @@ test("Template MCP URL validation rejects local endpoints and mismatches", () =>
     () => validatePublicExampleUrl("https://localhost/mcp"),
     /public, non-test hostname/u,
   );
-  assert.throws(
-    () => validatePublicExampleUrl("https://127.0.0.1/mcp"),
-    /private or local IP/u,
-  );
+  assert.throws(() => validatePublicExampleUrl("https://127.0.0.1/mcp"), /private or local IP/u);
   assert.throws(
     () => validatePublicExampleUrl("https://[::ffff:7f00:1]/mcp"),
     /private or local IP/u,
@@ -81,7 +75,7 @@ test("Terraform inspector inventories the global foundation", () => {
       "}",
       "",
       'resource "tama_space" "example" {',
-      '  name = module.global.name',
+      "  name = module.global.name",
       "}",
       "",
     ].join("\n"),

@@ -18,8 +18,7 @@ export function contentDigest(content) {
 function hasManagedMarker(content) {
   const firstLine = content.split(/\r?\n/u, 1)[0];
   return (
-    firstLine.startsWith(`# ${MANAGED_MARKER}`) ||
-    firstLine.startsWith(`<!-- ${MANAGED_MARKER}`)
+    firstLine.startsWith(`# ${MANAGED_MARKER}`) || firstLine.startsWith(`<!-- ${MANAGED_MARKER}`)
   );
 }
 
@@ -81,7 +80,9 @@ export function operationForContent(
     };
   }
   if (!allowUnmanagedUpdate && !hasManagedMarker(before)) {
-    throw ownershipError(`refusing to overwrite an unmanaged file: ${filename}`, { path: filename });
+    throw ownershipError(`refusing to overwrite an unmanaged file: ${filename}`, {
+      path: filename,
+    });
   }
   return {
     action: "update",

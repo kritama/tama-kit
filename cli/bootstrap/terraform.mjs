@@ -1,6 +1,6 @@
 // @ts-check
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { buildInventory } from "../../skills/graph-builder/scripts/inspect-tama-repository.mjs";
@@ -27,8 +27,7 @@ function terraformFiles(directory) {
   }
   return readdirSync(directory, { withFileTypes: true })
     .filter(
-      (entry) =>
-        entry.isFile() && (entry.name.endsWith(".tf") || entry.name.endsWith(".tf.json")),
+      (entry) => entry.isFile() && (entry.name.endsWith(".tf") || entry.name.endsWith(".tf.json")),
     )
     .map((entry) => join(directory, entry.name));
 }
@@ -97,8 +96,7 @@ function inspectTerraformJson(files) {
 function preservedProviderVersion(inventory) {
   const lock = inventory.provider_locks.find(
     (provider) =>
-      provider.source === "registry.terraform.io/upmaru/tama" ||
-      provider.source === "upmaru/tama",
+      provider.source === "registry.terraform.io/upmaru/tama" || provider.source === "upmaru/tama",
   );
   return lock?.constraints ?? lock?.version ?? null;
 }
@@ -149,8 +147,7 @@ export function planTerraform(directory, versions, planManagedFile = operationFo
     return {
       foundation: "preserved",
       providerVersion: preservedProviderVersion(inventory),
-      globalModuleVersion:
-        foundation.declared_version ?? foundation.installed_version ?? null,
+      globalModuleVersion: foundation.declared_version ?? foundation.installed_version ?? null,
       operations: [],
     };
   }

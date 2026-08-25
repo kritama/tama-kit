@@ -140,11 +140,15 @@ references remain domain-neutral. Validate the public-directory metadata,
 Template MCP scaffold, and review cases with:
 
 ```bash
+npm run check
 npm run typecheck
 npm test
 npm run validate:bootstrap
 npm run validate:submission
 ```
+
+`npm run check` verifies formatting, lint rules, and import ordering with Biome.
+Use `npm run check:fix` to apply its safe fixes and formatter output locally.
 
 The public Template MCP connection is intentionally not represented by a fake
 local endpoint. Configure the review materials with a concrete, working example

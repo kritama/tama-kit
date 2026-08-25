@@ -1,11 +1,6 @@
 #!/usr/bin/env node
 
-import {
-  existsSync,
-  lstatSync,
-  readFileSync,
-  readdirSync,
-} from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -33,7 +28,8 @@ const CATEGORIES = new Set([
 ]);
 const IMAGE_SUFFIXES = new Set([".png", ".jpg", ".jpeg", ".webp", ".svg"]);
 const ROOT_DEFAULT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
+const SEMVER =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
 
 export class SubmissionError extends Error {}
 
@@ -82,17 +78,12 @@ function requireHttpsUrl(value, field) {
     parsed.protocol === "https:" && Boolean(parsed.hostname),
     `${field} must be a public HTTPS URL`,
   );
-  requireCondition(
-    !parsed.username && !parsed.password,
-    `${field} must not embed credentials`,
-  );
+  requireCondition(!parsed.username && !parsed.password, `${field} must not embed credentials`);
 }
 
 function attributeValue(attributes, name) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  const match = attributes.match(
-    new RegExp(`(?:^|\\s)${escaped}\\s*=\\s*(["'])(.*?)\\1`, "su"),
-  );
+  const match = attributes.match(new RegExp(`(?:^|\\s)${escaped}\\s*=\\s*(["'])(.*?)\\1`, "su"));
   return match?.[2];
 }
 
@@ -110,7 +101,10 @@ function parseSvgDimensions(path) {
   let width;
   let height;
   if (viewBox) {
-    const values = viewBox.trim().split(/[\s,]+/u).map(Number);
+    const values = viewBox
+      .trim()
+      .split(/[\s,]+/u)
+      .map(Number);
     requireCondition(
       values.length === 4 && values.every(Number.isFinite),
       `${path} viewBox must contain four numbers`,
@@ -187,7 +181,9 @@ function validateManifest(root) {
   requireCondition(isObject(pluginInterface), "interface must contain a JSON object");
   requireText(pluginInterface.displayName, "interface.displayName", 30);
   requireText(pluginInterface.shortDescription, "interface.shortDescription", 30);
-  requireText(pluginInterface.longDescription, "interface.longDescription", 4000, { oneLine: false });
+  requireText(pluginInterface.longDescription, "interface.longDescription", 4000, {
+    oneLine: false,
+  });
   requireText(pluginInterface.developerName, "interface.developerName", 80);
   requireCondition(CATEGORIES.has(pluginInterface.category), "interface.category is unsupported");
 
@@ -208,9 +204,15 @@ function validateManifest(root) {
   const normalizedPrompts = new Set();
   prompts.forEach((prompt, index) => {
     const promptText = requireText(prompt, `interface.defaultPrompt[${index}]`, 128);
-    requireCondition(!promptText.includes("@"), `interface.defaultPrompt[${index}] must not contain an app @mention`);
+    requireCondition(
+      !promptText.includes("@"),
+      `interface.defaultPrompt[${index}] must not contain an app @mention`,
+    );
     const normalized = promptText.trim().split(/\s+/u).join(" ").toLowerCase();
-    requireCondition(!normalizedPrompts.has(normalized), "interface.defaultPrompt entries must be unique");
+    requireCondition(
+      !normalizedPrompts.has(normalized),
+      "interface.defaultPrompt entries must be unique",
+    );
     normalizedPrompts.add(normalized);
   });
 
@@ -239,12 +241,18 @@ function validateMarketplace(root, manifest, packageJson) {
   const source = matching[0].source;
   requireCondition(isObject(source), "marketplace source must be an object");
   requireCondition(source.source === "npm", "marketplace source must use npm");
-  requireCondition(source.package === packageJson.name, "marketplace npm package must match package.json");
+  requireCondition(
+    source.package === packageJson.name,
+    "marketplace npm package must match package.json",
+  );
   requireCondition(source.registry === "https://registry.npmjs.org", "npm registry is unsupported");
   const policy = matching[0].policy;
   requireCondition(isObject(policy), "marketplace policy must be an object");
   requireCondition(policy.installation === "AVAILABLE", "plugin must be available to install");
-  requireCondition(policy.authentication === "ON_INSTALL", "plugin authentication must run on install");
+  requireCondition(
+    policy.authentication === "ON_INSTALL",
+    "plugin authentication must run on install",
+  );
   requireCondition(matching[0].category === "Developer Tools", "marketplace category must match");
 }
 
@@ -264,33 +272,64 @@ function validateSkillLayout(root) {
       `skills/${name}/SKILL.md name must match its folder`,
     );
     const agentText = readFileSync(join(skillsRoot, name, "agents", "openai.yaml"), "utf8");
-    requireCondition(agentText.includes(`$${name}`), `skills/${name}/agents/openai.yaml must invoke $${name}`);
+    requireCondition(
+      agentText.includes(`$${name}`),
+      `skills/${name}/agents/openai.yaml must invoke $${name}`,
+    );
   }
   return new Set(names);
 }
 
 function validateTemplateMcp(root, portal, manifest, reviewReady) {
-  requireCondition(portal.submissionType === "MCP and Skills", "submissionType must be MCP and Skills");
+  requireCondition(
+    portal.submissionType === "MCP and Skills",
+    "submissionType must be MCP and Skills",
+  );
   const mcpServer = portal.mcpServer;
   requireCondition(isObject(mcpServer), "submission.mcpServer must be an object");
   requireCondition(mcpServer.urlMode === "Template", "mcpServer.urlMode must be Template");
-  const template = requireText(mcpServer.templateMcpServerURL, "mcpServer.templateMcpServerURL", 1024);
+  const template = requireText(
+    mcpServer.templateMcpServerURL,
+    "mcpServer.templateMcpServerURL",
+    1024,
+  );
   requireHttpsUrl(template, "mcpServer.templateMcpServerURL");
   const placeholders = placeholderNames(template);
-  requireCondition(placeholders.length > 0, "Template MCP URL must contain at least one {name} placeholder");
-  requireCondition(placeholders.length === new Set(placeholders).size, "Template MCP URL placeholders must be unique");
+  requireCondition(
+    placeholders.length > 0,
+    "Template MCP URL must contain at least one {name} placeholder",
+  );
+  requireCondition(
+    placeholders.length === new Set(placeholders).size,
+    "Template MCP URL placeholders must be unique",
+  );
   requireCondition(
     template.replace(/\{[A-Za-z][A-Za-z0-9_]*\}/gu, "workspace") === "https://workspace/mcp",
     "Tama Kit Template MCP URL must keep the deployment host variable and /mcp path",
   );
-  requireCondition(mcpServer.authentication === "OAuth 2.1", "mcpServer.authentication must be OAuth 2.1");
-  requireCondition(!("registeredAppId" in mcpServer), "mcpServer must not contain an integration or registered app ID");
-  requireCondition(!("apps" in manifest), "plugin.json apps is for local registered connections, not Platform submission");
-  requireCondition(!existsSync(join(root, ".app.json")), ".app.json is for local registered connections, not Platform submission");
+  requireCondition(
+    mcpServer.authentication === "OAuth 2.1",
+    "mcpServer.authentication must be OAuth 2.1",
+  );
+  requireCondition(
+    !("registeredAppId" in mcpServer),
+    "mcpServer must not contain an integration or registered app ID",
+  );
+  requireCondition(
+    !("apps" in manifest),
+    "plugin.json apps is for local registered connections, not Platform submission",
+  );
+  requireCondition(
+    !existsSync(join(root, ".app.json")),
+    ".app.json is for local registered connections, not Platform submission",
+  );
 
   const exampleUrl = mcpServer.exampleMcpServerURL;
   if (reviewReady) {
-    requireCondition(exampleUrl !== null && exampleUrl !== undefined, "Example MCP Server URL is not configured; run npm run configure:mcp");
+    requireCondition(
+      exampleUrl !== null && exampleUrl !== undefined,
+      "Example MCP Server URL is not configured; run npm run configure:mcp",
+    );
   }
   if (exampleUrl === null || exampleUrl === undefined) {
     return;
@@ -309,8 +348,14 @@ function validateEvals(root, manifest, skillNames, reviewReady) {
   requireCondition(isObject(data), "evals/cases.json must contain a JSON object");
   const positive = data.positive_cases;
   const negative = data.negative_cases;
-  requireCondition(Array.isArray(positive) && positive.length >= 5, "At least five positive test cases are required");
-  requireCondition(Array.isArray(negative) && negative.length >= 3, "At least three negative test cases are required");
+  requireCondition(
+    Array.isArray(positive) && positive.length >= 5,
+    "At least five positive test cases are required",
+  );
+  requireCondition(
+    Array.isArray(negative) && negative.length >= 3,
+    "At least three negative test cases are required",
+  );
 
   const seenIds = new Set();
   for (const testCase of positive) {
@@ -321,8 +366,13 @@ function validateEvals(root, manifest, skillNames, reviewReady) {
     validateCaseText(testCase, "prompt", caseId);
     const skillName = requireText(testCase.skill, `${caseId}.skill`, 120);
     requireCondition(skillNames.has(skillName), `${caseId}.skill must name a packaged skill`);
-    requireCondition(Array.isArray(testCase.expected_behavior) && testCase.expected_behavior.length > 0, `${caseId}.expected_behavior must be a non-empty list`);
-    testCase.expected_behavior.forEach((item, index) => requireText(item, `${caseId}.expected_behavior[${index}]`, 1000, { oneLine: false }));
+    requireCondition(
+      Array.isArray(testCase.expected_behavior) && testCase.expected_behavior.length > 0,
+      `${caseId}.expected_behavior must be a non-empty list`,
+    );
+    testCase.expected_behavior.forEach((item, index) => {
+      requireText(item, `${caseId}.expected_behavior[${index}]`, 1000, { oneLine: false });
+    });
     validateCaseText(testCase, "expected_result_shape", caseId);
     validateCaseText(testCase, "fixture_data", caseId);
   }
@@ -350,14 +400,36 @@ function validateEvals(root, manifest, skillNames, reviewReady) {
   const negativeIds = new Set(negative.map((testCase) => testCase.id));
   const selectedPositive = portal.positiveCaseIds;
   const selectedNegative = portal.negativeCaseIds;
-  requireCondition(Array.isArray(selectedPositive) && selectedPositive.length >= 5, "submission.positiveCaseIds must select at least five positive cases");
-  requireCondition(Array.isArray(selectedNegative) && selectedNegative.length >= 3, "submission.negativeCaseIds must select at least three negative cases");
-  selectedPositive.forEach((caseId, index) => requireText(caseId, `submission.positiveCaseIds[${index}]`, 120));
-  selectedNegative.forEach((caseId, index) => requireText(caseId, `submission.negativeCaseIds[${index}]`, 120));
-  requireCondition(selectedPositive.length === new Set(selectedPositive).size, "submission.positiveCaseIds must be unique");
-  requireCondition(selectedNegative.length === new Set(selectedNegative).size, "submission.negativeCaseIds must be unique");
-  requireCondition(selectedPositive.every((caseId) => positiveIds.has(caseId)), "submission.positiveCaseIds contains an unknown case");
-  requireCondition(selectedNegative.every((caseId) => negativeIds.has(caseId)), "submission.negativeCaseIds contains an unknown case");
+  requireCondition(
+    Array.isArray(selectedPositive) && selectedPositive.length >= 5,
+    "submission.positiveCaseIds must select at least five positive cases",
+  );
+  requireCondition(
+    Array.isArray(selectedNegative) && selectedNegative.length >= 3,
+    "submission.negativeCaseIds must select at least three negative cases",
+  );
+  selectedPositive.forEach((caseId, index) => {
+    requireText(caseId, `submission.positiveCaseIds[${index}]`, 120);
+  });
+  selectedNegative.forEach((caseId, index) => {
+    requireText(caseId, `submission.negativeCaseIds[${index}]`, 120);
+  });
+  requireCondition(
+    selectedPositive.length === new Set(selectedPositive).size,
+    "submission.positiveCaseIds must be unique",
+  );
+  requireCondition(
+    selectedNegative.length === new Set(selectedNegative).size,
+    "submission.negativeCaseIds must be unique",
+  );
+  requireCondition(
+    selectedPositive.every((caseId) => positiveIds.has(caseId)),
+    "submission.positiveCaseIds contains an unknown case",
+  );
+  requireCondition(
+    selectedNegative.every((caseId) => negativeIds.has(caseId)),
+    "submission.negativeCaseIds contains an unknown case",
+  );
   return [positive.length, negative.length];
 }
 

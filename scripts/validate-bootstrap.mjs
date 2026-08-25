@@ -79,14 +79,7 @@ try {
   }
 
   const packed = JSON.parse(
-    execute("npm", [
-      "pack",
-      "--json",
-      "--pack-destination",
-      packageDirectory,
-      "--cache",
-      npmCache,
-    ]),
+    execute("npm", ["pack", "--json", "--pack-destination", packageDirectory, "--cache", npmCache]),
   );
   const tarball = join(packageDirectory, packed[0].filename);
   execute("npm", [
@@ -128,11 +121,9 @@ try {
 } finally {
   if (started && existsSync(composeFile)) {
     try {
-      execute(
-        "docker",
-        ["compose", "-f", composeFile, "down", "-v", "--remove-orphans"],
-        { cwd: project },
-      );
+      execute("docker", ["compose", "-f", composeFile, "down", "-v", "--remove-orphans"], {
+        cwd: project,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`warning: failed to clean up bootstrap containers: ${message}`);

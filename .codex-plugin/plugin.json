@@ -9,12 +9,7 @@
   "homepage": "https://github.com/upmaru/tama-kit#readme",
   "repository": "https://github.com/upmaru/tama-kit",
   "license": "Apache-2.0",
-  "keywords": [
-    "tama",
-    "terraform",
-    "mcp",
-    "graphs"
-  ],
+  "keywords": ["tama", "terraform", "mcp", "graphs"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Tama Kit",

@@ -64,22 +64,15 @@ export function validateComposePrerequisite() {
  * @param {BootstrapPlan} plan
  * @param {{quiet?: boolean, checkPrerequisite?: boolean}} [options]
  */
-export async function validateCompose(
-  plan,
-  { quiet = true, checkPrerequisite = true } = {},
-) {
+export async function validateCompose(plan, { quiet = true, checkPrerequisite = true } = {}) {
   if (checkPrerequisite) {
     validateComposePrerequisite();
   }
   try {
-    await runProcess(
-      "docker",
-      ["compose", "-f", plan.composeFile, "config", "--quiet"],
-      {
-        cwd: plan.root,
-        stdio: quiet ? "ignore" : "inherit",
-      },
-    );
+    await runProcess("docker", ["compose", "-f", plan.composeFile, "config", "--quiet"], {
+      cwd: plan.root,
+      stdio: quiet ? "ignore" : "inherit",
+    });
   } catch (error) {
     if (hasErrorCode(error, "ENOENT")) {
       throw prerequisiteError("Docker Compose is required to validate the generated integration");
@@ -118,11 +111,10 @@ async function waitForHealth(port, timeoutMs = 60_000) {
  */
 export async function startCompose(plan, { quiet = false } = {}) {
   try {
-    await runProcess(
-      "docker",
-      ["compose", "-f", plan.composeFile, "up", "-d", "tama"],
-      { cwd: plan.root, stdio: quiet ? "ignore" : "inherit" },
-    );
+    await runProcess("docker", ["compose", "-f", plan.composeFile, "up", "-d", "tama"], {
+      cwd: plan.root,
+      stdio: quiet ? "ignore" : "inherit",
+    });
   } catch (error) {
     throw startupError(`Docker Compose startup failed: ${errorMessage(error)}`);
   }
