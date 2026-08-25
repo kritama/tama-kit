@@ -104,6 +104,7 @@ function validateDatabaseUrl(values, filename) {
   const valid =
     databaseUrl?.protocol === "ecto:" &&
     databaseUrl.hostname === "tama-postgres" &&
+    (databaseUrl.port === "" || databaseUrl.port === "5432") &&
     decodeUrlComponent(databaseUrl.username) === values.get("POSTGRES_USER") &&
     decodeUrlComponent(databaseUrl.password) === values.get("POSTGRES_PASSWORD") &&
     decodeUrlComponent(databaseUrl.pathname.replace(/^\//u, "")) === values.get("POSTGRES_DB");

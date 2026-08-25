@@ -92,6 +92,11 @@ export function createManagedFilePlanner(root, tamaDirectory) {
    */
   function plan(filename, content, options = {}) {
     const path = projectRelativePath(root, filename);
+    if (recorded.has(path) && !existsSync(filename)) {
+      throw ownershipError(`managed file recorded by Tama Kit is missing: ${filename}`, {
+        path: filename,
+      });
+    }
     planned.add(path);
     const digest = contentDigest(content);
     desired.set(path, digest);

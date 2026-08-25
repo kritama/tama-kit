@@ -190,9 +190,10 @@ export function planTerraform(
   }
 
   const referencesGlobal = inventory.declared.global_reference_count > 0;
-  const reservesGlobalAddress = inventory.declared.module_calls.some(
-    (call) => call.name === "global",
-  );
+  const reservesGlobalAddress = [
+    .../** @type {ModuleCall[]} */ (inventory.declared.module_calls),
+    ...jsonInventory.moduleCalls,
+  ].some((call) => call.name === "global");
   const hasTamaResources =
     Object.keys(inventory.declared.block_counts).some(
       (name) => name.startsWith("resource.tama_") || name.startsWith("data.tama_"),

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  chownSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -69,6 +70,22 @@ test("bootstrap rejects user drift in a managed template", () => {
       /user-modified content/u.test(error.message),
   );
   assert.match(readFileSync(readme, "utf8"), /User-maintained note/u);
+});
+
+test("bootstrap rejects a missing file recorded in the managed manifest", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const readme = join(root, "tama", "README.md");
+  unlinkSync(readme);
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      /managed file recorded by Tama Kit is missing/u.test(error.message),
+  );
+  assert.equal(existsSync(readme), false);
 });
 
 test("bootstrap rejects drift in a recorded managed Terraform foundation", () => {
@@ -215,6 +232,35 @@ test("bootstrap preserves permissions when updating a user-owned Compose file", 
   assert.equal(statSync(composeFile).mode & 0o777, 0o600);
 });
 
+test("bootstrap preserves ownership when atomically updating an existing file", (context) => {
+  if (
+    process.platform === "win32" ||
+    typeof process.getuid !== "function" ||
+    typeof process.getgroups !== "function"
+  ) {
+    context.skip("POSIX ownership is not available");
+    return;
+  }
+
+  const root = project();
+  const composeFile = join(root, "compose.yaml");
+  writeFileSync(composeFile, "services: {}\n");
+  const initial = statSync(composeFile);
+  const secondaryGroup = process.getgroups().find((group) => group !== initial.gid);
+  if (secondaryGroup === undefined) {
+    context.skip("current user does not have a secondary group");
+    return;
+  }
+  chownSync(composeFile, process.getuid(), secondaryGroup);
+  const before = statSync(composeFile);
+
+  applyOperations(planFor(root).operations);
+
+  const after = statSync(composeFile);
+  assert.equal(after.uid, before.uid);
+  assert.equal(after.gid, before.gid);
+});
+
 test("bootstrap rolls back every file change when post-write validation fails", async () => {
   const root = project();
   const composeFile = join(root, "compose.yaml");
@@ -274,6 +320,33 @@ test("bootstrap rejects a managed Compose include at a different path", () => {
   );
 });
 
+test("bootstrap rejects using its managed Compose fragment as the project Compose root", () => {
+  const root = project();
+  mkdirSync(join(root, "tama"));
+  writeFileSync(join(root, "tama", "compose.yaml"), "services: {}\n");
+
+  assert.throws(
+    () => planFor(root, { composePath: "tama/compose.yaml" }),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      /cannot also be Tama Kit's managed Compose fragment/u.test(error.message),
+  );
+});
+
+test("bootstrap rejects a non-directory Tama path", () => {
+  const root = project();
+  writeFileSync(join(root, "tama"), "reserved by the application\n");
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      /Tama path is not a directory/u.test(error.message),
+  );
+});
+
 test("bootstrap rejects a Compose file that escapes through a symlinked directory", () => {
   const root = project();
   const external = project("tama-kit-external-compose-");
@@ -330,6 +403,20 @@ test("bootstrap preserves an existing global foundation address", () => {
   assert.ok(!plan.operations.some((operation) => operation.path.endsWith("main.tf")));
 });
 
+test("bootstrap preserves a one-line global foundation declaration", () => {
+  const root = project();
+  mkdirSync(join(root, "tama"));
+  writeFileSync(
+    join(root, "tama", "foundation.tf"),
+    'module "foundation" { source = "upmaru/base/tama" version = "0.5.5" }\n',
+  );
+
+  const plan = planFor(root);
+  assert.equal(plan.terraform.foundation, "preserved");
+  assert.equal(plan.terraform.globalModuleVersion, "0.5.5");
+  assert.ok(!plan.operations.some((operation) => operation.path.endsWith("tama-kit-global.tf")));
+});
+
 test("bootstrap preserves a Tama foundation declared in root Terraform JSON", () => {
   const root = project();
   mkdirSync(join(root, "tama"));
@@ -361,6 +448,30 @@ test("bootstrap does not mistake an unrelated module.global for Tama's foundatio
   writeFileSync(
     join(root, "tama", "main.tf"),
     'module "global" {\n  source = "terraform-aws-modules/vpc/aws"\n  version = "6.0.1"\n}\n',
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) => error instanceof CLIError && error.exitCode === EXIT_CODES.OWNERSHIP,
+  );
+});
+
+test("bootstrap fails closed when Terraform JSON reserves module.global", () => {
+  const root = project();
+  mkdirSync(join(root, "tama"));
+  writeFileSync(
+    join(root, "tama", "network.tf.json"),
+    `${JSON.stringify(
+      {
+        module: {
+          global: {
+            source: "terraform-aws-modules/vpc/aws",
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
   );
 
   assert.throws(
@@ -643,6 +754,24 @@ test("bootstrap rejects PostgreSQL credentials that disagree with DATABASE_URL",
       /^POSTGRES_PASSWORD=.*$/mu,
       "POSTGRES_PASSWORD=different-password",
     ),
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      error.details.variable === "DATABASE_URL",
+  );
+});
+
+test("bootstrap rejects a non-default PostgreSQL port in DATABASE_URL", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8").replace("@tama-postgres/tama", "@tama-postgres:5433/tama"),
   );
 
   assert.throws(

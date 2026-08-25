@@ -3,6 +3,7 @@
 import { randomBytes } from "node:crypto";
 import {
   chmodSync,
+  chownSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -31,9 +32,8 @@ import { contentDigest } from "./files.mjs";
 function atomicWrite(operation) {
   const directory = dirname(operation.path);
   mkdirSync(directory, { recursive: true });
-  const mode =
-    operation.mode ??
-    (operation.action === "update" ? statSync(operation.path).mode & 0o777 : 0o644);
+  const existing = operation.action === "update" ? statSync(operation.path) : null;
+  const mode = operation.mode ?? (existing ? existing.mode & 0o777 : 0o644);
   const temporary = join(
     directory,
     `.${basename(operation.path)}.tama-kit-${process.pid}-${randomBytes(4).toString("hex")}`,
@@ -43,6 +43,9 @@ function atomicWrite(operation) {
       encoding: "utf8",
       mode,
     });
+    if (existing && process.platform !== "win32") {
+      chownSync(temporary, existing.uid, existing.gid);
+    }
     if (operation.mode !== undefined || operation.action === "update") {
       chmodSync(temporary, mode);
     }

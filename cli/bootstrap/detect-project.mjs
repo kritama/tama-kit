@@ -134,8 +134,23 @@ export function inspectProject({ cwd, targetPath, composePath }) {
 
   const detected = detectFramework(root);
   const tamaDirectory = join(root, "tama");
-  if (existsSync(tamaDirectory) && lstatSync(tamaDirectory).isSymbolicLink()) {
-    throw ownershipError(`refusing to use a symbolic-link Tama directory: ${tamaDirectory}`);
+  if (existsSync(tamaDirectory)) {
+    const metadata = lstatSync(tamaDirectory);
+    if (metadata.isSymbolicLink()) {
+      throw ownershipError(`refusing to use a symbolic-link Tama directory: ${tamaDirectory}`);
+    }
+    if (!metadata.isDirectory()) {
+      throw ownershipError(`Tama path is not a directory: ${tamaDirectory}`, {
+        path: tamaDirectory,
+      });
+    }
+  }
+  const managedCompose = join(tamaDirectory, "compose.yaml");
+  if (resolve(selectedCompose) === resolve(managedCompose)) {
+    throw ownershipError(
+      `the project Compose file cannot also be Tama Kit's managed Compose fragment: ${selectedCompose}`,
+      { path: selectedCompose },
+    );
   }
   return {
     root,
