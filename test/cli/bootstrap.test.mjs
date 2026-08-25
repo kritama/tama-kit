@@ -55,6 +55,31 @@ test("bootstrap creates a private, idempotent generic project scaffold", () => {
   assert.equal(readFileSync(join(root, ".tama.env"), "utf8"), secretBefore);
 });
 
+test("dry-run reports and bootstrap repairs unsafe sensitive-file permissions", async () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const environmentFile = join(root, ".tama.env");
+  chmodSync(environmentFile, 0o644);
+
+  const output = [];
+  const exitCode = await run(["bootstrap", root, "--dry-run", "--json"], {
+    cwd: root,
+    stdout: (message) => output.push(message),
+    stderr: () => {},
+  });
+  const payload = JSON.parse(output.join("\n"));
+  const environmentChange = payload.changes.find(
+    (change) => change.path === environmentFile,
+  );
+
+  assert.equal(exitCode, EXIT_CODES.SUCCESS);
+  assert.equal(environmentChange.action, "update");
+  assert.equal(statSync(environmentFile).mode & 0o777, 0o644);
+
+  applyOperations(planFor(root).operations);
+  assert.equal(statSync(environmentFile).mode & 0o777, 0o600);
+});
+
 test("framework detection distinguishes Rails, Phoenix, and Node projects", () => {
   const rails = project("tama-kit-rails-");
   mkdirSync(join(rails, "config"));
@@ -139,8 +164,12 @@ test("bootstrap resolves a managed include relative to a nested Compose file", (
   );
   assert.ok(
     readFileSync(join(root, "tama", "README.md"), "utf8").includes(
-      formatComposeUpCommand(join(root, "deploy", "compose.yaml")),
+      formatComposeUpCommand("deploy/compose.yaml"),
     ),
+  );
+  assert.doesNotMatch(
+    readFileSync(join(root, "tama", "README.md"), "utf8"),
+    new RegExp(root, "u"),
   );
 
   const second = planFor(root, { composePath: "deploy/compose.yaml" });

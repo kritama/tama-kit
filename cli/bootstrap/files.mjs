@@ -22,12 +22,16 @@ export function operationForContent(
   if (!existsSync(filename)) {
     return { action: "create", path: filename, content, owner, sensitive, mode };
   }
-  if (lstatSync(filename).isSymbolicLink()) {
+  const fileStats = lstatSync(filename);
+  if (fileStats.isSymbolicLink()) {
     throw ownershipError(`refusing to update a symbolic link: ${filename}`, { path: filename });
   }
 
   const before = readFileSync(filename, "utf8");
   if (before === content) {
+    if (mode !== undefined && (fileStats.mode & 0o777) !== mode) {
+      return { action: "update", path: filename, content, owner, sensitive, mode };
+    }
     return { action: "unchanged", path: filename, owner, sensitive, mode };
   }
   if (!allowUnmanagedUpdate && !before.includes(MANAGED_MARKER)) {

@@ -1,6 +1,6 @@
 // @ts-check
 
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 import { BOOTSTRAP_SCHEMA_VERSION, DEFAULTS } from "./constants.mjs";
 import { formatComposePsCommand, formatComposeUpCommand } from "./compose-command.mjs";
@@ -63,11 +63,12 @@ export function createBootstrapPlan(options) {
     globalModuleVersion: DEFAULTS.globalModuleVersion,
   });
   operations.push(...terraform.operations);
+  const projectComposePath = relative(inspection.root, inspection.selectedCompose);
   operations.push(
     managedTemplate(join(inspection.tamaDirectory, "README.md"), "README.md", {
       PORT: environment.port,
-      COMPOSE_UP_COMMAND: formatComposeUpCommand(inspection.selectedCompose),
-      COMPOSE_PS_COMMAND: formatComposePsCommand(inspection.selectedCompose),
+      COMPOSE_UP_COMMAND: formatComposeUpCommand(projectComposePath),
+      COMPOSE_PS_COMMAND: formatComposePsCommand(projectComposePath),
     }),
   );
 
