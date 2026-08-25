@@ -17,6 +17,18 @@ const packagedProject = join(temporaryRoot, "packaged-project");
 const npxProject = join(temporaryRoot, "npx-project");
 const npmCache = join(temporaryRoot, "npm-cache");
 const composeFile = join(project, "compose.yaml");
+const environmentFile = join(project, ".tama.env");
+
+const SENSITIVE_ENVIRONMENT_VARIABLES = [
+  "DATABASE_URL",
+  "POSTGRES_PASSWORD",
+  "SECRET_KEY_BASE",
+  "TAMA_CLIENT_SECRET",
+  "TAMA_JWT_SECRET",
+  "TAMA_OAUTH_SIGNING_KEY",
+  "TAMA_SETUP_TOKEN",
+  "TAMA_VAULT_KEY",
+];
 
 mkdirSync(project);
 mkdirSync(packageDirectory);
@@ -44,7 +56,63 @@ function environmentValues(content) {
   );
 }
 
-let started = false;
+/** @param {unknown} error @param {"stdout" | "stderr"} stream */
+function commandOutput(error, stream) {
+  if (!error || typeof error !== "object" || !(stream in error)) {
+    return "";
+  }
+  const output = error[stream];
+  return typeof output === "string" ? output.trim() : "";
+}
+
+/** @param {string} content */
+function redactRuntimeSecrets(content) {
+  if (!content || !existsSync(environmentFile)) {
+    return content;
+  }
+  const values = environmentValues(readFileSync(environmentFile, "utf8"));
+  return SENSITIVE_ENVIRONMENT_VARIABLES.map((name) => values[name])
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length)
+    .reduce((redacted, value) => redacted.replaceAll(value, "[REDACTED]"), content);
+}
+
+/** @param {unknown} error */
+function reportBootstrapFailure(error) {
+  const stdout = redactRuntimeSecrets(commandOutput(error, "stdout"));
+  const stderr = redactRuntimeSecrets(commandOutput(error, "stderr"));
+  if (stdout) {
+    console.error(`bootstrap stdout:\n${stdout}`);
+  }
+  if (stderr) {
+    console.error(`bootstrap stderr:\n${stderr}`);
+  }
+  if (!runtime || !existsSync(composeFile)) {
+    return;
+  }
+
+  for (const [label, args] of [
+    ["status", ["compose", "-f", composeFile, "ps", "--all"]],
+    ["logs", ["compose", "-f", composeFile, "logs", "--no-color", "--tail", "200"]],
+  ]) {
+    try {
+      const output = redactRuntimeSecrets(execute("docker", args, { cwd: project }).trim());
+      if (output) {
+        console.error(`docker compose ${label}:\n${output}`);
+      }
+    } catch (diagnosticError) {
+      const output = redactRuntimeSecrets(
+        [commandOutput(diagnosticError, "stdout"), commandOutput(diagnosticError, "stderr")]
+          .filter(Boolean)
+          .join("\n"),
+      );
+      console.error(
+        `warning: failed to collect Docker Compose ${label}${output ? `:\n${output}` : ""}`,
+      );
+    }
+  }
+}
+
 try {
   const bootstrapArguments = [
     join(REPOSITORY_ROOT, "bin", "tama-kit.mjs"),
@@ -55,8 +123,13 @@ try {
   if (runtime) {
     bootstrapArguments.push("--start");
   }
-  const bootstrapOutput = execute(process.execPath, bootstrapArguments);
-  started = runtime && existsSync(composeFile);
+  let bootstrapOutput;
+  try {
+    bootstrapOutput = execute(process.execPath, bootstrapArguments);
+  } catch (error) {
+    reportBootstrapFailure(error);
+    throw error;
+  }
   const result = JSON.parse(bootstrapOutput);
   assert.equal(result.ok, true);
   assert.equal(result.started, runtime);
@@ -119,7 +192,7 @@ try {
     `Bootstrap validation passed (${runtime ? "runtime, Compose, Terraform, package" : "Compose, Terraform, package"}).`,
   );
 } finally {
-  if (started && existsSync(composeFile)) {
+  if (runtime && existsSync(composeFile)) {
     try {
       execute("docker", ["compose", "-f", composeFile, "down", "-v", "--remove-orphans"], {
         cwd: project,

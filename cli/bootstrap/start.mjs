@@ -81,6 +81,23 @@ export async function validateCompose(plan, { quiet = true, checkPrerequisite = 
   }
 }
 
+/**
+ * @param {string} url
+ * @param {number} timeoutMs
+ * @param {typeof fetch} [fetchImpl]
+ * @returns {Promise<Response>}
+ */
+export async function fetchWithTimeout(url, timeoutMs, fetchImpl = fetch) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  timeout.ref();
+  try {
+    return await fetchImpl(url, { redirect: "follow", signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 /** @param {number} port @param {number} [timeoutMs] @returns {Promise<string>} */
 async function waitForHealth(port, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs;
@@ -89,7 +106,7 @@ async function waitForHealth(port, timeoutMs = 60_000) {
   let lastError;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(2_000) });
+      const response = await fetchWithTimeout(url, 2_000);
       if (response.ok) {
         return url;
       }
