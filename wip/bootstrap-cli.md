@@ -102,11 +102,13 @@ tama-kit/
 │   │   ├── terraform.mjs
 │   │   ├── environment.mjs
 │   │   ├── gitignore.mjs
+│   │   ├── manifest.mjs
 │   │   ├── plan.mjs
 │   │   └── write.mjs
 │   └── templates/
 │       └── bootstrap/
 │           ├── compose.yaml
+│           ├── global-module.tf
 │           ├── main.tf
 │           ├── versions.tf
 │           ├── README.md
@@ -131,8 +133,8 @@ Responsibilities:
 - `bin/tama-kit.mjs` is an executable shim that passes arguments to
   `cli/index.mjs` and maps errors to exit codes.
 - `cli/index.mjs` parses global arguments and dispatches commands.
-- `cli/commands/bootstrap.mjs` coordinates inspection, planning, confirmation,
-  writes, and optional startup.
+- `cli/commands/bootstrap.mjs` coordinates inspection, planning, conflict
+  handling, writes, and optional startup.
 - `cli/bootstrap/` contains the deterministic implementation and must not
   depend on terminal prompting.
 - `cli/templates/bootstrap/` contains safe, versioned templates.
@@ -206,6 +208,7 @@ project/
 ├── .tama.env.example
 ├── compose.yaml
 └── tama/
+    ├── .tama-kit.json
     ├── compose.yaml
     ├── main.tf
     ├── versions.tf
@@ -390,7 +393,7 @@ Inspection and mutation are separate phases:
 inspect project
   -> build change plan
   -> report conflicts and warnings
-  -> confirm when required
+  -> stop on ownership conflicts or managed-file drift
   -> write atomically
   -> validate generated configuration
   -> optionally start and health-check
@@ -409,9 +412,11 @@ Change
   reason
 ```
 
-Sensitive content is redacted from human and JSON output. Writes use temporary
-files followed by same-filesystem rename where supported. If validation fails,
-bootstrap reports the affected generated files and does not start containers.
+Sensitive content is redacted from human and JSON output. JSON errors include
+their stable numeric exit code, and file changes include reasons plus before
+and after SHA-256 digests. Writes use temporary files followed by
+same-filesystem rename where supported. If validation fails, bootstrap reports
+the affected generated files and does not start containers.
 
 `--dry-run` performs the same inspection and planning code path but skips all
 writes and external processes.
@@ -428,13 +433,16 @@ On rerun:
 - preserve an existing global-module address;
 - update only Tama Kit-managed templates;
 - leave user-owned Terraform and Compose content untouched;
-- report template drift before overwriting a user-modified managed file; and
+- report template drift and refuse to overwrite a user-modified managed file;
+  and
 - produce no changes when inputs and template versions are unchanged.
 
-The generator may maintain a non-secret manifest such as
-`tama/.tama-kit.json` containing the bootstrap schema version, managed paths,
-template versions, and non-sensitive configuration. This should be preferred
-over guessing ownership from formatting alone.
+The generator maintains a non-secret `tama/.tama-kit.json` manifest containing
+the manifest schema version and SHA-256 digests for generated, non-sensitive
+managed files. A rerun updates a managed template only when its current digest
+matches the previously recorded digest. Missing or user-modified managed files
+fail closed instead of being silently replaced. Sensitive environment files
+are excluded from the manifest.
 
 ## Exit codes
 
@@ -480,6 +488,11 @@ code.
 - Both `npx @upmaru/tama-kit bootstrap` and a globally linked
   `tama-kit bootstrap` exercise the same implementation.
 
+The branch CI runs these checks through `npm run validate:bootstrap:runtime`,
+including packaged CLI installation, Compose validation, Terraform formatting,
+initialization and validation, local runtime health, and setup-route
+reachability.
+
 ### Runtime smoke check
 
 In a disposable test project:
@@ -517,8 +530,9 @@ provisioner credentials.
 - Whether `init` ships as a permanent alias or is omitted until user demand is
   demonstrated.
 - Docker Compose 2.20.0 or newer is required for `include`.
-- A managed manifest is deferred; format-specific ownership markers are used
-  in the first release.
+- A managed digest manifest is included in the first release. Format-specific
+  ownership markers remain as a secondary check for sensitive generated files
+  that are deliberately excluded from the manifest.
 - `--start` prints setup guidance and does not open a browser.
 - Whether a future `tama-kit terraform <args>` command should load
   `.tama.env`, or documentation should keep Terraform invocation explicit.

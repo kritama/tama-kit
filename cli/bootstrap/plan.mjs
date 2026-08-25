@@ -7,8 +7,8 @@ import { formatComposePsCommand, formatComposeUpCommand } from "./compose-comman
 import { planRootCompose } from "./compose.mjs";
 import { inspectProject } from "./detect-project.mjs";
 import { planEnvironment } from "./environment.mjs";
-import { operationForContent } from "./files.mjs";
 import { planGitignore } from "./gitignore.mjs";
+import { createManagedFilePlanner } from "./manifest.mjs";
 import { renderTemplate } from "./templates.mjs";
 import { planTerraform } from "./terraform.mjs";
 
@@ -18,18 +18,20 @@ import { planTerraform } from "./terraform.mjs";
 /** @typedef {import("../types.mjs").PublicBootstrapPlan} PublicBootstrapPlan */
 
 /**
+ * @param {(filename: string, content: string) => FileOperation} planManagedFile
  * @param {string} filename
  * @param {string} templateName
  * @param {Record<string, string | number>} replacements
  * @returns {FileOperation}
  */
-function managedTemplate(filename, templateName, replacements) {
-  return operationForContent(filename, renderTemplate(templateName, replacements));
+function managedTemplate(planManagedFile, filename, templateName, replacements) {
+  return planManagedFile(filename, renderTemplate(templateName, replacements));
 }
 
 /** @param {BootstrapPlanOptions} options @returns {BootstrapPlan} */
 export function createBootstrapPlan(options) {
   const inspection = inspectProject(options);
+  const managedFiles = createManagedFilePlanner(inspection.root, inspection.tamaDirectory);
   const environment = planEnvironment(inspection.root, options.port);
   const replacements = {
     PORT: environment.port,
@@ -41,12 +43,20 @@ export function createBootstrapPlan(options) {
   /** @type {FileOperation[]} */
   const operations = [environment.operation, environment.postgresOperation];
   operations.push(
-    managedTemplate(join(inspection.root, ".tama.env.example"), "tama-env.example", {
-      PORT: environment.port,
-    }),
+    managedTemplate(
+      managedFiles.plan,
+      join(inspection.root, ".tama.env.example"),
+      "tama-env.example",
+      { PORT: environment.port },
+    ),
   );
   operations.push(
-    managedTemplate(join(inspection.tamaDirectory, "compose.yaml"), "compose.yaml", replacements),
+    managedTemplate(
+      managedFiles.plan,
+      join(inspection.tamaDirectory, "compose.yaml"),
+      "compose.yaml",
+      replacements,
+    ),
   );
   operations.push(
     planRootCompose(
@@ -57,20 +67,33 @@ export function createBootstrapPlan(options) {
   );
   operations.push(planGitignore(inspection.root));
 
-  const terraform = planTerraform(inspection.tamaDirectory, {
-    terraformVersion: DEFAULTS.terraformVersion,
-    providerVersion: DEFAULTS.providerVersion,
-    globalModuleVersion: DEFAULTS.globalModuleVersion,
-  });
+  const terraform = planTerraform(
+    inspection.tamaDirectory,
+    {
+      terraformVersion: DEFAULTS.terraformVersion,
+      providerVersion: DEFAULTS.providerVersion,
+      globalModuleVersion: DEFAULTS.globalModuleVersion,
+    },
+    managedFiles.plan,
+  );
   operations.push(...terraform.operations);
+  for (const filename of ["main.tf", "versions.tf", "tama-kit-global.tf"]) {
+    managedFiles.adoptMarkedFile(join(inspection.tamaDirectory, filename));
+  }
   const projectComposePath = relative(inspection.root, inspection.selectedCompose);
   operations.push(
-    managedTemplate(join(inspection.tamaDirectory, "README.md"), "README.md", {
-      PORT: environment.port,
-      COMPOSE_UP_COMMAND: formatComposeUpCommand(projectComposePath),
-      COMPOSE_PS_COMMAND: formatComposePsCommand(projectComposePath),
-    }),
+    managedTemplate(
+      managedFiles.plan,
+      join(inspection.tamaDirectory, "README.md"),
+      "README.md",
+      {
+        PORT: environment.port,
+        COMPOSE_UP_COMMAND: formatComposeUpCommand(projectComposePath),
+        COMPOSE_PS_COMMAND: formatComposePsCommand(projectComposePath),
+      },
+    ),
   );
+  operations.push(managedFiles.manifestOperation());
 
   return {
     schemaVersion: BOOTSTRAP_SCHEMA_VERSION,
@@ -83,8 +106,8 @@ export function createBootstrapPlan(options) {
     postgresImage: replacements.POSTGRES_IMAGE,
     terraform: {
       foundation: terraform.foundation,
-      providerVersion: DEFAULTS.providerVersion,
-      globalModuleVersion: DEFAULTS.globalModuleVersion,
+      providerVersion: terraform.providerVersion,
+      globalModuleVersion: terraform.globalModuleVersion,
     },
     operations,
   };
@@ -102,11 +125,16 @@ export function publicPlan(plan) {
     tamaImage: plan.tamaImage,
     postgresImage: plan.postgresImage,
     terraform: plan.terraform,
-    changes: plan.operations.map(({ action, path, owner, sensitive }) => ({
-      action,
-      path,
-      owner,
-      sensitive,
-    })),
+    changes: plan.operations.map(
+      ({ action, path, owner, sensitive, beforeDigest, afterDigest, reason }) => ({
+        action,
+        path,
+        owner,
+        sensitive,
+        beforeDigest,
+        afterDigest,
+        reason,
+      }),
+    ),
   };
 }

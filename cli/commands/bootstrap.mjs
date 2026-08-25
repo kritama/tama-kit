@@ -185,7 +185,7 @@ async function executeBootstrap(argv, io) {
       validateCompose(plan, { checkPrerequisite: false }),
     );
     if (options.start) {
-      healthUrl = await startCompose(plan);
+      healthUrl = await startCompose(plan, { quiet: options.json });
     }
   }
 
@@ -218,7 +218,11 @@ export async function runBootstrap(argv, io) {
     io.stdout(
       JSON.stringify({
         ok: false,
-        error: { category: cliError.category, message: cliError.message },
+        error: {
+          category: cliError.category,
+          exitCode: cliError.exitCode,
+          message: cliError.message,
+        },
       }),
     );
     return cliError.exitCode;

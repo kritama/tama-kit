@@ -14,6 +14,8 @@ import {
 import { basename, dirname, join, sep } from "node:path";
 import { randomBytes } from "node:crypto";
 
+import { contentDigest } from "./files.mjs";
+
 /** @typedef {import("../types.mjs").FileOperation} FileOperation */
 /** @typedef {import("../types.mjs").WriteOperation} WriteOperation */
 
@@ -122,6 +124,9 @@ function rollbackOperations(snapshot) {
       owner: "user",
       sensitive: false,
       mode: file.mode,
+      beforeDigest: contentDigest(file.content ?? ""),
+      afterDigest: contentDigest(file.content ?? ""),
+      reason: "restore pre-bootstrap snapshot",
     });
   }
 

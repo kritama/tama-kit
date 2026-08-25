@@ -29,6 +29,10 @@ private `.tama.env`, adds managed Tama and PostgreSQL services, and generates a
 an existing global-foundation address and refuses ambiguous ownership rather
 than creating duplicate data-bearing resources.
 
+Generated non-sensitive files are tracked by `tama/.tama-kit.json`. If a
+tracked file has been edited since the previous bootstrap, Tama Kit stops and
+reports the drift instead of overwriting the user's changes.
+
 Inspect the proposed changes without writing:
 
 ```bash
@@ -138,6 +142,7 @@ Template MCP scaffold, and review cases with:
 ```bash
 npm run typecheck
 npm test
+npm run validate:bootstrap
 npm run validate:submission
 ```
 

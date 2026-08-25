@@ -18,24 +18,33 @@ const PATTERNS = [
 const MANAGED_BLOCK = ["# Tama Kit local runtime", ...PATTERNS].join("\n");
 
 /** @param {string} content */
-function hasFinalManagedBlock(content) {
+function withoutManagedBlocks(content) {
   const lines = content.replace(/\r\n/gu, "\n").split("\n");
-  while (lines.at(-1) === "") {
-    lines.pop();
+  const managedLines = MANAGED_BLOCK.split("\n");
+  const kept = [];
+  for (let index = 0; index < lines.length; ) {
+    const candidate = lines.slice(index, index + managedLines.length);
+    if (candidate.join("\n") === MANAGED_BLOCK) {
+      index += managedLines.length;
+      if (kept.at(-1) === "" && lines[index] === "") {
+        index += 1;
+      }
+      continue;
+    }
+    kept.push(lines[index]);
+    index += 1;
   }
-  return lines.slice(-PATTERNS.length - 1).join("\n") === MANAGED_BLOCK;
+  while (kept.at(-1) === "") {
+    kept.pop();
+  }
+  return kept.join("\n");
 }
 
 /** @param {string} root @returns {FileOperation} */
 export function planGitignore(root) {
   const filename = join(root, ".gitignore");
   const original = existsSync(filename) ? readFileSync(filename, "utf8") : "";
-  if (hasFinalManagedBlock(original)) {
-    return { action: "unchanged", path: filename, owner: "user", sensitive: false };
-  }
-
-  const separator = original.length === 0 || original.endsWith("\n") ? "" : "\n";
-  const leadingBlank = original.length === 0 ? "" : "\n";
-  const content = `${original}${separator}${leadingBlank}${MANAGED_BLOCK}\n`;
+  const unmanaged = withoutManagedBlocks(original);
+  const content = `${unmanaged}${unmanaged.length === 0 ? "" : "\n\n"}${MANAGED_BLOCK}\n`;
   return operationForContent(filename, content, { owner: "user", allowUnmanagedUpdate: true });
 }

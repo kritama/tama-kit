@@ -12,6 +12,9 @@
  * @property {FileOwner} owner
  * @property {boolean} sensitive
  * @property {number} [mode]
+ * @property {string | null} beforeDigest
+ * @property {string} afterDigest
+ * @property {string} reason
  */
 
 /**
@@ -21,6 +24,9 @@
  * @property {FileOwner} owner
  * @property {boolean} sensitive
  * @property {number} [mode]
+ * @property {string} beforeDigest
+ * @property {string} afterDigest
+ * @property {string} reason
  */
 
 /** @typedef {WriteOperation | UnchangedOperation} FileOperation */
@@ -79,6 +85,8 @@
  * @typedef {object} TerraformPlan
  * @property {"created" | "preserved"} foundation
  * @property {FileOperation[]} operations
+ * @property {string | null} providerVersion
+ * @property {string | null} globalModuleVersion
  */
 
 /**
@@ -91,7 +99,7 @@
  * @property {number} port
  * @property {string} tamaImage
  * @property {string} postgresImage
- * @property {{foundation: "created" | "preserved", providerVersion: string, globalModuleVersion: string}} terraform
+ * @property {{foundation: "created" | "preserved", providerVersion: string | null, globalModuleVersion: string | null}} terraform
  * @property {FileOperation[]} operations
  */
 
@@ -101,6 +109,9 @@
  * @property {string} path
  * @property {FileOwner} owner
  * @property {boolean} sensitive
+ * @property {string | null} beforeDigest
+ * @property {string} afterDigest
+ * @property {string} reason
  */
 
 /**
@@ -113,7 +124,7 @@
  * @property {number} port
  * @property {string} tamaImage
  * @property {string} postgresImage
- * @property {{foundation: "created" | "preserved", providerVersion: string, globalModuleVersion: string}} terraform
+ * @property {{foundation: "created" | "preserved", providerVersion: string | null, globalModuleVersion: string | null}} terraform
  * @property {PublicChange[]} changes
  */
 

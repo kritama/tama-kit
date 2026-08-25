@@ -45,6 +45,8 @@
   "scripts": {
     "configure:mcp": "node scripts/configure-mcp-plugin.mjs",
     "typecheck": "tsc --project tsconfig.json",
+    "validate:bootstrap": "node scripts/validate-bootstrap.mjs",
+    "validate:bootstrap:runtime": "node scripts/validate-bootstrap.mjs --runtime",
     "validate:submission": "node scripts/validate-submission.mjs",
     "validate:review": "node scripts/validate-submission.mjs --review-ready",
     "build:submission": "node scripts/build-submission-zip.mjs",

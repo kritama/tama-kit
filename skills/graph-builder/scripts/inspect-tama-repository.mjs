@@ -7,9 +7,6 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 const SKIP_PARTS = new Set([".git", ".terraform", ".terragrunt-cache", "node_modules", "vendor"]);
-const BLOCK_PATTERN = /^\s*(resource|data)\s+"([^"]+)"\s+"([^"]+)"\s*\{/u;
-const MODULE_PATTERN = /^\s*module\s+"([^"]+)"\s*\{/u;
-const ASSIGNMENT_PATTERN = /^\s*(source|version)\s*=\s*"([^"]+)"/u;
 const PROVIDER_PATTERN = /provider\s+"([^"]+)"\s*\{(.*?)\n\}/gsu;
 const LOCK_VALUE_PATTERN = /^\s*(version|constraints)\s*=\s*"([^"]+)"/gmu;
 const GLOBAL_REFERENCE_PATTERN = /\bmodule\.global\b/gu;
@@ -56,66 +53,112 @@ function collectRootTerraformFiles(root) {
     .sort((left, right) => left.localeCompare(right, "en"));
 }
 
-function stripHclComments(text) {
-  let output = "";
-  let state = "code";
+function tokenizeHcl(text) {
+  const tokens = [];
+  let index = 0;
+  let line = 1;
 
-  for (let index = 0; index < text.length; index += 1) {
+  const advance = () => {
+    if (text[index] === "\n") {
+      line += 1;
+    }
+    index += 1;
+  };
+
+  while (index < text.length) {
     const character = text[index];
     const next = text[index + 1];
-
-    if (state === "line-comment") {
-      if (character === "\n") {
-        output += "\n";
-        state = "code";
-      } else {
-        output += " ";
+    if (/\s/u.test(character)) {
+      advance();
+      continue;
+    }
+    if (character === "#" || (character === "/" && next === "/")) {
+      while (index < text.length && text[index] !== "\n") {
+        index += 1;
+      }
+      continue;
+    }
+    if (character === "/" && next === "*") {
+      advance();
+      advance();
+      while (index < text.length && !(text[index] === "*" && text[index + 1] === "/")) {
+        advance();
+      }
+      if (index < text.length) {
+        advance();
+        advance();
       }
       continue;
     }
 
-    if (state === "block-comment") {
-      if (character === "*" && next === "/") {
-        output += "  ";
-        index += 1;
-        state = "code";
-      } else {
-        output += character === "\n" ? "\n" : " ";
+    if (character === "<" && next === "<") {
+      const header = text.slice(index).match(/^<<(-?)([A-Za-z_][A-Za-z0-9_-]*)[^\S\r\n]*(?:\r?\n|$)/u);
+      if (header) {
+        const tokenLine = line;
+        const indented = header[1] === "-";
+        const delimiter = header[2];
+        for (let offset = 0; offset < header[0].length; offset += 1) {
+          advance();
+        }
+        const bodyStart = index;
+        while (index < text.length) {
+          const lineStart = index;
+          while (index < text.length && text[index] !== "\n") {
+            index += 1;
+          }
+          const candidate = text.slice(lineStart, index).replace(/\r$/u, "");
+          const comparable = indented ? candidate.trimStart() : candidate;
+          if (comparable === delimiter) {
+            const value = text.slice(bodyStart, lineStart);
+            tokens.push({ type: "heredoc", value, line: tokenLine });
+            if (index < text.length) {
+              advance();
+            }
+            break;
+          }
+          if (index < text.length) {
+            advance();
+          }
+        }
+        continue;
       }
-      continue;
-    }
-
-    if (state === "string") {
-      output += character;
-      if (character === "\\" && next !== undefined) {
-        output += next;
-        index += 1;
-      } else if (character === '"') {
-        state = "code";
-      }
-      continue;
     }
 
     if (character === '"') {
-      output += character;
-      state = "string";
-    } else if (character === "#") {
-      output += " ";
-      state = "line-comment";
-    } else if (character === "/" && next === "/") {
-      output += "  ";
-      index += 1;
-      state = "line-comment";
-    } else if (character === "/" && next === "*") {
-      output += "  ";
-      index += 1;
-      state = "block-comment";
-    } else {
-      output += character;
+      const tokenLine = line;
+      let value = "";
+      advance();
+      while (index < text.length) {
+        const current = text[index];
+        if (current === "\\" && text[index + 1] !== undefined) {
+          value += current + text[index + 1];
+          advance();
+          advance();
+          continue;
+        }
+        if (current === '"') {
+          advance();
+          break;
+        }
+        value += current;
+        advance();
+      }
+      tokens.push({ type: "string", value, line: tokenLine });
+      continue;
     }
+
+    const identifier = text.slice(index).match(/^[A-Za-z_][A-Za-z0-9_-]*/u);
+    if (identifier) {
+      tokens.push({ type: "identifier", value: identifier[0], line });
+      index += identifier[0].length;
+      continue;
+    }
+
+    tokens.push({ type: "symbol", value: character, line });
+    advance();
   }
 
-  return output;
+  return tokens;
 }
 
 function parseDeclaredBlocks(root, files) {
@@ -125,39 +168,66 @@ function parseDeclaredBlocks(root, files) {
 
   const increment = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
   for (const path of files) {
-    const text = stripHclComments(readFileSync(path, "utf8"));
-    globalReferenceCount += [...text.matchAll(GLOBAL_REFERENCE_PATTERN)].length;
-    const lines = text.split(/\r?\n/u);
-    let index = 0;
-    while (index < lines.length) {
-      const line = lines[index];
-      const blockMatch = line.match(BLOCK_PATTERN);
-      if (blockMatch) {
-        increment(`${blockMatch[1]}.${blockMatch[2]}`);
+    const tokens = tokenizeHcl(readFileSync(path, "utf8"));
+    for (const token of tokens) {
+      if (token.type === "string" || token.type === "heredoc") {
+        globalReferenceCount += [...token.value.matchAll(GLOBAL_REFERENCE_PATTERN)].length;
+      }
+    }
+    for (let index = 0; index < tokens.length; index += 1) {
+      const token = tokens[index];
+      if (
+        token.type === "identifier" &&
+        token.value === "module" &&
+        tokens[index + 1]?.value === "." &&
+        tokens[index + 2]?.value === "global"
+      ) {
+        globalReferenceCount += 1;
       }
 
-      const moduleMatch = line.match(MODULE_PATTERN);
-      if (!moduleMatch) {
-        index += 1;
+      if (
+        token.type === "identifier" &&
+        (token.value === "resource" || token.value === "data") &&
+        tokens[index + 1]?.type === "string" &&
+        tokens[index + 2]?.type === "string" &&
+        tokens[index + 3]?.value === "{"
+      ) {
+        increment(`${token.value}.${tokens[index + 1].value}`);
+      }
+
+      if (
+        token.type !== "identifier" ||
+        token.value !== "module" ||
+        tokens[index + 1]?.type !== "string" ||
+        tokens[index + 2]?.value !== "{"
+      ) {
         continue;
       }
 
       increment("module");
-      const name = moduleMatch[1];
-      const startLine = index + 1;
-      let depth = [...line].filter((character) => character === "{").length;
-      depth -= [...line].filter((character) => character === "}").length;
+      const name = tokens[index + 1].value;
+      const startLine = token.line;
+      let depth = 1;
       const values = {};
-      index += 1;
+      index += 3;
 
-      while (index < lines.length && depth > 0) {
-        const current = lines[index];
-        const assignment = current.match(ASSIGNMENT_PATTERN);
-        if (depth === 1 && assignment && !(assignment[1] in values)) {
-          values[assignment[1]] = assignment[2];
+      while (index < tokens.length && depth > 0) {
+        const current = tokens[index];
+        if (
+          depth === 1 &&
+          current.type === "identifier" &&
+          (current.value === "source" || current.value === "version") &&
+          tokens[index + 1]?.value === "=" &&
+          tokens[index + 2]?.type === "string" &&
+          !(current.value in values)
+        ) {
+          values[current.value] = tokens[index + 2].value;
         }
-        depth += [...current].filter((character) => character === "{").length;
-        depth -= [...current].filter((character) => character === "}").length;
+        if (current.value === "{") {
+          depth += 1;
+        } else if (current.value === "}") {
+          depth -= 1;
+        }
         index += 1;
       }
 
@@ -168,6 +238,7 @@ function parseDeclaredBlocks(root, files) {
         file: relative(root, path).split("\\").join("/"),
         line: startLine,
       });
+      index -= 1;
     }
   }
 

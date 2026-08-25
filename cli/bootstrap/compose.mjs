@@ -1,11 +1,12 @@
 // @ts-check
 
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, relative, sep } from "node:path";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import { parseDocument } from "yaml";
 
 import { ambiguityError, ownershipError } from "../errors.mjs";
+import { MANAGED_MARKER } from "./constants.mjs";
 import { operationForContent } from "./files.mjs";
 
 /** @typedef {import("../types.mjs").FileOperation} FileOperation */
@@ -13,9 +14,12 @@ import { operationForContent } from "./files.mjs";
 
 const OWNED_SERVICES = new Set(["tama", "tama-postgres"]);
 
-/** @param {unknown} value @returns {string | null} */
-function normalizePath(value) {
-  return typeof value === "string" ? value.replace(/^\.\//u, "") : null;
+/** @param {unknown} value @param {string} filename @returns {string | null} */
+function localIncludePath(value, filename) {
+  if (typeof value !== "string" || /^[a-z][a-z0-9+.-]*:\/\//iu.test(value)) {
+    return null;
+  }
+  return isAbsolute(value) ? resolve(value) : resolve(dirname(filename), value);
 }
 
 /** @param {string} content @param {string} filename */
@@ -46,11 +50,30 @@ function includePaths(entry) {
   return Array.isArray(path) ? path : [path];
 }
 
-/** @param {unknown} entry @param {string} includePath */
-function hasTamaInclude(entry, includePath) {
-  return includePaths(entry).some(
-    (item) => normalizePath(item) === normalizePath(includePath),
-  );
+/** @param {unknown} entry @param {string} filename @param {string} managedComposeFilename */
+function hasTamaInclude(entry, filename, managedComposeFilename) {
+  const expected = resolve(managedComposeFilename);
+  return includePaths(entry).some((item) => localIncludePath(item, filename) === expected);
+}
+
+/** @param {unknown} entry @param {string} filename @param {string} managedComposeFilename */
+function relocatedManagedIncludes(entry, filename, managedComposeFilename) {
+  const expected = resolve(managedComposeFilename);
+  return includePaths(entry).filter((item) => {
+    const includePath = localIncludePath(item, filename);
+    if (!includePath || includePath === expected) {
+      return false;
+    }
+    const conventionalTamaPath = /(?:^|[\\/])tama[\\/]compose\.ya?ml$/u.test(includePath);
+    if (!existsSync(includePath) || lstatSync(includePath).isDirectory()) {
+      return conventionalTamaPath;
+    }
+    if (lstatSync(includePath).isSymbolicLink()) {
+      return conventionalTamaPath;
+    }
+    const firstLine = readFileSync(includePath, "utf8").split(/\r?\n/u, 1)[0];
+    return conventionalTamaPath || firstLine.startsWith(`# ${MANAGED_MARKER}`);
+  });
 }
 
 /** @param {string} filename @param {string} managedComposeFilename */
@@ -94,11 +117,23 @@ export function planRootCompose(filename, managedComposeFilename, newRootContent
     throw ambiguityError(`Compose include must be a sequence: ${filename}`, { path: filename });
   }
   const includePath = relativeIncludePath(filename, managedComposeFilename);
-  const matches = currentIncludes.filter((entry) => hasTamaInclude(entry, includePath));
+  const matches = currentIncludes.filter((entry) =>
+    hasTamaInclude(entry, filename, managedComposeFilename),
+  );
   if (matches.length > 1) {
     throw ownershipError(`Compose file contains multiple Tama Kit includes: ${filename}`, {
       path: filename,
     });
+  }
+
+  const relocated = currentIncludes.flatMap((entry) =>
+    relocatedManagedIncludes(entry, filename, managedComposeFilename),
+  );
+  if (relocated.length > 0) {
+    throw ownershipError(
+      `Compose file already includes a Tama Kit fragment at a different path: ${filename}`,
+      { path: filename, includes: relocated },
+    );
   }
 
   const updated = [...currentIncludes];

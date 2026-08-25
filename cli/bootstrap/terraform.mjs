@@ -11,7 +11,8 @@ import { renderTemplate } from "./templates.mjs";
 
 /** @typedef {import("../types.mjs").TerraformPlan} TerraformPlan */
 /** @typedef {import("../types.mjs").TerraformVersions} TerraformVersions */
-/** @typedef {{name: string, source: string | null, file?: string}} ModuleCall */
+/** @typedef {{name: string, source: string | null, file?: string, declared_version?: string | null, installed_version?: string | null}} ModuleCall */
+/** @typedef {(filename: string, content: string) => import("../types.mjs").FileOperation} ManagedFilePlanner */
 
 /**
  * @typedef {object} JsonTerraformInventory
@@ -75,6 +76,7 @@ function inspectTerraformJson(files) {
         moduleCalls.push({
           name,
           source: typeof call?.source === "string" ? call.source : null,
+          declared_version: typeof call?.version === "string" ? call.version : null,
           file: filename,
         });
       }
@@ -91,18 +93,35 @@ function inspectTerraformJson(files) {
   return { moduleCalls, hasTamaResources };
 }
 
-/** @param {string} directory @param {TerraformVersions} versions @returns {TerraformPlan} */
-export function planTerraform(directory, versions) {
+/** @param {ReturnType<typeof buildInventory>} inventory */
+function preservedProviderVersion(inventory) {
+  const lock = inventory.provider_locks.find(
+    (provider) =>
+      provider.source === "registry.terraform.io/upmaru/tama" ||
+      provider.source === "upmaru/tama",
+  );
+  return lock?.constraints ?? lock?.version ?? null;
+}
+
+/**
+ * @param {string} directory
+ * @param {TerraformVersions} versions
+ * @param {ManagedFilePlanner} [planManagedFile]
+ * @returns {TerraformPlan}
+ */
+export function planTerraform(directory, versions, planManagedFile = operationForContent) {
   const existingFiles = terraformFiles(directory);
   if (existingFiles.length === 0) {
     return {
       foundation: "created",
+      providerVersion: versions.providerVersion,
+      globalModuleVersion: versions.globalModuleVersion,
       operations: [
-        operationForContent(
+        planManagedFile(
           join(directory, "main.tf"),
           renderTemplate("main.tf", { GLOBAL_MODULE_VERSION: versions.globalModuleVersion }),
         ),
-        operationForContent(
+        planManagedFile(
           join(directory, "versions.tf"),
           renderTemplate("versions.tf", {
             TERRAFORM_VERSION: versions.terraformVersion,
@@ -126,17 +145,42 @@ export function planTerraform(directory, versions) {
     );
   }
   if (foundationCalls.length === 1) {
-    return { foundation: "preserved", operations: [] };
+    const foundation = foundationCalls[0];
+    return {
+      foundation: "preserved",
+      providerVersion: preservedProviderVersion(inventory),
+      globalModuleVersion:
+        foundation.declared_version ?? foundation.installed_version ?? null,
+      operations: [],
+    };
   }
 
-  const sources = existingFiles.map((filename) => readFileSync(filename, "utf8")).join("\n");
-  const referencesGlobal = /\bmodule\.global\b/u.test(sources);
-  const hasTamaResources =
-    /\b(?:resource|data)\s+"tama_/u.test(sources) || jsonInventory.hasTamaResources;
-  throw ownershipError(
-    referencesGlobal || hasTamaResources
-      ? `existing Terraform configuration needs a global foundation, but its ownership is unknown: ${directory}`
-      : `existing Terraform root has no Tama global foundation; ownership must be declared before bootstrap: ${directory}`,
-    { path: directory, warnings: inventory.warnings },
+  const referencesGlobal = inventory.declared.global_reference_count > 0;
+  const reservesGlobalAddress = inventory.declared.module_calls.some(
+    (call) => call.name === "global",
   );
+  const hasTamaResources =
+    Object.keys(inventory.declared.block_counts).some(
+      (name) => name.startsWith("resource.tama_") || name.startsWith("data.tama_"),
+    ) || jsonInventory.hasTamaResources;
+  if (referencesGlobal || reservesGlobalAddress || hasTamaResources) {
+    throw ownershipError(
+      `existing Terraform configuration needs a global foundation, but its ownership is unknown: ${directory}`,
+      { path: directory, warnings: inventory.warnings },
+    );
+  }
+
+  return {
+    foundation: "created",
+    providerVersion: null,
+    globalModuleVersion: versions.globalModuleVersion,
+    operations: [
+      planManagedFile(
+        join(directory, "tama-kit-global.tf"),
+        renderTemplate("global-module.tf", {
+          GLOBAL_MODULE_VERSION: versions.globalModuleVersion,
+        }),
+      ),
+    ],
+  };
 }
