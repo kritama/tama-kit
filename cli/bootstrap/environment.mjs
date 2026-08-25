@@ -131,6 +131,35 @@ function validateDatabaseUrl(values, filename) {
   }
 }
 
+/** @param {string} value */
+function isValidVaultKey(value) {
+  if (Buffer.byteLength(value, "utf8") === 32) {
+    return true;
+  }
+  if (value.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(value)) {
+    return false;
+  }
+  const decoded = Buffer.from(value, "base64");
+  return decoded.length === 32 && decoded.toString("base64") === value;
+}
+
+/** @param {Map<string, string>} values @param {string} filename */
+function validateRuntimeSecrets(values, filename) {
+  const invalid = [];
+  if (Buffer.byteLength(values.get("SECRET_KEY_BASE") ?? "", "utf8") < 64) {
+    invalid.push("SECRET_KEY_BASE");
+  }
+  if (!isValidVaultKey(values.get("TAMA_VAULT_KEY") ?? "")) {
+    invalid.push("TAMA_VAULT_KEY");
+  }
+  if (invalid.length > 0) {
+    throw ownershipError(
+      `${filename} contains runtime secrets with invalid formats: ${invalid.join(", ")}`,
+      { path: filename, variables: invalid },
+    );
+  }
+}
+
 /** @param {Map<string, string>} values @param {string} filename @param {number} port */
 function validateEnvironment(values, filename, port) {
   const missing = REQUIRED_ENVIRONMENT_VARIABLES.filter((name) => !values.get(name));
@@ -140,6 +169,7 @@ function validateEnvironment(values, filename, port) {
       { path: filename, variables: missing },
     );
   }
+  validateRuntimeSecrets(values, filename);
   validateDatabaseUrl(values, filename);
   const internalPort = values.get("PORT");
   if (internalPort !== String(DEFAULTS.containerPort)) {

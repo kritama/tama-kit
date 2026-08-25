@@ -290,6 +290,9 @@ TAMA_BASE_URL=http://localhost:4000
 The exact variable set must be verified against the pinned Tama image before
 release. Generated secrets must use a cryptographically secure random source,
 must not appear in normal terminal output, and must not rotate on rerun.
+Persisted values are validated against the pinned runtime contracts:
+`SECRET_KEY_BASE` must contain at least 64 bytes, and `TAMA_VAULT_KEY` must be
+either 32 raw bytes or canonical Base64 that decodes to 32 bytes.
 
 Bootstrap adds the secret-file patterns to the project-root `.gitignore`:
 
@@ -297,6 +300,11 @@ Bootstrap adds the secret-file patterns to the project-root `.gitignore`:
 .tama.env
 .tama.postgres.env
 ```
+
+Ignore rules do not protect files that are already in the Git index. Bootstrap
+refuses to continue if either private environment file is tracked or staged and
+reports the explicit `git rm --cached -- ...` remediation without removing the
+working-tree files.
 
 It adds Terraform working-directory and state patterns to `tama/.gitignore`,
 after any existing rules at that scope so nested negations cannot make state
@@ -425,7 +433,8 @@ same-filesystem rename where supported. If validation fails, bootstrap reports
 the affected generated files and does not start containers.
 
 `--dry-run` performs the same inspection and planning code path but skips all
-writes and external processes.
+writes and runtime or prerequisite processes. It may perform a read-only local
+Git-index inspection to protect private environment files.
 
 ## Idempotency and ownership
 
@@ -477,7 +486,9 @@ code.
 - Add exactly one include when Compose exists.
 - Preserve unrelated YAML nodes and representative comments.
 - Generate secrets with correct shape and file permissions.
+- Reject persisted secrets that do not satisfy the pinned runtime formats.
 - Append missing `.gitignore` patterns exactly once.
+- Refuse private environment files that are already tracked or staged in Git.
 - Preserve existing secrets and produce no diff on a second run.
 - Detect an existing root global module under any Terraform address.
 - Refuse duplicate or unknown global-foundation ownership.

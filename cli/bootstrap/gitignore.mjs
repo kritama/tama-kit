@@ -1,8 +1,10 @@
 // @ts-check
 
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { ownershipError, prerequisiteError } from "../errors.mjs";
 import { operationForContent } from "./files.mjs";
 
 /** @typedef {import("../types.mjs").FileOperation} FileOperation */
@@ -22,6 +24,43 @@ const TERRAFORM_MANAGED_BLOCK = [
   "*.tfstate",
   "*.tfstate.*",
 ].join("\n");
+const SECRET_FILES = [".tama.env", ".tama.postgres.env"];
+
+/** @param {string} root */
+export function validateSecretFilesUntracked(root) {
+  const worktree = spawnSync("git", ["-C", root, "rev-parse", "--is-inside-work-tree"], {
+    encoding: "utf8",
+    env: { ...process.env, LC_ALL: "C" },
+  });
+  const gitMissing = worktree.error && "code" in worktree.error && worktree.error.code === "ENOENT";
+  const notRepository =
+    typeof worktree.stderr === "string" && worktree.stderr.includes("not a git repository");
+  if (gitMissing || notRepository) {
+    return;
+  }
+  if (worktree.error || worktree.status !== 0 || worktree.stdout.trim() !== "true") {
+    throw prerequisiteError("Unable to inspect the local Git index before writing secret files", {
+      root,
+    });
+  }
+
+  const tracked = spawnSync("git", ["-C", root, "ls-files", "--cached", "--", ...SECRET_FILES], {
+    encoding: "utf8",
+    env: { ...process.env, LC_ALL: "C" },
+  });
+  if (tracked.error || tracked.status !== 0) {
+    throw prerequisiteError("Unable to inspect the local Git index before writing secret files", {
+      root,
+    });
+  }
+  const paths = tracked.stdout.split(/\r?\n/u).filter(Boolean);
+  if (paths.length > 0) {
+    throw ownershipError(
+      `Refusing to continue because private environment files are tracked by Git: ${paths.join(", ")}. Untrack them with: git rm --cached -- ${paths.join(" ")}`,
+      { paths },
+    );
+  }
+}
 
 /** @param {string} content @param {string[]} managedBlocks */
 function withoutManagedBlocks(content, managedBlocks) {

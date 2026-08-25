@@ -6,7 +6,7 @@ import { formatComposePsCommand, formatComposeUpCommand } from "./compose-comman
 import { BOOTSTRAP_SCHEMA_VERSION, DEFAULTS } from "./constants.mjs";
 import { inspectProject } from "./detect-project.mjs";
 import { planEnvironment } from "./environment.mjs";
-import { planGitignore } from "./gitignore.mjs";
+import { planGitignore, validateSecretFilesUntracked } from "./gitignore.mjs";
 import { createManagedFilePlanner } from "./manifest.mjs";
 import { renderTemplate } from "./templates.mjs";
 import { planTerraform } from "./terraform.mjs";
@@ -30,6 +30,7 @@ function managedTemplate(planManagedFile, filename, templateName, replacements) 
 /** @param {BootstrapPlanOptions} options @returns {BootstrapPlan} */
 export function createBootstrapPlan(options) {
   const inspection = inspectProject(options);
+  validateSecretFilesUntracked(inspection.root);
   const managedFiles = createManagedFilePlanner(inspection.root, inspection.tamaDirectory);
   const environment = planEnvironment(inspection.root, options.port);
   const replacements = {

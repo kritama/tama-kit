@@ -836,6 +836,49 @@ test("bootstrap rejects missing required variables in a persisted environment", 
   }
 });
 
+test("bootstrap rejects persisted runtime secrets with invalid formats", () => {
+  for (const [name, invalidValue] of [
+    ["SECRET_KEY_BASE", "replace-me"],
+    ["TAMA_VAULT_KEY", "replace-me"],
+    ["TAMA_VAULT_KEY", "x".repeat(44)],
+  ]) {
+    const root = project();
+    applyOperations(planFor(root).operations);
+    const filename = join(root, ".tama.env");
+    writeFileSync(
+      filename,
+      readFileSync(filename, "utf8").replace(
+        new RegExp(`^${name}=.*$`, "mu"),
+        `${name}=${invalidValue}`,
+      ),
+    );
+
+    assert.throws(
+      () => planFor(root),
+      (error) =>
+        error instanceof CLIError &&
+        error.exitCode === EXIT_CODES.OWNERSHIP &&
+        error.details.variables.includes(name) &&
+        !error.message.includes(invalidValue),
+    );
+  }
+});
+
+test("bootstrap accepts the Tama runtime's 32-byte raw vault-key format", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8").replace(
+      /^TAMA_VAULT_KEY=.*$/mu,
+      `TAMA_VAULT_KEY=${"x".repeat(32)}`,
+    ),
+  );
+
+  assert.ok(planFor(root).operations.every((operation) => operation.action === "unchanged"));
+});
+
 test("bootstrap rejects duplicate keys in a persisted environment", () => {
   const root = project();
   const first = planFor(root);
@@ -903,6 +946,25 @@ test("bootstrap appends ignore rules after a later secret-file negation", () => 
 
   const second = planFor(root);
   assert.ok(second.operations.every((operation) => operation.action === "unchanged"));
+});
+
+test("bootstrap refuses private environment files already tracked by Git", () => {
+  const root = project();
+  execFileSync("git", ["init", "--quiet"], { cwd: root });
+  applyOperations(planFor(root).operations);
+  execFileSync("git", ["add", "--force", ".tama.env", ".tama.postgres.env"], { cwd: root });
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      error.message.includes("git rm --cached") &&
+      error.details.paths.includes(".tama.env") &&
+      error.details.paths.includes(".tama.postgres.env"),
+  );
+  assert.ok(existsSync(join(root, ".tama.env")));
+  assert.ok(existsSync(join(root, ".tama.postgres.env")));
 });
 
 test("bootstrap moves one managed ignore block to the end without duplicating it", () => {
