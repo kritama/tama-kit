@@ -1,7 +1,7 @@
 // @ts-check
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 import { buildInventory } from "../../skills/graph-builder/scripts/inspect-tama-repository.mjs";
 
@@ -13,6 +13,7 @@ import { renderTemplate } from "./templates.mjs";
 /** @typedef {import("../types.mjs").TerraformVersions} TerraformVersions */
 /** @typedef {{name: string, source: string | null, file?: string, declared_version?: string | null, installed_version?: string | null}} ModuleCall */
 /** @typedef {(filename: string, content: string) => import("../types.mjs").FileOperation} ManagedFilePlanner */
+/** @typedef {(filename: string) => boolean} ManagedFilePredicate */
 
 /**
  * @typedef {object} JsonTerraformInventory
@@ -105,9 +106,15 @@ function preservedProviderVersion(inventory) {
  * @param {string} directory
  * @param {TerraformVersions} versions
  * @param {ManagedFilePlanner} [planManagedFile]
+ * @param {ManagedFilePredicate} [isManagedFile]
  * @returns {TerraformPlan}
  */
-export function planTerraform(directory, versions, planManagedFile = operationForContent) {
+export function planTerraform(
+  directory,
+  versions,
+  planManagedFile = operationForContent,
+  isManagedFile = () => false,
+) {
   const existingFiles = terraformFiles(directory);
   if (existingFiles.length === 0) {
     return {
@@ -144,11 +151,41 @@ export function planTerraform(directory, versions, planManagedFile = operationFo
   }
   if (foundationCalls.length === 1) {
     const foundation = foundationCalls[0];
+    const foundationFile = foundation.file ? resolve(directory, foundation.file) : null;
+    const versionsFile = join(directory, "versions.tf");
+    const managesFoundation = foundationFile ? isManagedFile(foundationFile) : false;
+    const managesVersions = isManagedFile(versionsFile);
+    const operations = [];
+    if (foundationFile && managesFoundation) {
+      const template =
+        basename(foundationFile) === "tama-kit-global.tf" ? "global-module.tf" : "main.tf";
+      operations.push(
+        planManagedFile(
+          foundationFile,
+          renderTemplate(template, { GLOBAL_MODULE_VERSION: versions.globalModuleVersion }),
+        ),
+      );
+    }
+    if (managesVersions) {
+      operations.push(
+        planManagedFile(
+          versionsFile,
+          renderTemplate("versions.tf", {
+            TERRAFORM_VERSION: versions.terraformVersion,
+            PROVIDER_VERSION: versions.providerVersion,
+          }),
+        ),
+      );
+    }
     return {
       foundation: "preserved",
-      providerVersion: preservedProviderVersion(inventory),
-      globalModuleVersion: foundation.declared_version ?? foundation.installed_version ?? null,
-      operations: [],
+      providerVersion: managesVersions
+        ? versions.providerVersion
+        : preservedProviderVersion(inventory),
+      globalModuleVersion: managesFoundation
+        ? versions.globalModuleVersion
+        : (foundation.declared_version ?? foundation.installed_version ?? null),
+      operations,
     };
   }
 

@@ -15,6 +15,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { formatComposeUpCommand } from "../../cli/bootstrap/compose-command.mjs";
 import { inspectProject } from "../../cli/bootstrap/detect-project.mjs";
+import { contentDigest } from "../../cli/bootstrap/files.mjs";
 import { createBootstrapPlan } from "../../cli/bootstrap/plan.mjs";
 import { applyOperations, applyOperationsTransactionally } from "../../cli/bootstrap/write.mjs";
 import { CLIError, EXIT_CODES } from "../../cli/errors.mjs";
@@ -98,6 +99,48 @@ test("bootstrap adopts marked Terraform files when migrating to the digest manif
   const payload = JSON.parse(readFileSync(manifest, "utf8"));
   assert.match(payload.managedFiles["tama/main.tf"], /^sha256:[0-9a-f]{64}$/u);
   assert.match(payload.managedFiles["tama/versions.tf"], /^sha256:[0-9a-f]{64}$/u);
+});
+
+test("bootstrap upgrades previously generated Terraform templates", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const foundation = join(root, "tama", "main.tf");
+  const versions = join(root, "tama", "versions.tf");
+  const manifest = join(root, "tama", ".tama-kit.json");
+  const oldFoundation = readFileSync(foundation, "utf8").replace(
+    'version = "0.5.6"',
+    'version = "0.5.5"',
+  );
+  const oldVersions = readFileSync(versions, "utf8").replace(
+    'version = "~> 0.6.3"',
+    'version = "~> 0.6.2"',
+  );
+  writeFileSync(foundation, oldFoundation);
+  writeFileSync(versions, oldVersions);
+  const manifestPayload = JSON.parse(readFileSync(manifest, "utf8"));
+  manifestPayload.managedFiles["tama/main.tf"] = contentDigest(oldFoundation);
+  manifestPayload.managedFiles["tama/versions.tf"] = contentDigest(oldVersions);
+  writeFileSync(manifest, `${JSON.stringify(manifestPayload, null, 2)}\n`);
+
+  const upgrade = planFor(root);
+  const terraformChanges = upgrade.operations.filter(
+    (operation) => operation.path === foundation || operation.path === versions,
+  );
+
+  assert.equal(upgrade.terraform.foundation, "preserved");
+  assert.equal(upgrade.terraform.globalModuleVersion, "0.5.6");
+  assert.equal(upgrade.terraform.providerVersion, "~> 0.6.3");
+  assert.deepEqual(
+    terraformChanges.map((operation) => [operation.path, operation.action]),
+    [
+      [foundation, "update"],
+      [versions, "update"],
+    ],
+  );
+
+  applyOperations(upgrade.operations);
+  assert.match(readFileSync(foundation, "utf8"), /version = "0\.5\.6"/u);
+  assert.match(readFileSync(versions, "utf8"), /version = "~> 0\.6\.3"/u);
 });
 
 test("dry-run reports and bootstrap repairs unsafe sensitive-file permissions", async () => {
@@ -414,6 +457,24 @@ test("bootstrap adds a separate managed foundation to a safe existing Terraform 
   assert.equal(plan.terraform.foundation, "created");
   assert.equal(operation.action, "create");
   assert.match(operation.content, /module "global"/u);
+
+  applyOperations(plan.operations);
+  const foundation = join(root, "tama", "tama-kit-global.tf");
+  const manifest = join(root, "tama", ".tama-kit.json");
+  const oldFoundation = readFileSync(foundation, "utf8").replace(
+    'version = "0.5.6"',
+    'version = "0.5.5"',
+  );
+  writeFileSync(foundation, oldFoundation);
+  const manifestPayload = JSON.parse(readFileSync(manifest, "utf8"));
+  manifestPayload.managedFiles["tama/tama-kit-global.tf"] = contentDigest(oldFoundation);
+  writeFileSync(manifest, `${JSON.stringify(manifestPayload, null, 2)}\n`);
+
+  const upgrade = planFor(root);
+  const foundationUpgrade = upgrade.operations.find((item) => item.path === foundation);
+  assert.equal(foundationUpgrade.action, "update");
+  assert.match(foundationUpgrade.content, /version = "0\.5\.6"/u);
+  assert.doesNotMatch(foundationUpgrade.content, /provider "tama"/u);
 });
 
 test("bootstrap still fails closed when existing Tama resources have unknown ownership", () => {

@@ -66,6 +66,9 @@ export function createBootstrapPlan(options) {
   );
   operations.push(planGitignore(inspection.root));
 
+  for (const filename of ["main.tf", "versions.tf", "tama-kit-global.tf"]) {
+    managedFiles.adoptMarkedFile(join(inspection.tamaDirectory, filename));
+  }
   const terraform = planTerraform(
     inspection.tamaDirectory,
     {
@@ -74,11 +77,9 @@ export function createBootstrapPlan(options) {
       globalModuleVersion: DEFAULTS.globalModuleVersion,
     },
     managedFiles.plan,
+    managedFiles.isManagedFile,
   );
   operations.push(...terraform.operations);
-  for (const filename of ["main.tf", "versions.tf", "tama-kit-global.tf"]) {
-    managedFiles.adoptMarkedFile(join(inspection.tamaDirectory, filename));
-  }
   const projectComposePath = relative(inspection.root, inspection.selectedCompose);
   operations.push(
     managedTemplate(managedFiles.plan, join(inspection.tamaDirectory, "README.md"), "README.md", {

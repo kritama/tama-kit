@@ -137,8 +137,14 @@ export function createManagedFilePlanner(root, tamaDirectory) {
         actualDigest: digest,
       });
     }
+    recorded.set(path, digest);
     planned.add(path);
     desired.set(path, digest);
+  }
+
+  /** @param {string} filename */
+  function isManagedFile(filename) {
+    return recorded.has(projectRelativePath(root, filename));
   }
 
   /** @returns {FileOperation} */
@@ -181,5 +187,5 @@ export function createManagedFilePlanner(root, tamaDirectory) {
     return operationForContent(manifestPath, content, { allowUnmanagedUpdate: true });
   }
 
-  return { plan, adoptMarkedFile, manifestOperation };
+  return { plan, adoptMarkedFile, isManagedFile, manifestOperation };
 }
