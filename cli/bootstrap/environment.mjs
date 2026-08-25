@@ -83,6 +83,21 @@ function updateEnvironment(content, updates) {
   return `${lines.join("\n")}\n`;
 }
 
+/** @param {string | undefined} value @param {number} existingPort @param {number} port */
+function updateAllowedOrigins(value, existingPort, port) {
+  const previousOrigin = `http://localhost:${existingPort}`;
+  const nextOrigin = `http://localhost:${port}`;
+  if (!value) {
+    return nextOrigin;
+  }
+  return value
+    .split(",")
+    .map((origin) =>
+      origin.trim() === previousOrigin ? origin.replace(previousOrigin, nextOrigin) : origin,
+    )
+    .join(",");
+}
+
 /** @param {string} value @returns {string | null} */
 function decodeUrlComponent(value) {
   try {
@@ -249,7 +264,11 @@ export function planEnvironment(root, requestedPort) {
           TAMA_PORT: port,
           TAMA_OAUTH_ISSUER: `http://localhost:${port}`,
           TAMA_MCP_RESOURCE: `http://localhost:${port}/mcp`,
-          TAMA_MCP_ALLOWED_ORIGINS: `http://localhost:${port}`,
+          TAMA_MCP_ALLOWED_ORIGINS: updateAllowedOrigins(
+            values.get("TAMA_MCP_ALLOWED_ORIGINS"),
+            existingPort,
+            port,
+          ),
           TAMA_BASE_URL: `http://localhost:${port}`,
         });
   const updatedValues = parseEnvironment(content, filename);

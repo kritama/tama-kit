@@ -118,6 +118,27 @@ test("bootstrap adopts marked Terraform files when migrating to the digest manif
   assert.match(payload.managedFiles["tama/versions.tf"], /^sha256:[0-9a-f]{64}$/u);
 });
 
+test("bootstrap refuses to adopt an edited marked Terraform file without a manifest", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const manifest = join(root, "tama", ".tama-kit.json");
+  const foundation = join(root, "tama", "main.tf");
+  unlinkSync(manifest);
+  writeFileSync(
+    foundation,
+    `${readFileSync(foundation, "utf8")}\nresource "tama_space" "custom" {}\n`,
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      /cannot establish ownership of marked legacy Terraform file/u.test(error.message),
+  );
+  assert.match(readFileSync(foundation, "utf8"), /tama_space" "custom/u);
+});
+
 test("bootstrap upgrades previously generated Terraform templates", () => {
   const root = project();
   applyOperations(planFor(root).operations);
@@ -654,6 +675,26 @@ test("an explicit port updates public local URLs without rotating secrets", () =
   assert.match(after, /^TAMA_BASE_URL=http:\/\/localhost:4567$/mu);
   assert.match(after, new RegExp(`^TAMA_SETUP_TOKEN=${setupToken}$`, "mu"));
   assert.match(readFileSync(join(root, "tama", "compose.yaml"), "utf8"), /"4567:4000"/u);
+});
+
+test("an explicit port preserves additional MCP allowed origins", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8").replace(
+      /^TAMA_MCP_ALLOWED_ORIGINS=http:\/\/localhost:4000$/mu,
+      "TAMA_MCP_ALLOWED_ORIGINS=http://localhost:4000,https://app.example",
+    ),
+  );
+
+  applyOperations(planFor(root, { port: 4567 }).operations);
+
+  assert.match(
+    readFileSync(filename, "utf8"),
+    /^TAMA_MCP_ALLOWED_ORIGINS=http:\/\/localhost:4567,https:\/\/app\.example$/mu,
+  );
 });
 
 test("bootstrap rejects an invalid persisted port instead of silently changing it", () => {

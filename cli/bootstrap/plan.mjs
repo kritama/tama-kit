@@ -66,8 +66,27 @@ export function createBootstrapPlan(options) {
   );
   operations.push(planGitignore(inspection.root));
 
-  for (const filename of ["main.tf", "versions.tf", "tama-kit-global.tf"]) {
-    managedFiles.adoptMarkedFile(join(inspection.tamaDirectory, filename));
+  /** @type {Array<[string, string, Record<string, string | number>]>} */
+  const knownTerraformTemplates = [
+    ["main.tf", "main.tf", { GLOBAL_MODULE_VERSION: DEFAULTS.globalModuleVersion }],
+    [
+      "versions.tf",
+      "versions.tf",
+      {
+        TERRAFORM_VERSION: DEFAULTS.terraformVersion,
+        PROVIDER_VERSION: DEFAULTS.providerVersion,
+      },
+    ],
+    [
+      "tama-kit-global.tf",
+      "global-module.tf",
+      { GLOBAL_MODULE_VERSION: DEFAULTS.globalModuleVersion },
+    ],
+  ];
+  for (const [filename, templateName, templateReplacements] of knownTerraformTemplates) {
+    managedFiles.adoptMarkedFile(join(inspection.tamaDirectory, filename), [
+      renderTemplate(templateName, templateReplacements),
+    ]);
   }
   const terraform = planTerraform(
     inspection.tamaDirectory,

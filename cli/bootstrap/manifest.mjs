@@ -119,8 +119,8 @@ export function createManagedFilePlanner(root, tamaDirectory) {
     return operationForContent(filename, content, { ...options, allowUnmanagedUpdate: true });
   }
 
-  /** @param {string} filename */
-  function adoptMarkedFile(filename) {
+  /** @param {string} filename @param {string[]} knownContents */
+  function adoptMarkedFile(filename, knownContents) {
     if (!existsSync(filename)) {
       return;
     }
@@ -141,6 +141,15 @@ export function createManagedFilePlanner(root, tamaDirectory) {
         expectedDigest: previousDigest,
         actualDigest: digest,
       });
+    }
+    if (!previousDigest && !knownContents.some((known) => contentDigest(known) === digest)) {
+      throw ownershipError(
+        `cannot establish ownership of marked legacy Terraform file: ${filename}`,
+        {
+          path: filename,
+          actualDigest: digest,
+        },
+      );
     }
     recorded.set(path, digest);
     planned.add(path);
