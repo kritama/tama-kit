@@ -291,15 +291,21 @@ The exact variable set must be verified against the pinned Tama image before
 release. Generated secrets must use a cryptographically secure random source,
 must not appear in normal terminal output, and must not rotate on rerun.
 
-Bootstrap adds these patterns to the nearest applicable `.gitignore` without
-removing existing entries:
+Bootstrap adds the secret-file patterns to the project-root `.gitignore`:
 
 ```gitignore
 .tama.env
 .tama.postgres.env
-tama/.terraform/
-tama/*.tfstate
-tama/*.tfstate.*
+```
+
+It adds Terraform working-directory and state patterns to `tama/.gitignore`,
+after any existing rules at that scope so nested negations cannot make state
+trackable:
+
+```gitignore
+.terraform/
+*.tfstate
+*.tfstate.*
 ```
 
 `tama/.terraform.lock.hcl` is intentionally not ignored.

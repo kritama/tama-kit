@@ -64,7 +64,7 @@ export function createBootstrapPlan(options) {
       renderTemplate("root-compose.yaml"),
     ),
   );
-  operations.push(planGitignore(inspection.root));
+  operations.push(...planGitignore(inspection.root));
 
   /** @type {Array<[string, string, Record<string, string | number>]>} */
   const knownTerraformTemplates = [

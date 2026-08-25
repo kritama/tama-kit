@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   chownSync,
@@ -566,6 +567,73 @@ test("bootstrap ignores assignment-looking content inside HCL heredocs", () => {
   assert.ok(plan.operations.some((operation) => operation.path.endsWith("tama-kit-global.tf")));
 });
 
+test("bootstrap ignores literal module.global text in HCL strings and heredocs", () => {
+  const root = project();
+  mkdirSync(join(root, "tama"));
+  writeFileSync(
+    join(root, "tama", "main.tf"),
+    [
+      'resource "null_resource" "documentation" {',
+      "  triggers = {",
+      '    quoted = "The identifier module.global is reserved"',
+      '    escaped = "$${module.global.name}"',
+      '    escaped_directive = "%%{ module.global is literal }"',
+      "    heredoc = <<EOT",
+      "module.global is documentation, not a traversal",
+      "EOT",
+      "  }",
+      "}",
+      "",
+    ].join("\n"),
+  );
+
+  const plan = planFor(root);
+  assert.equal(plan.terraform.foundation, "created");
+  assert.ok(plan.operations.some((operation) => operation.path.endsWith("tama-kit-global.tf")));
+});
+
+test("bootstrap still detects module.global inside an HCL template expression", () => {
+  const root = project();
+  mkdirSync(join(root, "tama"));
+  writeFileSync(
+    join(root, "tama", "main.tf"),
+    `resource "null_resource" "example" { triggers = { name = "\${module.global.name}" } }\n`,
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      /ownership is unknown/u.test(error.message),
+  );
+});
+
+test("bootstrap detects module.global after nested braces in an HCL template directive", () => {
+  const root = project();
+  mkdirSync(join(root, "tama"));
+  writeFileSync(
+    join(root, "tama", "main.tf"),
+    [
+      'resource "null_resource" "example" {',
+      "  triggers = {",
+      `    name = "\${true ? { fallback = "local" } : module.global.name}"`,
+      `    body = "%%{ literal module.global } %{ if module.global.enabled }active%{ endif }"`,
+      "  }",
+      "}",
+      "",
+    ].join("\n"),
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      /ownership is unknown/u.test(error.message),
+  );
+});
+
 test("bootstrap ignores foundations in nested modules and creates one in the root", () => {
   const root = project();
   mkdirSync(join(root, "tama", "modules", "unused"), { recursive: true });
@@ -856,8 +924,38 @@ test("bootstrap moves one managed ignore block to the end without duplicating it
 
   applyOperations(planFor(root).operations);
   const content = readFileSync(join(root, ".gitignore"), "utf8");
+  const nestedContent = readFileSync(join(root, "tama", ".gitignore"), "utf8");
   assert.equal((content.match(/# Tama Kit local runtime/gu) ?? []).length, 1);
   assert.ok(content.lastIndexOf("# Tama Kit local runtime") > content.lastIndexOf("coverage/"));
+  assert.doesNotMatch(content, /tama\/\.terraform|tama\/\*\.tfstate/u);
+  assert.match(nestedContent, /^\.terraform\/$/mu);
+  assert.match(nestedContent, /^\*\.tfstate$/mu);
+  assert.ok(planFor(root).operations.every((operation) => operation.action === "unchanged"));
+});
+
+test("bootstrap enforces Terraform state ignores after a nested negation", () => {
+  const root = project();
+  mkdirSync(join(root, "tama"));
+  writeFileSync(join(root, "tama", ".gitignore"), "!*.tfstate\n");
+
+  applyOperations(planFor(root).operations);
+  writeFileSync(join(root, "tama", "example.tfstate"), "{}\n");
+  execFileSync("git", ["init", "--quiet"], { cwd: root });
+
+  const nestedIgnore = readFileSync(join(root, "tama", ".gitignore"), "utf8");
+  assert.ok(nestedIgnore.lastIndexOf("*.tfstate") > nestedIgnore.lastIndexOf("!*.tfstate"));
+  assert.doesNotThrow(() =>
+    execFileSync("git", ["check-ignore", "--quiet", "--no-index", "tama/example.tfstate"], {
+      cwd: root,
+    }),
+  );
+  assert.throws(
+    () =>
+      execFileSync("git", ["check-ignore", "--quiet", "--no-index", "tama/.terraform.lock.hcl"], {
+        cwd: root,
+      }),
+    (error) => error && typeof error === "object" && "status" in error && error.status === 1,
+  );
   assert.ok(planFor(root).operations.every((operation) => operation.action === "unchanged"));
 });
 

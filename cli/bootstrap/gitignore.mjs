@@ -7,25 +7,33 @@ import { operationForContent } from "./files.mjs";
 
 /** @typedef {import("../types.mjs").FileOperation} FileOperation */
 
-const PATTERNS = [
-  ".tama.env",
-  ".tama.postgres.env",
+const ROOT_MANAGED_BLOCK = ["# Tama Kit local runtime", ".tama.env", ".tama.postgres.env"].join(
+  "\n",
+);
+const LEGACY_ROOT_MANAGED_BLOCK = [
+  ROOT_MANAGED_BLOCK,
   "tama/.terraform/",
   "tama/*.tfstate",
   "tama/*.tfstate.*",
-];
+].join("\n");
+const TERRAFORM_MANAGED_BLOCK = [
+  "# Tama Kit Terraform local state",
+  ".terraform/",
+  "*.tfstate",
+  "*.tfstate.*",
+].join("\n");
 
-const MANAGED_BLOCK = ["# Tama Kit local runtime", ...PATTERNS].join("\n");
-
-/** @param {string} content */
-function withoutManagedBlocks(content) {
+/** @param {string} content @param {string[]} managedBlocks */
+function withoutManagedBlocks(content, managedBlocks) {
   const lines = content.replace(/\r\n/gu, "\n").split("\n");
-  const managedLines = MANAGED_BLOCK.split("\n");
   const kept = [];
   for (let index = 0; index < lines.length; ) {
-    const candidate = lines.slice(index, index + managedLines.length);
-    if (candidate.join("\n") === MANAGED_BLOCK) {
-      index += managedLines.length;
+    const matched = managedBlocks.find((block) => {
+      const managedLines = block.split("\n");
+      return lines.slice(index, index + managedLines.length).join("\n") === block;
+    });
+    if (matched) {
+      index += matched.split("\n").length;
       if (kept.at(-1) === "" && lines[index] === "") {
         index += 1;
       }
@@ -40,11 +48,18 @@ function withoutManagedBlocks(content) {
   return kept.join("\n");
 }
 
-/** @param {string} root @returns {FileOperation} */
-export function planGitignore(root) {
-  const filename = join(root, ".gitignore");
+/** @param {string} filename @param {string} managedBlock @param {string[]} [legacyBlocks] */
+function planIgnoreFile(filename, managedBlock, legacyBlocks = []) {
   const original = existsSync(filename) ? readFileSync(filename, "utf8") : "";
-  const unmanaged = withoutManagedBlocks(original);
-  const content = `${unmanaged}${unmanaged.length === 0 ? "" : "\n\n"}${MANAGED_BLOCK}\n`;
+  const unmanaged = withoutManagedBlocks(original, [...legacyBlocks, managedBlock]);
+  const content = `${unmanaged}${unmanaged.length === 0 ? "" : "\n\n"}${managedBlock}\n`;
   return operationForContent(filename, content, { owner: "user", allowUnmanagedUpdate: true });
+}
+
+/** @param {string} root @returns {FileOperation[]} */
+export function planGitignore(root) {
+  return [
+    planIgnoreFile(join(root, ".gitignore"), ROOT_MANAGED_BLOCK, [LEGACY_ROOT_MANAGED_BLOCK]),
+    planIgnoreFile(join(root, "tama", ".gitignore"), TERRAFORM_MANAGED_BLOCK),
+  ];
 }

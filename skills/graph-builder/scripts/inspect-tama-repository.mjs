@@ -9,7 +9,6 @@ import { parseArgs } from "node:util";
 const SKIP_PARTS = new Set([".git", ".terraform", ".terragrunt-cache", "node_modules", "vendor"]);
 const PROVIDER_PATTERN = /provider\s+"([^"]+)"\s*\{(.*?)\n\}/gsu;
 const LOCK_VALUE_PATTERN = /^\s*(version|constraints)\s*=\s*"([^"]+)"/gmu;
-const GLOBAL_REFERENCE_PATTERN = /\bmodule\.global\b/gu;
 
 function expandHome(path) {
   return path === "~" ? homedir() : path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
@@ -163,6 +162,74 @@ function tokenizeHcl(text) {
   return tokens;
 }
 
+function templateExpressions(value) {
+  const expressions = [];
+  let index = 0;
+  while (index < value.length) {
+    const marker = value[index];
+    if (
+      (marker === "$" || marker === "%") &&
+      value[index + 1] === marker &&
+      value[index + 2] === "{"
+    ) {
+      index += 3;
+      continue;
+    }
+    if ((marker !== "$" && marker !== "%") || value[index + 1] !== "{") {
+      index += 1;
+      continue;
+    }
+
+    const start = index + 2;
+    let depth = 1;
+    let quoted = false;
+    index = start;
+    while (index < value.length && depth > 0) {
+      const character = value[index];
+      if (quoted && character === "\\" && value[index + 1] !== undefined) {
+        index += 2;
+        continue;
+      }
+      if (character === '"') {
+        quoted = !quoted;
+        index += 1;
+        continue;
+      }
+      if (!quoted && character === "{") {
+        depth += 1;
+      } else if (!quoted && character === "}") {
+        depth -= 1;
+      }
+      index += 1;
+    }
+    if (depth === 0) {
+      expressions.push(value.slice(start, index - 1));
+    }
+  }
+  return expressions;
+}
+
+function countGlobalReferences(tokens) {
+  let count = 0;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (
+      token.type === "identifier" &&
+      token.value === "module" &&
+      tokens[index + 1]?.value === "." &&
+      tokens[index + 2]?.value === "global"
+    ) {
+      count += 1;
+    }
+    if (token.type === "string" || token.type === "heredoc") {
+      for (const expression of templateExpressions(token.value)) {
+        count += countGlobalReferences(tokenizeHcl(expression));
+      }
+    }
+  }
+  return count;
+}
+
 function parseDeclaredBlocks(root, files) {
   const counts = new Map();
   const moduleCalls = [];
@@ -171,22 +238,9 @@ function parseDeclaredBlocks(root, files) {
   const increment = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
   for (const path of files) {
     const tokens = tokenizeHcl(readFileSync(path, "utf8"));
-    for (const token of tokens) {
-      if (token.type === "string" || token.type === "heredoc") {
-        globalReferenceCount += [...token.value.matchAll(GLOBAL_REFERENCE_PATTERN)].length;
-      }
-    }
+    globalReferenceCount += countGlobalReferences(tokens);
     for (let index = 0; index < tokens.length; index += 1) {
       const token = tokens[index];
-      if (
-        token.type === "identifier" &&
-        token.value === "module" &&
-        tokens[index + 1]?.value === "." &&
-        tokens[index + 2]?.value === "global"
-      ) {
-        globalReferenceCount += 1;
-      }
-
       if (
         token.type === "identifier" &&
         (token.value === "resource" || token.value === "data") &&
