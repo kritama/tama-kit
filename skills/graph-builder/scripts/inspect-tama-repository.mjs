@@ -1,18 +1,14 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 const SKIP_PARTS = new Set([".git", ".terraform", ".terragrunt-cache", "node_modules", "vendor"]);
-const BLOCK_PATTERN = /^\s*(resource|data)\s+"([^"]+)"\s+"([^"]+)"\s*\{/u;
-const MODULE_PATTERN = /^\s*module\s+"([^"]+)"\s*\{/u;
-const ASSIGNMENT_PATTERN = /^\s*(source|version)\s*=\s*"([^"]+)"/u;
 const PROVIDER_PATTERN = /provider\s+"([^"]+)"\s*\{(.*?)\n\}/gsu;
 const LOCK_VALUE_PATTERN = /^\s*(version|constraints)\s*=\s*"([^"]+)"/gmu;
-const GLOBAL_REFERENCE_PATTERN = /\bmodule\.global\b/gu;
 
 function expandHome(path) {
   return path === "~" ? homedir() : path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
@@ -49,6 +45,191 @@ function collectTerraformFiles(root, directory = root, files = []) {
   return files;
 }
 
+function collectRootTerraformFiles(root) {
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".tf"))
+    .map((entry) => join(root, entry.name))
+    .sort((left, right) => left.localeCompare(right, "en"));
+}
+
+function tokenizeHcl(text) {
+  const tokens = [];
+  let index = 0;
+  let line = 1;
+
+  const advance = () => {
+    if (text[index] === "\n") {
+      line += 1;
+    }
+    index += 1;
+  };
+
+  while (index < text.length) {
+    const character = text[index];
+    const next = text[index + 1];
+    if (/\s/u.test(character)) {
+      advance();
+      continue;
+    }
+    if (character === "#" || (character === "/" && next === "/")) {
+      while (index < text.length && text[index] !== "\n") {
+        index += 1;
+      }
+      continue;
+    }
+    if (character === "/" && next === "*") {
+      advance();
+      advance();
+      while (index < text.length && !(text[index] === "*" && text[index + 1] === "/")) {
+        advance();
+      }
+      if (index < text.length) {
+        advance();
+        advance();
+      }
+      continue;
+    }
+
+    if (character === "<" && next === "<") {
+      const header = text
+        .slice(index)
+        .match(/^<<(-?)([A-Za-z_][A-Za-z0-9_-]*)[^\S\r\n]*(?:\r?\n|$)/u);
+      if (header) {
+        const tokenLine = line;
+        const indented = header[1] === "-";
+        const delimiter = header[2];
+        for (let offset = 0; offset < header[0].length; offset += 1) {
+          advance();
+        }
+        const bodyStart = index;
+        while (index < text.length) {
+          const lineStart = index;
+          while (index < text.length && text[index] !== "\n") {
+            index += 1;
+          }
+          const candidate = text.slice(lineStart, index).replace(/\r$/u, "");
+          const comparable = indented ? candidate.trimStart() : candidate;
+          if (comparable === delimiter) {
+            const value = text.slice(bodyStart, lineStart);
+            tokens.push({ type: "heredoc", value, line: tokenLine });
+            if (index < text.length) {
+              advance();
+            }
+            break;
+          }
+          if (index < text.length) {
+            advance();
+          }
+        }
+        continue;
+      }
+    }
+
+    if (character === '"') {
+      const tokenLine = line;
+      let value = "";
+      advance();
+      while (index < text.length) {
+        const current = text[index];
+        if (current === "\\" && text[index + 1] !== undefined) {
+          value += current + text[index + 1];
+          advance();
+          advance();
+          continue;
+        }
+        if (current === '"') {
+          advance();
+          break;
+        }
+        value += current;
+        advance();
+      }
+      tokens.push({ type: "string", value, line: tokenLine });
+      continue;
+    }
+
+    const identifier = text.slice(index).match(/^[A-Za-z_][A-Za-z0-9_-]*/u);
+    if (identifier) {
+      tokens.push({ type: "identifier", value: identifier[0], line });
+      index += identifier[0].length;
+      continue;
+    }
+
+    tokens.push({ type: "symbol", value: character, line });
+    advance();
+  }
+
+  return tokens;
+}
+
+function templateExpressions(value) {
+  const expressions = [];
+  let index = 0;
+  while (index < value.length) {
+    const marker = value[index];
+    if (
+      (marker === "$" || marker === "%") &&
+      value[index + 1] === marker &&
+      value[index + 2] === "{"
+    ) {
+      index += 3;
+      continue;
+    }
+    if ((marker !== "$" && marker !== "%") || value[index + 1] !== "{") {
+      index += 1;
+      continue;
+    }
+
+    const start = index + 2;
+    let depth = 1;
+    let quoted = false;
+    index = start;
+    while (index < value.length && depth > 0) {
+      const character = value[index];
+      if (quoted && character === "\\" && value[index + 1] !== undefined) {
+        index += 2;
+        continue;
+      }
+      if (character === '"') {
+        quoted = !quoted;
+        index += 1;
+        continue;
+      }
+      if (!quoted && character === "{") {
+        depth += 1;
+      } else if (!quoted && character === "}") {
+        depth -= 1;
+      }
+      index += 1;
+    }
+    if (depth === 0) {
+      expressions.push(value.slice(start, index - 1));
+    }
+  }
+  return expressions;
+}
+
+function countGlobalReferences(tokens) {
+  let count = 0;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (
+      token.type === "identifier" &&
+      token.value === "module" &&
+      tokens[index + 1]?.value === "." &&
+      tokens[index + 2]?.value === "global"
+    ) {
+      count += 1;
+    }
+    if (token.type === "string" || token.type === "heredoc") {
+      for (const expression of templateExpressions(token.value)) {
+        count += countGlobalReferences(tokenizeHcl(expression));
+      }
+    }
+  }
+  return count;
+}
+
 function parseDeclaredBlocks(root, files) {
   const counts = new Map();
   const moduleCalls = [];
@@ -56,39 +237,53 @@ function parseDeclaredBlocks(root, files) {
 
   const increment = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
   for (const path of files) {
-    const text = readFileSync(path, "utf8");
-    globalReferenceCount += [...text.matchAll(GLOBAL_REFERENCE_PATTERN)].length;
-    const lines = text.split(/\r?\n/u);
-    let index = 0;
-    while (index < lines.length) {
-      const line = lines[index];
-      const blockMatch = line.match(BLOCK_PATTERN);
-      if (blockMatch) {
-        increment(`${blockMatch[1]}.${blockMatch[2]}`);
+    const tokens = tokenizeHcl(readFileSync(path, "utf8"));
+    globalReferenceCount += countGlobalReferences(tokens);
+    for (let index = 0; index < tokens.length; index += 1) {
+      const token = tokens[index];
+      if (
+        token.type === "identifier" &&
+        (token.value === "resource" || token.value === "data") &&
+        tokens[index + 1]?.type === "string" &&
+        tokens[index + 2]?.type === "string" &&
+        tokens[index + 3]?.value === "{"
+      ) {
+        increment(`${token.value}.${tokens[index + 1].value}`);
       }
 
-      const moduleMatch = line.match(MODULE_PATTERN);
-      if (!moduleMatch) {
-        index += 1;
+      if (
+        token.type !== "identifier" ||
+        token.value !== "module" ||
+        tokens[index + 1]?.type !== "string" ||
+        tokens[index + 2]?.value !== "{"
+      ) {
         continue;
       }
 
       increment("module");
-      const name = moduleMatch[1];
-      const startLine = index + 1;
-      let depth = [...line].filter((character) => character === "{").length;
-      depth -= [...line].filter((character) => character === "}").length;
+      const name = tokens[index + 1].value;
+      const startLine = token.line;
+      let depth = 1;
       const values = {};
-      index += 1;
+      index += 3;
 
-      while (index < lines.length && depth > 0) {
-        const current = lines[index];
-        const assignment = current.match(ASSIGNMENT_PATTERN);
-        if (assignment && !(assignment[1] in values)) {
-          values[assignment[1]] = assignment[2];
+      while (index < tokens.length && depth > 0) {
+        const current = tokens[index];
+        if (
+          depth === 1 &&
+          current.type === "identifier" &&
+          (current.value === "source" || current.value === "version") &&
+          tokens[index + 1]?.value === "=" &&
+          tokens[index + 2]?.type === "string" &&
+          !(current.value in values)
+        ) {
+          values[current.value] = tokens[index + 2].value;
         }
-        depth += [...current].filter((character) => character === "{").length;
-        depth -= [...current].filter((character) => character === "}").length;
+        if (current.value === "{") {
+          depth += 1;
+        } else if (current.value === "}") {
+          depth -= 1;
+        }
         index += 1;
       }
 
@@ -99,11 +294,14 @@ function parseDeclaredBlocks(root, files) {
         file: relative(root, path).split("\\").join("/"),
         line: startLine,
       });
+      index -= 1;
     }
   }
 
   return {
-    block_counts: Object.fromEntries([...counts.entries()].sort(([left], [right]) => left.localeCompare(right, "en"))),
+    block_counts: Object.fromEntries(
+      [...counts.entries()].sort(([left], [right]) => left.localeCompare(right, "en")),
+    ),
     module_calls: moduleCalls,
     global_reference_count: globalReferenceCount,
   };
@@ -144,11 +342,7 @@ function parseInstalledModules(root) {
 
   return (payload.Modules ?? []).map((item) => {
     const directory = item.Dir ?? null;
-    const resolved = directory
-      ? isAbsolute(directory)
-        ? directory
-        : join(root, directory)
-      : root;
+    const resolved = directory ? (isAbsolute(directory) ? directory : join(root, directory)) : root;
     return {
       key: item.Key ?? "",
       source: item.Source ?? "",
@@ -159,8 +353,8 @@ function parseInstalledModules(root) {
   });
 }
 
-export function buildInventory(root) {
-  const files = collectTerraformFiles(root);
+export function buildInventory(root, { recursive = true } = {}) {
+  const files = recursive ? collectTerraformFiles(root) : collectRootTerraformFiles(root);
   const declared = parseDeclaredBlocks(root, files);
   const installed = parseInstalledModules(root);
   const installedByKey = new Map(
@@ -174,7 +368,8 @@ export function buildInventory(root) {
   }
 
   const globalCalls = declared.module_calls.filter(isGlobalFoundationCall);
-  const globalStatus = globalCalls.length === 0 ? "missing" : globalCalls.length === 1 ? "present" : "multiple";
+  const globalStatus =
+    globalCalls.length === 0 ? "missing" : globalCalls.length === 1 ? "present" : "multiple";
   const warnings = [];
   if (!existsSync(join(root, ".terraform.lock.hcl"))) {
     warnings.push("No .terraform.lock.hcl was found.");
@@ -183,19 +378,24 @@ export function buildInventory(root) {
     warnings.push("No .terraform/modules/modules.json was found; modules may be uninitialized.");
   }
   if (globalStatus === "missing") {
-    warnings.push("No global foundation module was found; verify whether this state or an external state owns it.");
+    warnings.push(
+      "No global foundation module was found; verify whether this state or an external state owns it.",
+    );
   } else if (globalStatus === "multiple") {
-    warnings.push("Multiple global foundation candidates were found; verify that exactly one Terraform state owns the Tama global foundation.");
+    warnings.push(
+      "Multiple global foundation candidates were found; verify that exactly one Terraform state owns the Tama global foundation.",
+    );
   }
-  if (
-    declared.global_reference_count > 0 &&
-    !globalCalls.some((call) => call.name === "global")
-  ) {
-    warnings.push("The configuration references module.global but does not declare that module address.");
+  if (declared.global_reference_count > 0 && !globalCalls.some((call) => call.name === "global")) {
+    warnings.push(
+      "The configuration references module.global but does not declare that module address.",
+    );
   }
   for (const call of globalCalls) {
     if (isRegistryGlobalSource(call.source) && !call.declared_version) {
-      warnings.push(`module.${call.name} uses the registry global foundation without an explicit version pin.`);
+      warnings.push(
+        `module.${call.name} uses the registry global foundation without an explicit version pin.`,
+      );
     }
     if (
       call.declared_version &&

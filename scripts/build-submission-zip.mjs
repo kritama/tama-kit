@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
+import { createHash, randomUUID } from "node:crypto";
 import {
   lstatSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -39,7 +39,9 @@ function collectDirectory(root, directory, files) {
     const path = join(directory, entry.name);
     const metadata = lstatSync(path);
     if (metadata.isSymbolicLink()) {
-      throw new TypeError(`Submission archives cannot include symlinks: ${archivePath(root, path)}`);
+      throw new TypeError(
+        `Submission archives cannot include symlinks: ${archivePath(root, path)}`,
+      );
     }
     if (metadata.isDirectory()) {
       collectDirectory(root, path, files);
@@ -70,7 +72,9 @@ export function collectFiles(root) {
       throw new TypeError(`Required submission path is not a file or directory: ${item}`);
     }
   }
-  return files.sort((left, right) => archivePath(root, left).localeCompare(archivePath(root, right), "en"));
+  return files.sort((left, right) =>
+    archivePath(root, left).localeCompare(archivePath(root, right), "en"),
+  );
 }
 
 export function buildArchive(root, output) {

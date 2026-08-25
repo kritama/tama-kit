@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-import { parseArgs } from "node:util";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
 
 import {
   readObject,
