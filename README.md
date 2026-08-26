@@ -7,6 +7,48 @@ conversations, direct forwarded actions, shared replies, ingestion, enrichment,
 embeddings, indexing, batch reprocessing, the required global foundation, and
 Terraform-safe graph migration.
 
+## Bootstrap a local Tama runtime
+
+Tama Kit also ships a conventional CLI for adding a local Tama runtime and a
+starter Terraform root to an existing Rails, Phoenix, Node, or generic
+application repository:
+
+```bash
+npx @upmaru/tama-kit bootstrap
+```
+
+After a global npm installation, the equivalent command is:
+
+```bash
+tama-kit bootstrap
+```
+
+Bootstrap detects the project and its default Docker Compose file, creates a
+private `.tama.env`, adds managed Tama and PostgreSQL services, and generates a
+`tama/` Terraform root with one version-pinned `module "global"`. It preserves
+an existing global-foundation address and refuses ambiguous ownership rather
+than creating duplicate data-bearing resources.
+
+Generated non-sensitive files are tracked by `tama/.tama-kit.json`. If a
+tracked file has been edited since the previous bootstrap, Tama Kit stops and
+reports the drift instead of overwriting the user's changes.
+
+Inspect the proposed changes without writing:
+
+```bash
+npx @upmaru/tama-kit bootstrap --dry-run
+```
+
+Generate and start the local services:
+
+```bash
+npx @upmaru/tama-kit bootstrap --start
+```
+
+The first release uses Tama's supported interactive setup flow to create root
+and provisioner credentials. Bootstrap does not use the test-only provisioner
+path and never runs `terraform apply`.
+
 ## Installation
 
 ### Codex
@@ -89,15 +131,24 @@ runtime unknowns with exact evidence.
 ## Development
 
 The bundled maintenance utilities and Terraform inspector are dependency-free
-Node.js ES modules; no Python runtime is required.
+Node.js ES modules; no Python runtime is required. The CLI remains native ESM
+and uses JSDoc contracts with a no-emit TypeScript check, so development does
+not require a compiled `dist/` tree.
 
 Memovee-derived forward-test cases live in `evals/cases.json`; public skill
 references remain domain-neutral. Validate the public-directory metadata,
 Template MCP scaffold, and review cases with:
 
 ```bash
+npm run check
+npm run typecheck
+npm test
+npm run validate:bootstrap
 npm run validate:submission
 ```
+
+`npm run check` verifies formatting, lint rules, and import ordering with Biome.
+Use `npm run check:fix` to apply its safe fixes and formatter output locally.
 
 The public Template MCP connection is intentionally not represented by a fake
 local endpoint. Configure the review materials with a concrete, working example
