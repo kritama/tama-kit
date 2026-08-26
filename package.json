@@ -1,5 +1,5 @@
 {
-  "name": "@upmaru/tama-kit",
+  "name": "@kritama/tama-kit",
   "version": "0.3.3",
   "description": "Bootstrap local Tama runtimes and build, manage, and audit Tama Terraform graph networks.",
   "keywords": [
@@ -16,11 +16,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/upmaru/tama-kit.git"
+    "url": "git+https://github.com/kritama/tama-kit.git"
   },
-  "homepage": "https://github.com/upmaru/tama-kit#readme",
+  "homepage": "https://github.com/kritama/tama-kit#readme",
   "bugs": {
-    "url": "https://github.com/upmaru/tama-kit/issues"
+    "url": "https://github.com/kritama/tama-kit/issues"
   },
   "license": "Apache-2.0",
   "engines": {

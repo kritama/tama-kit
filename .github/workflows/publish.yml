@@ -10,7 +10,7 @@ concurrency:
 
 jobs:
   publish:
-    if: github.repository == 'upmaru/tama-kit'
+    if: github.repository == 'kritama/tama-kit'
     runs-on: ubuntu-latest
     environment: npm
 

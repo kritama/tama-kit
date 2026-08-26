@@ -14,7 +14,7 @@ starter Terraform root to an existing Rails, Phoenix, Node, or generic
 application repository:
 
 ```bash
-npx @upmaru/tama-kit bootstrap
+npx @kritama/tama-kit bootstrap
 ```
 
 After a global npm installation, the equivalent command is:
@@ -36,13 +36,13 @@ reports the drift instead of overwriting the user's changes.
 Inspect the proposed changes without writing:
 
 ```bash
-npx @upmaru/tama-kit bootstrap --dry-run
+npx @kritama/tama-kit bootstrap --dry-run
 ```
 
 Generate and start the local services:
 
 ```bash
-npx @upmaru/tama-kit bootstrap --start
+npx @kritama/tama-kit bootstrap --start
 ```
 
 The first release uses Tama's supported interactive setup flow to create root
@@ -64,7 +64,7 @@ or newer, and an npm CLI available on your system.
 Add the marketplace and install the plugin:
 
 ```bash
-codex plugin marketplace add upmaru/tama-kit
+codex plugin marketplace add kritama/tama-kit
 codex plugin add tama-kit@upmaru
 ```
 
@@ -95,7 +95,7 @@ OpenCode loads Agent Skills directly; it does not use the Codex plugin
 manifest. Install both Tama Kit skills globally with the Skills CLI:
 
 ```bash
-npx skills add upmaru/tama-kit \
+npx skills add kritama/tama-kit \
   --agent opencode \
   --global \
   --yes
@@ -105,7 +105,7 @@ For a project-only installation, run the same command from the project root
 without `--global`:
 
 ```bash
-npx skills add upmaru/tama-kit \
+npx skills add kritama/tama-kit \
   --agent opencode \
   --yes
 ```

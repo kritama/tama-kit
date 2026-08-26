@@ -17,7 +17,7 @@ tama-kit bootstrap
 The npm-package entry point is:
 
 ```bash
-npx @upmaru/tama-kit bootstrap
+npx @kritama/tama-kit bootstrap
 ```
 
 `tama-kit init` may be retained as an alias for discoverability, but
@@ -502,7 +502,7 @@ code.
 - `terraform init` and `terraform validate` succeed against the selected,
   pinned compatibility set.
 - The npm package contains `bin/`, `cli/`, and all bootstrap templates.
-- Both `npx @upmaru/tama-kit bootstrap` and a globally linked
+- Both `npx @kritama/tama-kit bootstrap` and a globally linked
   `tama-kit bootstrap` exercise the same implementation.
 
 The branch CI runs these checks through `npm run validate:bootstrap:runtime`,
