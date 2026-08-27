@@ -251,7 +251,7 @@ function printHuman(io, result, color, setupUrl) {
       return;
     }
     io.stdout("");
-    printBox({ title: "Private setup URL", lines: [url], style: "magenta", continuation: true });
+    printBox({ title: "Private setup URL", lines: [url], style: "magenta" });
   }
 
   if (result.started) {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   cellWidth,
-  expandTabs,
+  cellWidthAt,
   graphemeWidth,
   renderBox,
   toGraphemes,
@@ -96,7 +96,9 @@ test("wrapLine never splits a ZWJ emoji cluster", () => {
 });
 
 test("wrapLine splits whitespace runs wider than the wrap width across rows", () => {
-  assert.deepEqual(wrapLine("run -f 'a          b' up", 9), ["run -f 'a", "       b'", " up"]);
+  const wrapped = wrapLine("run -f 'a          b' up", 9);
+  assert.deepEqual(wrapped, ["run -f 'a", "         ", " b' up"]);
+  assert.equal(wrapped.join(""), "run -f 'a          b' up");
 });
 
 test("wrapLine keeps short lines intact and breaks long lines at word boundaries", () => {
@@ -134,17 +136,11 @@ test("renderBox wraps content to maxWidth and stays rectangular", () => {
   assert.ok(lines.some((line) => line.startsWith("│ This is a fairly long prompt")));
 });
 
-test("expandTabs expands tabs to terminal tab stops from the content column", () => {
-  assert.equal(expandTabs("abc\tdefgh"), "abc   defgh");
-  assert.equal(expandTabs("abcdefgh\tij"), "abcdefgh      ij");
-  assert.equal(expandTabs("no tabs"), "no tabs");
-});
-
-test("renderBox expands tabs at terminal tab stops", () => {
+test("renderBox preserves literal tabs and keeps borders aligned", () => {
   const lines = renderBox({ lines: ["abc\tdefgh"], color: false, maxWidth: 30 });
-  assert.ok(lines.every((line) => !line.includes("\t")));
-  assert.ok(lines.some((line) => line.startsWith("│ abc   defgh")));
-  assert.equal(new Set(lines.map((line) => line.length)).size, 1);
+  assert.ok(lines.some((line) => line.includes("abc\tdefgh")));
+  assert.equal(new Set(lines.map((line) => cellWidthAt(line, 0))).size, 1);
+  assert.ok(lines.every((line) => cellWidthAt(line, 0) <= 34));
 });
 
 test("renderBox appends shell continuations to wrapped value rows", () => {

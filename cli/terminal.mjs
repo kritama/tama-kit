@@ -245,17 +245,22 @@ export function cellWidth(value) {
   return width;
 }
 
-/** @param {string} value @param {number} maxWidth @returns {[string, string]} */
-function breakAtWidth(value, maxWidth) {
+/**
+ * @param {string} value
+ * @param {number} maxWidth
+ * @param {number} [startColumn]
+ * @returns {[string, string]}
+ */
+function breakAtWidth(value, maxWidth, startColumn = CONTENT_COLUMN) {
   const graphemes = toGraphemes(value);
   let index = 0;
-  let used = 0;
+  let column = startColumn;
   for (const grapheme of graphemes) {
-    const width = graphemeWidth(grapheme);
-    if (used + width > maxWidth) {
+    const width = graphemeWidthAt(grapheme, column);
+    if (column + width - startColumn > maxWidth) {
       break;
     }
-    used += width;
+    column += width;
     index += 1;
   }
   if (index === 0) {
@@ -270,7 +275,7 @@ function breakAtWidth(value, maxWidth) {
  * @returns {string[]}
  */
 export function wrapLine(line, maxWidth) {
-  if (cellWidth(line) <= maxWidth) {
+  if (cellWidthAt(line, CONTENT_COLUMN) <= maxWidth) {
     return [line];
   }
   const tokens = line.trim().match(/\S+|\s+/gu) ?? [];
@@ -285,7 +290,7 @@ export function wrapLine(line, maxWidth) {
     /** @type {string[]} */
     const pieces = [];
     let rest = token;
-    while (cellWidth(rest) > maxWidth) {
+    while (cellWidthAt(rest, CONTENT_COLUMN) > maxWidth) {
       const [head, tail] = breakAtWidth(rest, maxWidth);
       pieces.push(head);
       rest = tail;
@@ -294,20 +299,41 @@ export function wrapLine(line, maxWidth) {
     pieces.forEach((piece, pieceIndex) => {
       const prefix = pieceIndex === 0 ? separator : "";
       const candidate = current ? `${current}${prefix}${piece}` : piece;
-      if (cellWidth(candidate) <= maxWidth) {
+      if (cellWidthAt(candidate, CONTENT_COLUMN) <= maxWidth) {
         current = candidate;
-      } else if (prefix && /^ +$/.test(prefix) && cellWidth(`${prefix}${piece}`) > maxWidth) {
-        const head = prefix.slice(0, Math.max(0, maxWidth - cellWidth(current)));
-        const tail = prefix.slice(head.length);
-        const lead = tail.slice(0, Math.max(0, maxWidth - cellWidth(piece)));
-        wrapped.push(`${current}${head}`);
-        current = `${lead}${piece}`;
+      } else if (
+        prefix &&
+        /^ +$/.test(prefix) &&
+        cellWidthAt(`${prefix}${piece}`, CONTENT_COLUMN) > maxWidth
+      ) {
+        let spaces = prefix.length;
+        if (current) {
+          const take = Math.min(
+            spaces,
+            Math.max(0, maxWidth - cellWidthAt(current, CONTENT_COLUMN)),
+          );
+          wrapped.push(`${current}${" ".repeat(take)}`);
+          spaces -= take;
+          current = "";
+        }
+        while (spaces >= maxWidth) {
+          wrapped.push(" ".repeat(maxWidth));
+          spaces -= maxWidth;
+        }
+        if (spaces + cellWidthAt(piece, CONTENT_COLUMN) > maxWidth) {
+          const lead = Math.max(0, maxWidth - cellWidthAt(piece, CONTENT_COLUMN));
+          if (spaces - lead > 1) {
+            wrapped.push(" ".repeat(spaces - lead));
+          }
+          spaces = lead;
+        }
+        current = `${" ".repeat(spaces)}${piece}`;
       } else {
         if (current) {
           wrapped.push(current);
         }
         const next = `${prefix}${piece}`;
-        current = cellWidth(next) <= maxWidth ? next : piece;
+        current = cellWidthAt(next, CONTENT_COLUMN) <= maxWidth ? next : piece;
       }
     });
   }
@@ -317,21 +343,23 @@ export function wrapLine(line, maxWidth) {
   return wrapped;
 }
 
-/** @param {string} value @param {number} [startColumn] @returns {string} */
-export function expandTabs(value, startColumn = 2) {
-  let column = startColumn;
-  let expanded = "";
-  for (const grapheme of toGraphemes(value)) {
-    if (grapheme === "\t") {
-      const stop = (Math.floor(column / 8) + 1) * 8;
-      expanded += " ".repeat(stop - column);
-      column = stop;
-    } else {
-      expanded += grapheme;
-      column += graphemeWidth(grapheme);
-    }
+const CONTENT_COLUMN = 2;
+
+/** @param {string} grapheme @param {number} column @returns {number} */
+function graphemeWidthAt(grapheme, column) {
+  if (grapheme === "\t") {
+    return (Math.floor(column / 8) + 1) * 8 - column;
   }
-  return expanded;
+  return graphemeWidth(grapheme);
+}
+
+/** @param {string} value @param {number} startColumn @returns {number} */
+export function cellWidthAt(value, startColumn) {
+  let column = startColumn;
+  for (const grapheme of toGraphemes(value)) {
+    column += graphemeWidthAt(grapheme, column);
+  }
+  return column - startColumn;
 }
 
 /**
@@ -341,10 +369,7 @@ export function expandTabs(value, startColumn = 2) {
 export function renderBox({ title, lines, color, style, maxWidth, continuation = false }) {
   const wrapWidth = continuation && maxWidth !== undefined ? Math.max(1, maxWidth - 2) : maxWidth;
   /** @param {string} line */
-  const wrap = (line) => {
-    const expanded = expandTabs(line);
-    return wrapWidth === undefined ? [expanded] : wrapLine(expanded, wrapWidth);
-  };
+  const wrap = (line) => (wrapWidth === undefined ? [line] : wrapLine(line, wrapWidth));
   /** @param {string[]} wrapped */
   const continued = (wrapped) =>
     continuation && wrapped.length > 1
@@ -353,7 +378,7 @@ export function renderBox({ title, lines, color, style, maxWidth, continuation =
   const contentLines = lines.flatMap((line) => continued(wrap(line)));
   const titleLines = title === undefined ? [] : wrap(title);
   /** @param {string} line */
-  const measure = (line) => cellWidth(stripAnsi(line));
+  const measure = (line) => cellWidthAt(stripAnsi(line), CONTENT_COLUMN);
   const width = [...titleLines, ...contentLines].reduce(
     (max, line) => Math.max(max, measure(line)),
     0,
