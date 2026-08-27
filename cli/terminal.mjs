@@ -407,10 +407,13 @@ function canonicalSpan(token) {
   if (!consumed) {
     return null;
   }
-  if (!value.includes("'") && !value.includes("$") && !value.includes("`")) {
+  // Single quotes make every character literal except the apostrophe itself,
+  // so only an embedded ' rules them out. Double quotes leave $, `, " and \
+  // active, so they need a value free of all four.
+  if (!value.includes("'")) {
     return { quote: "'", value };
   }
-  if (value.includes("'") && !/["$`"\\]/.test(value)) {
+  if (!/["$`"\\]/.test(value)) {
     return { quote: '"', value };
   }
   return null;

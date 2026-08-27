@@ -200,6 +200,17 @@ test("wrapLine re-quotes compound apostrophe tokens as double-quoted chunks", ()
   assert.ok(wrapped.every((row) => cellWidthAt(row, 2) <= 18));
 });
 
+test("wrapLine re-quotes single-quoted tokens with $ or backticks as single-quoted chunks", () => {
+  const dollar = "/tmp/$money budget/compose.yaml";
+  const tick = "/tmp/`tick` dir/compose.yaml";
+  for (const value of [dollar, tick]) {
+    const wrapped = wrapLine(`'${value}'`, 18);
+    assert.ok(wrapped.every((row) => row.startsWith("'") && row.endsWith("'")));
+    assert.equal(wrapped.map((row) => row.slice(1, -1)).join(""), value);
+    assert.ok(wrapped.every((row) => cellWidthAt(row, 2) <= 18));
+  }
+});
+
 test("wrapLine breaks words that mix apostrophes and $ only outside quoted spans", () => {
   assert.deepEqual(wrapLine("run 'a'\\''b$c'", 6), ["run", " 'a'\\'", "'b$c'"]);
 });
