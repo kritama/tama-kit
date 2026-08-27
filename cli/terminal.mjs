@@ -397,26 +397,43 @@ function parseShellWord(token) {
 }
 
 /**
- * Re-quotes a shell word as one span that can be hard-broken at any cell
- * boundary, or null when no such quoting exists.
+ * Re-quotes a fully parseable shell word as a sequence of single-quoted
+ * pieces that concatenate back to the original value. Every character is
+ * literal inside single quotes, so $, `, ", \ and ! stay inert; an embedded
+ * apostrophe becomes the atomic \' separator between quoted spans. Returns
+ * null when the word is not fully parseable.
  * @param {string} token
- * @returns {{quote: string, value: string} | null}
+ * @param {number} maxWidth
+ * @returns {string[] | null}
  */
-function canonicalSpan(token) {
+function canonicalPieces(token, maxWidth) {
   const { value, consumed } = parseShellWord(token);
   if (!consumed) {
     return null;
   }
-  // Single quotes make every character literal except the apostrophe itself,
-  // so only an embedded ' rules them out. Double quotes leave $, `, " and \
-  // active, so they need a value free of all four.
-  if (!value.includes("'")) {
-    return { quote: "'", value };
+  /** @type {string[]} */
+  const pieces = [];
+  /** @param {string} run */
+  const quoteRun = (run) => {
+    let rest = run;
+    while (rest !== "") {
+      const [head, tail] = breakAtWidth(rest, Math.max(1, maxWidth - 2), CONTENT_COLUMN + 1);
+      pieces.push(`'${head}'`);
+      rest = tail;
+    }
+  };
+  let run = "";
+  for (const char of Array.from(value)) {
+    if (char !== "'") {
+      run += char;
+      continue;
+    }
+    quoteRun(run);
+    run = "";
+    pieces.push("\\'");
   }
-  if (!/["$`"\\]/.test(value)) {
-    return { quote: '"', value };
-  }
-  return null;
+  quoteRun(run);
+  return pieces;
 }
 
 /**
@@ -561,26 +578,18 @@ function wrapLineDetailed(line, maxWidth, shell = true) {
     if (token === "") {
       continue;
     }
-    // Shell lines: quoted words are re-quoted as one canonical span so
+    // Shell lines: quoted words are re-quoted as single-quoted pieces so
     // every chunk is itself quoted: the continuation backslash then sits
     // outside the quotes and adjacent quoted chunks concatenate into the
-    // original word. Words that cannot be re-quoted are broken verbatim,
-    // only where a continuation backslash stays outside quotes. Display
-    // lines keep quotes as ordinary characters and break words verbatim.
+    // original word. Words that cannot be parsed are broken verbatim, only
+    // where a continuation backslash stays outside quotes. Display lines
+    // keep quotes as ordinary characters and break words verbatim.
     /** @type {string[]} */
     const pieces = [];
     if (shell) {
-      const span = /['"]/.test(token) ? canonicalSpan(token) : null;
-      if (span !== null) {
-        let rest = span.value;
-        while (rest !== "" && cellWidthAt(rest, CONTENT_COLUMN) + 2 > maxWidth) {
-          const [head, tail] = breakAtWidth(rest, Math.max(1, maxWidth - 2), CONTENT_COLUMN + 1);
-          pieces.push(`${span.quote}${head}${span.quote}`);
-          rest = tail;
-        }
-        if (rest !== "" || pieces.length === 0) {
-          pieces.push(`${span.quote}${rest}${span.quote}`);
-        }
+      const canonical = /['"]/.test(token) ? canonicalPieces(token, maxWidth) : null;
+      if (canonical !== null) {
+        pieces.push(...canonical);
       } else {
         pieces.push(...rawTokenPieces(token, maxWidth));
       }

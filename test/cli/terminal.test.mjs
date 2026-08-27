@@ -191,12 +191,31 @@ test("renderBox keeps quoted paths with whitespace as one shell word", () => {
   );
 });
 
-test("wrapLine re-quotes compound apostrophe tokens as double-quoted chunks", () => {
+test("wrapLine re-quotes compound apostrophe tokens as single-quoted chunks", () => {
   const value = "/tmp/tama project's/deploy/compose.yaml";
   const token = `'${value.replaceAll("'", "'\\''")}'`;
   const wrapped = wrapLine(token, 18);
-  assert.ok(wrapped.every((row) => row.startsWith('"') && row.endsWith('"')));
-  assert.equal(wrapped.map((row) => row.slice(1, -1)).join(""), value);
+  assert.ok(
+    wrapped.every((row) => /^('[^']*'|\\')+$/.test(row.trimStart())),
+    wrapped.join("\n"),
+  );
+  const rejoin = (text) => {
+    let out = "";
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] === "'") {
+        const end = text.indexOf("'", i + 1);
+        out += text.slice(i + 1, end);
+        i = end;
+      } else if (text[i] === "\\") {
+        out += text[i + 1];
+        i += 1;
+      } else {
+        out += text[i];
+      }
+    }
+    return out;
+  };
+  assert.equal(rejoin(wrapped.map((row) => row.trimStart()).join("")), value);
   assert.ok(wrapped.every((row) => cellWidthAt(row, 2) <= 18));
 });
 
@@ -213,6 +232,28 @@ test("wrapLine re-quotes single-quoted tokens with $ or backticks as single-quot
 
 test("wrapLine breaks words that mix apostrophes and $ only outside quoted spans", () => {
   assert.deepEqual(wrapLine("run 'a'\\''b$c'", 6), ["run", " 'a'\\'", "'b$c'"]);
+});
+
+test("wrapLine keeps history-expansion ! literal inside single-quoted chunks", () => {
+  const value = "a project's/!important/compose.yaml";
+  const token = `'${value.replaceAll("'", "'\\''")}'`;
+  const wrapped = wrapLine(token, 20);
+  assert.ok(
+    wrapped.every((row) => /^('[^']*'|\\')+$/.test(row.trimStart())),
+    wrapped.join("\n"),
+  );
+  assert.ok(wrapped.every((row) => cellWidthAt(row, 2) <= 20));
+});
+
+test("wrapLine fits apostrophe-and-$ paths inside maxWidth", () => {
+  const value = "this project's/$money/very-long-directory-name/compose.yaml";
+  const token = `'${value.replaceAll("'", "'\\''")}'`;
+  const wrapped = wrapLine(token, 36);
+  assert.ok(wrapped.length > 1);
+  assert.ok(
+    wrapped.every((row) => cellWidthAt(row, 2) <= 36),
+    wrapped.join("\n"),
+  );
 });
 
 test("wrapLine treats prose apostrophes as ordinary characters in display mode", () => {
