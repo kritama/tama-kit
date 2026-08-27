@@ -83,9 +83,9 @@ test("wrapLine preserves original whitespace runs on unbroken lines", () => {
   assert.deepEqual(wrapLine("a  b   c", 30), ["a  b   c"]);
 });
 
-test("wrapLine carries a multi-space separator onto the continuation row", () => {
+test("wrapLine keeps quoted whitespace tokens intact and wraps them as units", () => {
   const wrapped = wrapLine("run -f 'a  b' up", 9);
-  assert.deepEqual(wrapped, ["run -f 'a", "  b' up"]);
+  assert.deepEqual(wrapped, ["run -f", " 'a  b'", " up"]);
   assert.equal(wrapped.join(""), "run -f 'a  b' up");
 });
 
@@ -95,10 +95,11 @@ test("wrapLine never splits a ZWJ emoji cluster", () => {
   assert.deepEqual(wrapped, [`${family} hello`, " world"]);
 });
 
-test("wrapLine splits whitespace runs wider than the wrap width across rows", () => {
+test("wrapLine keeps the inner whitespace of a quoted token when hard-breaking it", () => {
   const wrapped = wrapLine("run -f 'a          b' up", 9);
-  assert.deepEqual(wrapped, ["run -f 'a", "         ", " b' up"]);
-  assert.equal(wrapped.join(""), "run -f 'a          b' up");
+  assert.deepEqual(wrapped, ["run -f ", "'a      '", "'    b'", " up"]);
+  assert.equal(wrapped.join("").replace(/''/g, ""), "run -f 'a          b' up");
+  assert.ok(wrapped.every((row) => cellWidthAt(row, 2) <= 9));
 });
 
 test("wrapLine keeps short lines intact and breaks long lines at word boundaries", () => {
@@ -119,17 +120,14 @@ test("wrapLine hard-breaks words longer than the max width", () => {
   assert.deepEqual(wrapLine("", 10), [""]);
 });
 
-test("wrapLine closes and reopens quotes when hard-breaking quoted tokens", () => {
+test("wrapLine hard-breaks quoted tokens into adjacent quoted chunks", () => {
   const wrapped = wrapLine("'averyveryverylongdirectory/compose.yaml'", 18);
+  assert.deepEqual(wrapped, ["'averyveryverylon'", "'gdirectory/compo'", "'se.yaml'"]);
+  assert.equal(wrapped.join("").replace(/''/g, ""), "'averyveryverylongdirectory/compose.yaml'");
   assert.ok(wrapped.every((row) => cellWidthAt(row, 2) <= 18));
-  assert.ok(wrapped.every((row) => /^'.*'$/.test(row)));
-  assert.equal(
-    wrapped.map((row) => row.slice(1, -1)).join(""),
-    "averyveryverylongdirectory/compose.yaml",
-  );
 });
 
-test("renderBox keeps continuation backslashes outside quoted tokens", () => {
+test("renderBox puts every continuation backslash at the very end of its row", () => {
   const command = "docker compose -f 'averyveryverylongdirectory/compose.yaml' up -d tama";
   const lines = renderBox({
     title: "Next",
@@ -138,27 +136,16 @@ test("renderBox keeps continuation backslashes outside quoted tokens", () => {
     maxWidth: 24,
     continuation: true,
   });
-  for (const row of lines) {
-    if (!/\\│$/.test(row)) {
-      continue;
-    }
-    let content = row.slice(0, -2);
-    if (content.startsWith("│ ")) {
-      content = content.slice(2);
-    } else if (content.startsWith("│")) {
-      content = content.slice(1);
-    }
-    content = content.replace(/\s+$/, "");
-    assert.equal(
-      (content.match(/'/g) ?? []).length % 2,
-      0,
-      `backslash must sit outside quotes: ${row}`,
-    );
+  const rows = lines.slice(3, -1);
+  for (const row of rows.slice(0, -1)) {
+    assert.ok(/\\│$/.test(row), `backslash must be the final character before the border: ${row}`);
   }
+  assert.ok(!rows.at(-1)?.includes("\\"));
 });
 
-test("wrapLine terminates for quoted tokens narrower than the quote overhead", () => {
+test("wrapLine terminates for tokens narrower than the wrap width", () => {
   assert.deepEqual(wrapLine("'abcd'", 1), ["'a'", "'b'", "'c'", "'d'"]);
+  assert.deepEqual(wrapLine("abcd", 1), ["a", "b", "c", "d"]);
 });
 
 test("renderBox continuations rejoin into the original command", () => {
@@ -179,6 +166,28 @@ test("renderBox continuations rejoin into the original command", () => {
   assert.equal(
     stripQuotes(joined).replace(/\s+/g, " ").trim(),
     stripQuotes(command).replace(/\s+/g, " ").trim(),
+  );
+});
+
+test("renderBox keeps quoted paths with whitespace as one shell word", () => {
+  const command = "docker compose -f 'a long directory/compose.yaml' up -d tama";
+  const lines = renderBox({
+    title: "Next",
+    lines: [command],
+    color: false,
+    maxWidth: 20,
+    continuation: true,
+  });
+  // Hard-wrapped chunk rows are deliberately tight (no padding): whitespace
+  // between the chunks would become part of the shell word.
+  const contentOf = (row) => {
+    const body = row.endsWith("\\│") ? row.slice(0, -2) : row.slice(0, -1);
+    return body.startsWith("│ ") ? body.slice(2) : body.slice(1);
+  };
+  const joined = lines.slice(3, -1).map(contentOf).join("").replace(/'/g, "");
+  assert.equal(
+    joined.replace(/\s+/g, " ").trim(),
+    command.replace(/'/g, "").replace(/\s+/g, " ").trim(),
   );
 });
 
@@ -206,10 +215,16 @@ test("renderBox preserves literal tabs and keeps borders aligned", () => {
   assert.ok(lines.every((line) => cellWidthAt(line, 0) <= 34));
 });
 
-test("wrapLine preserves tab separators when they do not fit beside the next token", () => {
+test("wrapLine preserves tabs inside quoted tokens when hard-breaking them", () => {
   const value = "docker compose -f 'nested/a\tb/compose.yaml' up -d tama";
   const wrapped = wrapLine(value, 18);
-  assert.equal(wrapped.join(""), value);
+  assert.deepEqual(wrapped, [
+    "docker compose -f",
+    " 'nested/a\tb/c'",
+    "'ompose.yaml' up",
+    " -d tama",
+  ]);
+  assert.equal(wrapped.join("").replace(/''/g, ""), value);
   assert.ok(wrapped.every((row) => cellWidthAt(row, 2) <= 18));
 });
 

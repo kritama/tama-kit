@@ -270,6 +270,51 @@ function breakAtWidth(value, maxWidth, startColumn = CONTENT_COLUMN) {
 }
 
 /**
+ * Splits a command into shell words: quoted spans stay inside one word even
+ * when they contain whitespace.
+ * @param {string} value
+ * @returns {{separator: string, token: string}[]}
+ */
+function tokenizeLine(value) {
+  /** @type {{separator: string, token: string}[]} */
+  const parts = [];
+  let separator = "";
+  let token = "";
+  let index = 0;
+  const flush = () => {
+    if (token !== "" || separator !== "") {
+      parts.push({ separator, token });
+    }
+    separator = "";
+    token = "";
+  };
+  while (index < value.length) {
+    const char = value[index];
+    if (char === " " || char === "\t") {
+      if (token === "") {
+        separator += char;
+      } else {
+        flush();
+        separator = char;
+      }
+      index += 1;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      const close = value.indexOf(char, index + 1);
+      const end = close === -1 ? value.length : close + 1;
+      token += value.slice(index, end);
+      index = end;
+      continue;
+    }
+    token += char;
+    index += 1;
+  }
+  flush();
+  return parts;
+}
+
+/**
  * @param {string} line
  * @param {number} maxWidth
  * @returns {{line: string, midToken: boolean, tokenContinuation: boolean}[]}
@@ -278,66 +323,71 @@ function wrapLineDetailed(line, maxWidth) {
   if (cellWidthAt(line, CONTENT_COLUMN) <= maxWidth) {
     return [{ line, midToken: false, tokenContinuation: false }];
   }
-  const tokens = line.trim().match(/\S+|\s+/gu) ?? [];
+  const tokens = tokenizeLine(line.trim());
   /** @type {{line: string, midToken: boolean, tokenContinuation: boolean}[]} */
   const wrapped = [];
   let current = "";
   let currentContinues = false;
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    if (token.trim() === "") {
+  for (const { separator, token } of tokens) {
+    if (token === "") {
       continue;
     }
-    const separator = index > 0 ? tokens[index - 1] : "";
-    /** @type {string[]} */
+    // A fully-quoted token is broken so every chunk is itself quoted: the
+    // continuation backslash then sits outside the quotes and the adjacent
+    // quoted chunks concatenate into the original word.
+    /** @type {{text: string, quoted: boolean}[]} */
     const pieces = [];
     const quote =
       token.length >= 2 && (token[0] === "'" || token[0] === '"') && token.endsWith(token[0])
         ? token[0]
         : "";
-    let rest = quote ? token.slice(1, -1) : token;
-    while (rest !== "" && cellWidthAt(rest, CONTENT_COLUMN) + (quote ? 2 : 0) > maxWidth) {
-      const [head, tail] = breakAtWidth(rest, Math.max(1, maxWidth - (quote ? 2 : 0)));
-      pieces.push(quote ? `${quote}${head}${quote}` : head);
+    let rest = quote !== "" ? token.slice(1, -1) : token;
+    while (rest !== "" && cellWidthAt(rest, CONTENT_COLUMN) + (quote !== "" ? 2 : 0) > maxWidth) {
+      const [head, tail] = breakAtWidth(
+        rest,
+        Math.max(1, maxWidth - (quote !== "" ? 2 : 0)),
+        quote !== "" ? CONTENT_COLUMN + 1 : CONTENT_COLUMN,
+      );
+      pieces.push({
+        text: quote !== "" ? `${quote}${head}${quote}` : head,
+        quoted: quote !== "",
+      });
       rest = tail;
     }
     if (rest !== "" || pieces.length === 0) {
-      pieces.push(quote ? `${quote}${rest}${quote}` : rest);
+      pieces.push({
+        text: quote !== "" ? `${quote}${rest}${quote}` : rest,
+        quoted: quote !== "",
+      });
     }
     pieces.forEach((piece, pieceIndex) => {
       const prefix = pieceIndex === 0 ? separator : "";
-      const continuesToken = prefix === "" && pieceIndex > 0;
-      const candidate = current ? `${current}${prefix}${piece}` : piece;
+      const continuesToken = pieceIndex > 0;
+      const candidate = current !== "" ? `${current}${prefix}${piece.text}` : piece.text;
       if (cellWidthAt(candidate, CONTENT_COLUMN) <= maxWidth) {
-        if (!current) {
+        if (current === "") {
           currentContinues = continuesToken;
         }
         current = candidate;
       } else if (
-        prefix &&
+        prefix !== "" &&
         /^ +$/.test(prefix) &&
-        cellWidthAt(`${prefix}${piece}`, CONTENT_COLUMN) > maxWidth
+        cellWidthAt(`${prefix}${piece.text}`, CONTENT_COLUMN) > maxWidth
       ) {
         let spaces = prefix.length;
-        if (current) {
-          const take = Math.min(
-            spaces,
-            Math.max(0, maxWidth - cellWidthAt(current, CONTENT_COLUMN)),
-          );
-          wrapped.push({
-            line: `${current}${" ".repeat(take)}`,
-            midToken: false,
-            tokenContinuation: currentContinues,
-          });
-          spaces -= take;
-          current = "";
-        }
+        const take = Math.min(spaces, Math.max(0, maxWidth - cellWidthAt(current, CONTENT_COLUMN)));
+        wrapped.push({
+          line: `${current}${" ".repeat(take)}`,
+          midToken: false,
+          tokenContinuation: currentContinues,
+        });
+        spaces -= take;
         while (spaces >= maxWidth) {
           wrapped.push({ line: " ".repeat(maxWidth), midToken: false, tokenContinuation: false });
           spaces -= maxWidth;
         }
-        if (spaces + cellWidthAt(piece, CONTENT_COLUMN) > maxWidth) {
-          const lead = Math.max(0, maxWidth - cellWidthAt(piece, CONTENT_COLUMN));
+        if (spaces + cellWidthAt(piece.text, CONTENT_COLUMN) > maxWidth) {
+          const lead = Math.max(0, maxWidth - cellWidthAt(piece.text, CONTENT_COLUMN));
           if (spaces - lead > 1) {
             wrapped.push({
               line: " ".repeat(spaces - lead),
@@ -347,40 +397,36 @@ function wrapLineDetailed(line, maxWidth) {
           }
           spaces = lead;
         }
-        current = `${" ".repeat(spaces)}${piece}`;
+        current = `${" ".repeat(spaces)}${piece.text}`;
         currentContinues = false;
       } else if (
-        prefix &&
+        prefix !== "" &&
         /^[\t ]+$/.test(prefix) &&
-        cellWidthAt(`${prefix}${piece}`, CONTENT_COLUMN) > maxWidth
+        cellWidthAt(`${prefix}${piece.text}`, CONTENT_COLUMN) > maxWidth
       ) {
-        if (cellWidthAt(`${current}${prefix}`, CONTENT_COLUMN) <= maxWidth) {
-          wrapped.push({
-            line: `${current}${prefix}`,
-            midToken: false,
-            tokenContinuation: currentContinues,
-          });
-          current = piece;
-        } else {
-          wrapped.push({ line: current, midToken: false, tokenContinuation: currentContinues });
-          current = piece;
-        }
+        const prefixFits = cellWidthAt(`${current}${prefix}`, CONTENT_COLUMN) <= maxWidth;
+        wrapped.push({
+          line: prefixFits ? `${current}${prefix}` : current,
+          midToken: false,
+          tokenContinuation: currentContinues,
+        });
+        current = piece.text;
         currentContinues = false;
       } else {
-        if (current) {
+        if (current !== "") {
           wrapped.push({
             line: current,
             midToken: continuesToken,
             tokenContinuation: currentContinues,
           });
         }
-        const next = `${prefix}${piece}`;
-        current = cellWidthAt(next, CONTENT_COLUMN) <= maxWidth ? next : piece;
+        const next = `${prefix}${piece.text}`;
+        current = cellWidthAt(next, CONTENT_COLUMN) <= maxWidth ? next : piece.text;
         currentContinues = continuesToken;
       }
     });
   }
-  if (current) {
+  if (current !== "") {
     wrapped.push({ line: current, midToken: false, tokenContinuation: currentContinues });
   }
   return wrapped;
