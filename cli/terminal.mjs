@@ -50,6 +50,8 @@ function codePointWidth(codePoint) {
     codePoint === 0x00ad ||
     codePoint === 0x200c ||
     codePoint === 0x200d ||
+    codePoint === 0x3099 ||
+    codePoint === 0x309a ||
     (codePoint >= 0xe0000 && codePoint <= 0xe007f)
   ) {
     return 0;
