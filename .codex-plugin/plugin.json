@@ -1,13 +1,13 @@
 {
   "name": "tama-kit",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Build, manage, and audit complete Tama Terraform graph networks.",
   "author": {
     "name": "Upmaru",
     "url": "https://upmaru.com"
   },
-  "homepage": "https://github.com/upmaru/tama-kit#readme",
-  "repository": "https://github.com/upmaru/tama-kit",
+  "homepage": "https://github.com/kritama/tama-kit#readme",
+  "repository": "https://github.com/kritama/tama-kit",
   "license": "Apache-2.0",
   "keywords": ["tama", "terraform", "mcp", "graphs"],
   "skills": "./skills/",

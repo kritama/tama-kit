@@ -17,7 +17,7 @@ tama-kit bootstrap
 The npm-package entry point is:
 
 ```bash
-npx @upmaru/tama-kit bootstrap
+npx @kritama/tama-kit bootstrap
 ```
 
 `tama-kit init` may be retained as an alias for discoverability, but
@@ -61,9 +61,11 @@ tama-kit bootstrap [path]
   --compose <path>
   --port <port>
   --image <tag-or-digest>
+  --skills <local|manual>
   --dry-run
   --start
   --json
+  --no-color
 ```
 
 Behavior:
@@ -73,14 +75,24 @@ Behavior:
 - `--port` changes the host-facing Tama port without changing container port
   4000.
 - `--image` overrides the tested default image for local experimentation.
+- `--skills` records whether Tama Kit copies its bundled skills into the
+  repository or prints self-installation commands after bootstrap.
 - `--dry-run` reports the detection result and proposed file operations without
   writing or starting containers.
 - `--start` runs Docker Compose after generation and waits for Tama health.
 - `--json` emits a stable result envelope for automation and implies no
   interactive output.
+- `--no-color` disables color styling in human-readable output.
 
 `bootstrap` should generate files by default but should not pull images or
 start containers unless `--start` is supplied.
+
+After a successful write, human-readable output ends with a copy-ready agent
+prompt that starts or checks Compose, guides the private interactive setup,
+runs Terraform initialization and non-destructive validation, summarizes the
+plan, and stops for explicit approval before apply. Human output includes the
+complete onboarding URL and setup token. JSON output returns a token-redacted
+prompt in `agentPrompt`; dry-run results use `null`.
 
 ## Repository layout
 
@@ -104,9 +116,12 @@ tama-kit/
 │   │   ├── gitignore.mjs
 │   │   ├── manifest.mjs
 │   │   ├── plan.mjs
+│   │   ├── skills.mjs
 │   │   └── write.mjs
+│   ├── terminal.mjs
 │   └── templates/
 │       └── bootstrap/
+│           ├── AGENTS.md
 │           ├── compose.yaml
 │           ├── global-module.tf
 │           ├── main.tf
@@ -203,12 +218,17 @@ For a new integration:
 
 ```text
 project/
+├── .agents/                       # when local skills are selected
+│   └── skills/
+│       ├── graph-builder/
+│       └── graph-audit/
 ├── .tama.env
 ├── .tama.postgres.env
 ├── .tama.env.example
 ├── compose.yaml
 └── tama/
     ├── .tama-kit.json
+    ├── AGENTS.md
     ├── compose.yaml
     ├── main.tf
     ├── versions.tf
@@ -288,8 +308,10 @@ TAMA_BASE_URL=http://localhost:4000
 ```
 
 The exact variable set must be verified against the pinned Tama image before
-release. Generated secrets must use a cryptographically secure random source,
-must not appear in normal terminal output, and must not rotate on rerun.
+release. Generated secrets must use a cryptographically secure random source
+and must not rotate on rerun. The setup token may appear only as part of the
+private onboarding URL in successful interactive human output; other generated
+secrets must not appear in terminal output.
 Persisted values are validated against the pinned runtime contracts:
 `SECRET_KEY_BASE` must contain at least 64 bytes, and `TAMA_VAULT_KEY` must be
 either 32 raw bytes or canonical Base64 that decodes to 32 bytes.
@@ -426,7 +448,8 @@ Change
   reason
 ```
 
-Sensitive content is redacted from human and JSON output. JSON errors include
+Sensitive content is redacted from JSON output. Human output reveals only the
+setup token inside its explicitly labeled private onboarding URL. JSON errors include
 their stable numeric exit code, and file changes include reasons plus before
 and after SHA-256 digests. Writes use temporary files followed by
 same-filesystem rename where supported. If validation fails, bootstrap reports
@@ -445,6 +468,7 @@ format permits it. Ownership is path- and content-specific; the presence of a
 On rerun:
 
 - preserve `.tama.env` and its secrets;
+- preserve the recorded local-or-manual agent-skill choice;
 - preserve an existing global-module address;
 - update only Tama Kit-managed templates;
 - leave user-owned Terraform and Compose content untouched;
@@ -453,11 +477,11 @@ On rerun:
 - produce no changes when inputs and template versions are unchanged.
 
 The generator maintains a non-secret `tama/.tama-kit.json` manifest containing
-the manifest schema version and SHA-256 digests for generated, non-sensitive
-managed files. A rerun updates a managed template only when its current digest
-matches the previously recorded digest. Missing or user-modified managed files
-fail closed instead of being silently replaced. Sensitive environment files
-are excluded from the manifest.
+the manifest schema version, the agent-skill installation choice, and SHA-256
+digests for generated, non-sensitive managed files. A rerun updates a managed
+template only when its current digest matches the previously recorded digest.
+Missing or user-modified managed files fail closed instead of being silently
+replaced. Sensitive environment files are excluded from the manifest.
 
 ## Exit codes
 
@@ -493,7 +517,8 @@ code.
 - Detect an existing root global module under any Terraform address.
 - Refuse duplicate or unknown global-foundation ownership.
 - Prove that `--dry-run` writes nothing.
-- Redact all sensitive values from text and JSON output.
+- Redact sensitive values from JSON output and every human-output location
+  except the explicitly labeled private onboarding URL.
 
 ### Static integration checks
 
@@ -502,7 +527,7 @@ code.
 - `terraform init` and `terraform validate` succeed against the selected,
   pinned compatibility set.
 - The npm package contains `bin/`, `cli/`, and all bootstrap templates.
-- Both `npx @upmaru/tama-kit bootstrap` and a globally linked
+- Both `npx @kritama/tama-kit bootstrap` and a globally linked
   `tama-kit bootstrap` exercise the same implementation.
 
 The branch CI runs these checks through `npm run validate:bootstrap:runtime`,

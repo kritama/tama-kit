@@ -168,8 +168,8 @@ function validateManifest(root) {
     "package.json and plugin manifest versions must match",
   );
   requireCondition(
-    packageJson.name === `@upmaru/${name}`,
-    "npm package name must match the plugin name under the @upmaru scope",
+    packageJson.name === `@kritama/${name}`,
+    "npm package name must match the plugin name under the @kritama scope",
   );
   requireCondition(packageJson.license === "Apache-2.0", "package.json license must be Apache-2.0");
   requireCondition(

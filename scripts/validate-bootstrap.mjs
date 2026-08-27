@@ -119,6 +119,8 @@ try {
     "bootstrap",
     project,
     "--json",
+    "--skills",
+    "local",
   ];
   if (runtime) {
     bootstrapArguments.push("--start");
@@ -133,7 +135,14 @@ try {
   const result = JSON.parse(bootstrapOutput);
   assert.equal(result.ok, true);
   assert.equal(result.started, runtime);
+  assert.match(result.agentPrompt, /terraform -chdir=tama plan/u);
+  assert.match(result.agentPrompt, /Do not run terraform apply until I explicitly approve/u);
+  const generatedEnvironment = environmentValues(readFileSync(environmentFile, "utf8"));
+  assert.equal(bootstrapOutput.includes(generatedEnvironment.TAMA_SETUP_TOKEN), false);
   assert.equal(existsSync(join(project, "tama", ".tama-kit.json")), true);
+  assert.equal(existsSync(join(project, "tama", "AGENTS.md")), true);
+  assert.equal(existsSync(join(project, ".agents", "skills", "graph-builder", "SKILL.md")), true);
+  assert.equal(existsSync(join(project, ".agents", "skills", "graph-audit", "SKILL.md")), true);
 
   execute("docker", ["compose", "-f", composeFile, "config", "--quiet"], { cwd: project });
   execute("terraform", ["-chdir=tama", "fmt", "-check"], { cwd: project });
@@ -145,8 +154,7 @@ try {
   if (runtime) {
     const response = await fetch(result.healthUrl, { redirect: "follow" });
     assert.equal(response.ok, true);
-    const environment = environmentValues(readFileSync(join(project, ".tama.env"), "utf8"));
-    const setupUrl = `http://localhost:${environment.TAMA_PORT}/setup/root?token=${environment.TAMA_SETUP_TOKEN}`;
+    const setupUrl = `http://localhost:${generatedEnvironment.TAMA_PORT}/setup/root?token=${generatedEnvironment.TAMA_SETUP_TOKEN}`;
     const setupResponse = await fetch(setupUrl, { redirect: "follow" });
     assert.equal(setupResponse.ok, true);
   }
@@ -166,10 +174,24 @@ try {
   ]);
   const installedBinary = join(installDirectory, "node_modules", ".bin", "tama-kit");
   const packagedResult = JSON.parse(
-    execute(installedBinary, ["bootstrap", packagedProject, "--dry-run", "--json"]),
+    execute(installedBinary, [
+      "bootstrap",
+      packagedProject,
+      "--dry-run",
+      "--json",
+      "--skills",
+      "local",
+    ]),
   );
   assert.equal(packagedResult.ok, true);
   assert.equal(packagedResult.mode, "dry-run");
+  assert.equal(packagedResult.skillMode, "local");
+  assert.equal(
+    packagedResult.changes.some((change) =>
+      change.path.endsWith(".agents/skills/graph-builder/SKILL.md"),
+    ),
+    true,
+  );
 
   const npxResult = JSON.parse(
     execute("npx", [
@@ -183,10 +205,13 @@ try {
       npxProject,
       "--dry-run",
       "--json",
+      "--skills",
+      "local",
     ]),
   );
   assert.equal(npxResult.ok, true);
   assert.equal(npxResult.mode, "dry-run");
+  assert.equal(npxResult.skillMode, "local");
 
   console.log(
     `Bootstrap validation passed (${runtime ? "runtime, Compose, Terraform, package" : "Compose, Terraform, package"}).`,

@@ -14,7 +14,7 @@ starter Terraform root to an existing Rails, Phoenix, Node, or generic
 application repository:
 
 ```bash
-npx @upmaru/tama-kit bootstrap
+npx @kritama/tama-kit bootstrap
 ```
 
 After a global npm installation, the equivalent command is:
@@ -25,9 +25,34 @@ tama-kit bootstrap
 
 Bootstrap detects the project and its default Docker Compose file, creates a
 private `.tama.env`, adds managed Tama and PostgreSQL services, and generates a
-`tama/` Terraform root with one version-pinned `module "global"`. It preserves
-an existing global-foundation address and refuses ambiguous ownership rather
-than creating duplicate data-bearing resources.
+`tama/` Terraform root with one version-pinned `module "global"` and focused
+`AGENTS.md` guidance. On the first interactive run, it asks whether to install
+the bundled `graph-builder` and `graph-audit` skills into the repository's
+`.agents/skills/` directory or leave skill installation to the user. It
+preserves an existing global-foundation address and refuses ambiguous ownership
+rather than creating duplicate data-bearing resources.
+
+Skip the prompt in scripts by selecting the skill mode explicitly:
+
+```bash
+npx @kritama/tama-kit bootstrap --skills local
+npx @kritama/tama-kit bootstrap --skills manual
+```
+
+JSON and other non-interactive runs default to `manual`. When manual mode is
+selected, the human-readable final output prints both the project-scoped Skills
+CLI command and the Codex plugin installation commands. Human-readable
+bootstrap output also uses terminal colors and a progress bar when supported;
+use `--no-color` to disable color styling.
+
+After a successful write, bootstrap ends with a copy-ready coding-agent prompt.
+The prompt starts and checks the local Compose runtime, guides the user through
+the private browser setup without exposing credentials, runs Terraform
+initialization, formatting, validation, and planning, and requires explicit
+approval before `terraform apply`. Human output includes the complete private
+onboarding URL with its setup token so it can be opened or copied into the agent
+prompt. Treat that URL as a secret. JSON output exposes a token-redacted version
+as `agentPrompt`; dry-run output sets it to `null`.
 
 Generated non-sensitive files are tracked by `tama/.tama-kit.json`. If a
 tracked file has been edited since the previous bootstrap, Tama Kit stops and
@@ -36,13 +61,13 @@ reports the drift instead of overwriting the user's changes.
 Inspect the proposed changes without writing:
 
 ```bash
-npx @upmaru/tama-kit bootstrap --dry-run
+npx @kritama/tama-kit bootstrap --dry-run
 ```
 
 Generate and start the local services:
 
 ```bash
-npx @upmaru/tama-kit bootstrap --start
+npx @kritama/tama-kit bootstrap --start
 ```
 
 The first release uses Tama's supported interactive setup flow to create root
@@ -64,7 +89,7 @@ or newer, and an npm CLI available on your system.
 Add the marketplace and install the plugin:
 
 ```bash
-codex plugin marketplace add upmaru/tama-kit
+codex plugin marketplace add kritama/tama-kit
 codex plugin add tama-kit@upmaru
 ```
 
@@ -95,7 +120,7 @@ OpenCode loads Agent Skills directly; it does not use the Codex plugin
 manifest. Install both Tama Kit skills globally with the Skills CLI:
 
 ```bash
-npx skills add upmaru/tama-kit \
+npx skills add kritama/tama-kit \
   --agent opencode \
   --global \
   --yes
@@ -105,7 +130,7 @@ For a project-only installation, run the same command from the project root
 without `--global`:
 
 ```bash
-npx skills add upmaru/tama-kit \
+npx skills add kritama/tama-kit \
   --agent opencode \
   --yes
 ```

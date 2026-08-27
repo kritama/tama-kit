@@ -8,7 +8,7 @@
       "name": "tama-kit",
       "source": {
         "source": "npm",
-        "package": "@upmaru/tama-kit",
+        "package": "@kritama/tama-kit",
         "version": "latest",
         "registry": "https://registry.npmjs.org"
       },

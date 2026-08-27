@@ -10,7 +10,7 @@
     "websiteURL": "https://upmaru.com",
     "privacyPolicyURL": "https://upmaru.com/privacy",
     "termsOfServiceURL": "https://upmaru.com/terms",
-    "supportURL": "https://github.com/upmaru/tama-kit/issues"
+    "supportURL": "https://github.com/kritama/tama-kit/issues"
   },
   "positiveCaseIds": [
     "bootstrap-global-foundation",
