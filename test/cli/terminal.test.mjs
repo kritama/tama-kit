@@ -119,6 +119,38 @@ test("wrapLine hard-breaks words longer than the max width", () => {
   assert.deepEqual(wrapLine("", 10), [""]);
 });
 
+test("wrapLine closes and reopens quotes when hard-breaking quoted tokens", () => {
+  const wrapped = wrapLine("'averyveryverylongdirectory/compose.yaml'", 18);
+  assert.ok(wrapped.every((row) => cellWidthAt(row, 2) <= 18));
+  assert.ok(wrapped.every((row) => /^'.*'$/.test(row)));
+  assert.equal(
+    wrapped.map((row) => row.slice(1, -1)).join(""),
+    "averyveryverylongdirectory/compose.yaml",
+  );
+});
+
+test("renderBox keeps continuation backslashes outside quoted tokens", () => {
+  const command = "docker compose -f 'averyveryverylongdirectory/compose.yaml' up -d tama";
+  const lines = renderBox({
+    title: "Next",
+    lines: [command],
+    color: false,
+    maxWidth: 24,
+    continuation: true,
+  });
+  for (const row of lines) {
+    if (!/ \\│$/.test(row)) {
+      continue;
+    }
+    const content = row.slice(2, -3);
+    assert.equal(
+      (content.match(/'/g) ?? []).length % 2,
+      0,
+      `backslash must sit outside quotes: ${row}`,
+    );
+  }
+});
+
 test("renderBox wraps content to maxWidth and stays rectangular", () => {
   const lines = renderBox({
     title: "Copy this prompt into your coding agent",

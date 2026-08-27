@@ -289,13 +289,17 @@ export function wrapLine(line, maxWidth) {
     const separator = index > 0 ? tokens[index - 1] : "";
     /** @type {string[]} */
     const pieces = [];
-    let rest = token;
-    while (cellWidthAt(rest, CONTENT_COLUMN) > maxWidth) {
-      const [head, tail] = breakAtWidth(rest, maxWidth);
-      pieces.push(head);
+    const quote =
+      token.length >= 2 && (token[0] === "'" || token[0] === '"') && token.endsWith(token[0])
+        ? token[0]
+        : "";
+    let rest = quote ? token.slice(1, -1) : token;
+    while (cellWidthAt(rest, CONTENT_COLUMN) + (quote ? 2 : 0) > maxWidth) {
+      const [head, tail] = breakAtWidth(rest, Math.max(1, maxWidth - (quote ? 2 : 0)));
+      pieces.push(quote ? `${quote}${head}${quote}` : head);
       rest = tail;
     }
-    pieces.push(rest);
+    pieces.push(quote ? `${quote}${rest}${quote}` : rest);
     pieces.forEach((piece, pieceIndex) => {
       const prefix = pieceIndex === 0 ? separator : "";
       const candidate = current ? `${current}${prefix}${piece}` : piece;
