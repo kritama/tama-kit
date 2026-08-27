@@ -39,19 +39,15 @@ export function visibleLength(value) {
   return stripAnsi(value).length;
 }
 
+const COMBINING_MARK = /\p{M}/u;
+
 /** @param {number} codePoint @returns {number} */
 function codePointWidth(codePoint) {
   if (
-    (codePoint >= 0x0300 && codePoint <= 0x036f) ||
-    (codePoint >= 0x1ab0 && codePoint <= 0x1aff) ||
-    (codePoint >= 0x1dc0 && codePoint <= 0x1dff) ||
-    (codePoint >= 0x20d0 && codePoint <= 0x20ff) ||
-    (codePoint >= 0xfe00 && codePoint <= 0xfe0f) ||
+    COMBINING_MARK.test(String.fromCodePoint(codePoint)) ||
     codePoint === 0x00ad ||
     codePoint === 0x200c ||
     codePoint === 0x200d ||
-    codePoint === 0x3099 ||
-    codePoint === 0x309a ||
     (codePoint >= 0xe0000 && codePoint <= 0xe007f)
   ) {
     return 0;
@@ -118,15 +114,31 @@ function isEmojiCodePoint(codePoint) {
 /** @param {string} grapheme @returns {number} */
 export function graphemeWidth(grapheme) {
   let emoji = false;
+  let textPresentation = false;
+  let hangul = false;
   let width = 0;
   for (const codePoint of codePointsOf(grapheme)) {
     if (codePoint === 0x200d) {
+      continue;
+    }
+    if (codePoint === 0xfe0e) {
+      textPresentation = true;
+      continue;
+    }
+    if (codePoint >= 0x1100 && codePoint <= 0x11ff) {
+      hangul = true;
       continue;
     }
     if (isEmojiCodePoint(codePoint) || codePoint === 0xfe0f || codePoint === 0x20e3) {
       emoji = true;
     }
     width += codePointWidth(codePoint);
+  }
+  if (hangul) {
+    return 2;
+  }
+  if (textPresentation) {
+    return width;
   }
   return emoji ? 2 : width;
 }

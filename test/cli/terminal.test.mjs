@@ -53,6 +53,9 @@ test("graphemeWidth measures wide, emoji, combining, and ZWJ characters", () => 
   assert.equal(graphemeWidth("1\ufe0f\u20e3"), 2);
   assert.equal(graphemeWidth("か\u3099"), 2);
   assert.equal(graphemeWidth("か\u309a"), 2);
+  assert.equal(graphemeWidth("ש\u05c1"), 1);
+  assert.equal(graphemeWidth("ㄱ\u1165"), 2);
+  assert.equal(graphemeWidth("☀\ufe0e"), 1);
 });
 
 test("cellWidth sums display cells across grapheme clusters", () => {
