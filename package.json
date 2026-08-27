@@ -1,6 +1,6 @@
 {
   "name": "@kritama/tama-kit",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Bootstrap local Tama runtimes and build, manage, and audit Tama Terraform graph networks.",
   "keywords": [
     "codex-plugin",
