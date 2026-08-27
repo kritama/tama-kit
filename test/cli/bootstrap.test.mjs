@@ -90,6 +90,31 @@ test("bootstrap installs complete repository-local agent skills when selected", 
   assert.ok(second.operations.every((operation) => operation.action === "unchanged"));
 });
 
+for (const skillAncestor of [
+  ".agents",
+  join(".agents", "skills"),
+  join(".agents", "skills", "graph-builder"),
+]) {
+  test(`bootstrap rejects a symbolic-link local skill ancestor at ${skillAncestor}`, () => {
+    const root = project();
+    const external = project("tama-kit-external-skills-");
+    const ancestor = join(root, skillAncestor);
+    mkdirSync(join(ancestor, ".."), { recursive: true });
+    writeFileSync(join(external, "canary"), "do not modify\n");
+    symlinkSync(external, ancestor, "dir");
+
+    assert.throws(
+      () => planFor(root, { skillMode: "local" }),
+      (error) =>
+        error instanceof CLIError &&
+        error.exitCode === EXIT_CODES.OWNERSHIP &&
+        /symbolic-link directory/u.test(error.message),
+    );
+    assert.equal(readFileSync(join(external, "canary"), "utf8"), "do not modify\n");
+    assert.equal(existsSync(join(external, "SKILL.md")), false);
+  });
+}
+
 test("interactive bootstrap prompts for local skills and renders colored progress", async () => {
   const root = project();
   const output = [];

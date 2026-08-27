@@ -49,6 +49,48 @@ function projectRelativePath(root, filename) {
   return path;
 }
 
+/** @param {string} root @param {string} filename */
+function safeManagedPath(root, filename) {
+  const path = projectRelativePath(root, filename);
+  const ancestors = path.split("/").slice(0, -1);
+  let current = root;
+
+  for (const ancestor of ancestors) {
+    current = join(current, ancestor);
+    let metadata;
+    try {
+      metadata = lstatSync(current);
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? error.code : undefined;
+      if (code === "ENOENT") {
+        break;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      throw ownershipError(`cannot inspect managed file ancestor ${current}: ${message}`, {
+        path: filename,
+        ancestorPath: current,
+      });
+    }
+    if (metadata.isSymbolicLink()) {
+      throw ownershipError(
+        `refusing to manage a file through a symbolic-link directory: ${current}`,
+        {
+          path: filename,
+          ancestorPath: current,
+        },
+      );
+    }
+    if (!metadata.isDirectory()) {
+      throw ownershipError(`managed file ancestor is not a directory: ${current}`, {
+        path: filename,
+        ancestorPath: current,
+      });
+    }
+  }
+
+  return path;
+}
+
 /**
  * @param {string} root
  * @param {string} tamaDirectory
@@ -114,7 +156,7 @@ export function createManagedFilePlanner(root, tamaDirectory, skillMode) {
    * @returns {FileOperation}
    */
   function plan(filename, content, options = {}) {
-    const path = projectRelativePath(root, filename);
+    const path = safeManagedPath(root, filename);
     if (recorded.has(path) && !existsSync(filename)) {
       throw ownershipError(`managed file recorded by Tama Kit is missing: ${filename}`, {
         path: filename,
@@ -147,6 +189,7 @@ export function createManagedFilePlanner(root, tamaDirectory, skillMode) {
     if (!existsSync(filename)) {
       return;
     }
+    safeManagedPath(root, filename);
     if (lstatSync(filename).isSymbolicLink()) {
       throw ownershipError(`refusing to adopt a symbolic link: ${filename}`, { path: filename });
     }
@@ -191,6 +234,7 @@ export function createManagedFilePlanner(root, tamaDirectory, skillMode) {
         continue;
       }
       const filename = join(root, path);
+      safeManagedPath(root, filename);
       if (!existsSync(filename) || lstatSync(filename).isSymbolicLink()) {
         throw ownershipError(
           `managed file recorded by Tama Kit is missing or unsafe: ${filename}`,
