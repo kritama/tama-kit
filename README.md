@@ -25,9 +25,34 @@ tama-kit bootstrap
 
 Bootstrap detects the project and its default Docker Compose file, creates a
 private `.tama.env`, adds managed Tama and PostgreSQL services, and generates a
-`tama/` Terraform root with one version-pinned `module "global"`. It preserves
-an existing global-foundation address and refuses ambiguous ownership rather
-than creating duplicate data-bearing resources.
+`tama/` Terraform root with one version-pinned `module "global"` and focused
+`AGENTS.md` guidance. On the first interactive run, it asks whether to install
+the bundled `graph-builder` and `graph-audit` skills into the repository's
+`.agents/skills/` directory or leave skill installation to the user. It
+preserves an existing global-foundation address and refuses ambiguous ownership
+rather than creating duplicate data-bearing resources.
+
+Skip the prompt in scripts by selecting the skill mode explicitly:
+
+```bash
+npx @kritama/tama-kit bootstrap --skills local
+npx @kritama/tama-kit bootstrap --skills manual
+```
+
+JSON and other non-interactive runs default to `manual`. When manual mode is
+selected, the human-readable final output prints both the project-scoped Skills
+CLI command and the Codex plugin installation commands. Human-readable
+bootstrap output also uses terminal colors and a progress bar when supported;
+use `--no-color` to disable color styling.
+
+After a successful write, bootstrap ends with a copy-ready coding-agent prompt.
+The prompt starts and checks the local Compose runtime, guides the user through
+the private browser setup without exposing credentials, runs Terraform
+initialization, formatting, validation, and planning, and requires explicit
+approval before `terraform apply`. Human output includes the complete private
+onboarding URL with its setup token so it can be opened or copied into the agent
+prompt. Treat that URL as a secret. JSON output exposes a token-redacted version
+as `agentPrompt`; dry-run output sets it to `null`.
 
 Generated non-sensitive files are tracked by `tama/.tama-kit.json`. If a
 tracked file has been edited since the previous bootstrap, Tama Kit stops and

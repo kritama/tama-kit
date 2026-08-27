@@ -15,8 +15,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { formatAgentSetupPrompt } from "../../cli/bootstrap/agent-prompt.mjs";
 import { formatComposeUpCommand } from "../../cli/bootstrap/compose-command.mjs";
 import { inspectProject } from "../../cli/bootstrap/detect-project.mjs";
+import { readSetupUrl } from "../../cli/bootstrap/environment.mjs";
 import { contentDigest } from "../../cli/bootstrap/files.mjs";
 import { createBootstrapPlan } from "../../cli/bootstrap/plan.mjs";
 import { applyOperations, applyOperationsTransactionally } from "../../cli/bootstrap/write.mjs";
@@ -41,6 +43,7 @@ test("bootstrap creates a private, idempotent generic project scaffold", () => {
   assert.ok(existsSync(join(root, "compose.yaml")));
   assert.ok(existsSync(join(root, "tama", "compose.yaml")));
   assert.ok(existsSync(join(root, "tama", ".tama-kit.json")));
+  assert.ok(existsSync(join(root, "tama", "AGENTS.md")));
   assert.ok(existsSync(join(root, "tama", "main.tf")));
   assert.match(readFileSync(join(root, "tama", "main.tf"), "utf8"), /module "global"/u);
   assert.equal(statSync(join(root, ".tama.env")).mode & 0o777, 0o600);
@@ -50,11 +53,157 @@ test("bootstrap creates a private, idempotent generic project scaffold", () => {
   assert.doesNotMatch(postgresEnvironment, /TAMA_SETUP_TOKEN|SECRET_KEY_BASE/u);
 
   const secretBefore = readFileSync(join(root, ".tama.env"), "utf8");
+  const setupToken = secretBefore.match(/^TAMA_SETUP_TOKEN=(.+)$/mu)[1];
+  assert.equal(readSetupUrl(root), `http://localhost:4000/setup/root?token=${setupToken}`);
   const second = planFor(root);
   assert.equal(second.terraform.foundation, "preserved");
   assert.ok(second.operations.every((operation) => operation.action === "unchanged"));
   applyOperations(second.operations);
   assert.equal(readFileSync(join(root, ".tama.env"), "utf8"), secretBefore);
+});
+
+test("bootstrap installs complete repository-local agent skills when selected", () => {
+  const root = project();
+  const first = planFor(root, { skillMode: "local" });
+  applyOperations(first.operations);
+
+  assert.equal(first.skillMode, "local");
+  assert.ok(existsSync(join(root, ".agents", "skills", "graph-builder", "SKILL.md")));
+  assert.ok(
+    existsSync(join(root, ".agents", "skills", "graph-builder", "references", "graph-contract.md")),
+  );
+  assert.ok(
+    existsSync(
+      join(root, ".agents", "skills", "graph-builder", "scripts", "inspect-tama-repository.mjs"),
+    ),
+  );
+  assert.ok(existsSync(join(root, ".agents", "skills", "graph-audit", "SKILL.md")));
+
+  const manifest = JSON.parse(readFileSync(join(root, "tama", ".tama-kit.json"), "utf8"));
+  assert.equal(manifest.agentSkills, "local");
+  assert.match(
+    manifest.managedFiles[".agents/skills/graph-builder/SKILL.md"],
+    /^sha256:[0-9a-f]{64}$/u,
+  );
+
+  const second = planFor(root, { skillMode: "local" });
+  assert.ok(second.operations.every((operation) => operation.action === "unchanged"));
+});
+
+test("interactive bootstrap prompts for local skills and renders colored progress", async () => {
+  const root = project();
+  const output = [];
+  const writes = [];
+  const questions = [];
+  const exitCode = await run(["bootstrap", root, "--dry-run"], {
+    cwd: root,
+    interactive: true,
+    color: true,
+    prompt: async (question) => {
+      questions.push(question);
+      return "yes";
+    },
+    write: (message) => writes.push(message),
+    stdout: (message) => output.push(message),
+    stderr: () => {},
+  });
+
+  assert.equal(exitCode, EXIT_CODES.SUCCESS);
+  assert.equal(questions.length, 1);
+  assert.match(questions[0], /skills in this repository/u);
+  assert.match(writes.join(""), /100%/u);
+  assert.ok(writes.join("").includes("\u001b["));
+  assert.match(output.join("\n"), /repository-local/u);
+  assert.match(output.join("\n"), /\.agents\/skills\/graph-builder\/SKILL\.md/u);
+});
+
+test("manual skill choice prints self-install commands", async () => {
+  const root = project();
+  const output = [];
+  const exitCode = await run(["bootstrap", root, "--dry-run", "--no-color"], {
+    cwd: root,
+    interactive: true,
+    color: true,
+    prompt: async () => "no",
+    write: () => {},
+    stdout: (message) => output.push(message),
+    stderr: () => {},
+  });
+  const text = output.join("\n");
+
+  assert.equal(exitCode, EXIT_CODES.SUCCESS);
+  assert.match(text, /manual installation/u);
+  assert.match(text, /npx skills add kritama\/tama-kit --agent codex --yes/u);
+  assert.match(text, /codex plugin add tama-kit@upmaru/u);
+  assert.equal(text.includes("\u001b["), false);
+});
+
+test("bootstrap reuses a recorded skill choice without prompting again", async () => {
+  const root = project();
+  applyOperations(planFor(root, { skillMode: "manual" }).operations);
+  const output = [];
+  const exitCode = await run(["bootstrap", root, "--dry-run"], {
+    cwd: root,
+    interactive: true,
+    color: false,
+    prompt: async () => {
+      throw new Error("bootstrap should not prompt for a recorded choice");
+    },
+    write: () => {},
+    stdout: (message) => output.push(message),
+    stderr: () => {},
+  });
+
+  assert.equal(exitCode, EXIT_CODES.SUCCESS);
+  assert.match(output.join("\n"), /manual installation/u);
+});
+
+test("JSON bootstrap accepts an explicit local skill mode without prompting", async () => {
+  const root = project();
+  const output = [];
+  const exitCode = await run(["bootstrap", root, "--dry-run", "--json", "--skills", "local"], {
+    cwd: root,
+    interactive: true,
+    color: true,
+    prompt: async () => {
+      throw new Error("JSON bootstrap must not prompt");
+    },
+    write: () => {
+      throw new Error("JSON bootstrap must not render progress");
+    },
+    stdout: (message) => output.push(message),
+    stderr: () => {},
+  });
+  const payload = JSON.parse(output.join("\n"));
+
+  assert.equal(exitCode, EXIT_CODES.SUCCESS);
+  assert.equal(payload.skillMode, "local");
+  assert.ok(
+    payload.changes.some((change) => change.path.endsWith(".agents/skills/graph-builder/SKILL.md")),
+  );
+});
+
+test("agent setup prompt covers runtime, private setup, Terraform validation, and apply approval", () => {
+  const root = project();
+  const composeFile = join(root, "docker compose.yaml");
+  writeFileSync(composeFile, "services: {}\n");
+  const plan = planFor(root, { composePath: composeFile });
+  const setupUrl = "http://localhost:4000/setup/root?token=private-test-token";
+  const prompt = formatAgentSetupPrompt(plan, { setupUrl });
+
+  assert.match(prompt, /docker compose -f 'docker compose\.yaml' up -d tama/u);
+  assert.match(prompt, /wait until Tama responds successfully at http:\/\/localhost:4000\//u);
+  assert.match(
+    prompt,
+    /private onboarding URL is http:\/\/localhost:4000\/setup\/root\?token=private-test-token/u,
+  );
+  assert.equal(prompt.split(setupUrl).length - 1, 1);
+  assert.match(prompt, /do not repeat it after this prompt or include it in logs/u);
+  assert.match(prompt, /Do not ask me to paste credentials into chat/u);
+  assert.match(prompt, /terraform -chdir=tama init/u);
+  assert.match(prompt, /terraform -chdir=tama validate/u);
+  assert.match(prompt, /terraform -chdir=tama plan/u);
+  assert.match(prompt, /Do not run terraform apply until I explicitly approve/u);
 });
 
 test("bootstrap rejects user drift in a managed template", () => {

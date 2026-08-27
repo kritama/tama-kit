@@ -8,6 +8,7 @@ import { inspectProject } from "./detect-project.mjs";
 import { planEnvironment } from "./environment.mjs";
 import { planGitignore, validateSecretFilesUntracked } from "./gitignore.mjs";
 import { createManagedFilePlanner } from "./manifest.mjs";
+import { planAgentSkills } from "./skills.mjs";
 import { renderTemplate } from "./templates.mjs";
 import { planTerraform } from "./terraform.mjs";
 
@@ -30,8 +31,13 @@ function managedTemplate(planManagedFile, filename, templateName, replacements) 
 /** @param {BootstrapPlanOptions} options @returns {BootstrapPlan} */
 export function createBootstrapPlan(options) {
   const inspection = inspectProject(options);
+  const skillMode = options.skillMode ?? "manual";
   validateSecretFilesUntracked(inspection.root);
-  const managedFiles = createManagedFilePlanner(inspection.root, inspection.tamaDirectory);
+  const managedFiles = createManagedFilePlanner(
+    inspection.root,
+    inspection.tamaDirectory,
+    skillMode,
+  );
   const environment = planEnvironment(inspection.root, options.port);
   const replacements = {
     PORT: environment.port,
@@ -108,6 +114,17 @@ export function createBootstrapPlan(options) {
       COMPOSE_PS_COMMAND: formatComposePsCommand(projectComposePath),
     }),
   );
+  operations.push(
+    managedTemplate(
+      managedFiles.plan,
+      join(inspection.tamaDirectory, "AGENTS.md"),
+      "AGENTS.md",
+      {},
+    ),
+  );
+  if (skillMode === "local") {
+    operations.push(...planAgentSkills(inspection.root, managedFiles.plan));
+  }
   operations.push(managedFiles.manifestOperation());
 
   return {
@@ -119,6 +136,7 @@ export function createBootstrapPlan(options) {
     port: environment.port,
     tamaImage: replacements.TAMA_IMAGE,
     postgresImage: replacements.POSTGRES_IMAGE,
+    skillMode,
     terraform: {
       foundation: terraform.foundation,
       providerVersion: terraform.providerVersion,
@@ -139,6 +157,7 @@ export function publicPlan(plan) {
     port: plan.port,
     tamaImage: plan.tamaImage,
     postgresImage: plan.postgresImage,
+    skillMode: plan.skillMode,
     terraform: plan.terraform,
     changes: plan.operations.map(
       ({ action, path, owner, sensitive, beforeDigest, afterDigest, reason }) => ({
