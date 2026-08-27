@@ -56,6 +56,10 @@ test("graphemeWidth measures wide, emoji, combining, and ZWJ characters", () => 
   assert.equal(graphemeWidth("ש\u05c1"), 1);
   assert.equal(graphemeWidth("ㄱ\u1165"), 2);
   assert.equal(graphemeWidth("☀\ufe0e"), 1);
+  assert.equal(graphemeWidth("ℹ"), 1);
+  assert.equal(graphemeWidth("ℹ\ufe0f"), 2);
+  assert.equal(graphemeWidth("™"), 1);
+  assert.equal(graphemeWidth("☀"), 2);
 });
 
 test("cellWidth sums display cells across grapheme clusters", () => {
@@ -74,7 +78,7 @@ test("wrapLine breaks CJK text on cell width without losing characters", () => {
 });
 
 test("wrapLine preserves original whitespace runs on unbroken lines", () => {
-  assert.deepEqual(wrapLine("a  bbb ccccccccc", 8), ["a  bbb", "cccccccc", "c"]);
+  assert.deepEqual(wrapLine("a  bbb ccccccccc", 8), ["a  bbb ", "cccccccc", "c"]);
   assert.deepEqual(wrapLine("a  b   c", 30), ["a  b   c"]);
 });
 
@@ -88,6 +92,10 @@ test("wrapLine never splits a ZWJ emoji cluster", () => {
   const family = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}";
   const wrapped = wrapLine(`${family} hello world`, 8);
   assert.deepEqual(wrapped, [`${family} hello`, " world"]);
+});
+
+test("wrapLine splits whitespace runs wider than the wrap width across rows", () => {
+  assert.deepEqual(wrapLine("run -f 'a          b' up", 9), ["run -f 'a", "       b'", " up"]);
 });
 
 test("wrapLine keeps short lines intact and breaks long lines at word boundaries", () => {

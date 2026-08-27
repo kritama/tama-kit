@@ -94,16 +94,100 @@ function codePointsOf(value) {
 }
 
 /** @param {number} codePoint @returns {boolean} */
-function isEmojiCodePoint(codePoint) {
+function isDefaultEmoji(codePoint) {
   return (
     (codePoint >= 0x1f000 && codePoint <= 0x1faff) ||
+    (codePoint >= 0x231a && codePoint <= 0x231b) ||
+    codePoint === 0x2328 ||
+    codePoint === 0x23cf ||
+    (codePoint >= 0x23e9 && codePoint <= 0x23f3) ||
+    (codePoint >= 0x23f8 && codePoint <= 0x23fa) ||
+    codePoint === 0x24c2 ||
+    (codePoint >= 0x25aa && codePoint <= 0x25ab) ||
+    codePoint === 0x25b6 ||
+    codePoint === 0x25c0 ||
+    (codePoint >= 0x25fb && codePoint <= 0x25fe) ||
+    (codePoint >= 0x2600 && codePoint <= 0x2604) ||
+    codePoint === 0x260e ||
+    codePoint === 0x2611 ||
+    (codePoint >= 0x2614 && codePoint <= 0x2615) ||
+    codePoint === 0x2618 ||
+    codePoint === 0x261d ||
+    codePoint === 0x2620 ||
+    (codePoint >= 0x2622 && codePoint <= 0x2624) ||
+    codePoint === 0x2626 ||
+    codePoint === 0x262a ||
+    codePoint === 0x262e ||
+    codePoint === 0x262f ||
+    (codePoint >= 0x2638 && codePoint <= 0x263a) ||
+    codePoint === 0x2640 ||
+    codePoint === 0x2642 ||
+    codePoint === 0x265f ||
+    (codePoint >= 0x2660 && codePoint <= 0x2661) ||
+    (codePoint >= 0x2663 && codePoint <= 0x2668) ||
+    codePoint === 0x267b ||
+    codePoint === 0x267e ||
+    codePoint === 0x267f ||
+    (codePoint >= 0x2692 && codePoint <= 0x2697) ||
+    codePoint === 0x2699 ||
+    (codePoint >= 0x269b && codePoint <= 0x269c) ||
+    codePoint === 0x26a0 ||
+    codePoint === 0x26a1 ||
+    codePoint === 0x26aa ||
+    codePoint === 0x26ab ||
+    (codePoint >= 0x26b0 && codePoint <= 0x26b2) ||
+    codePoint === 0x26bd ||
+    codePoint === 0x26be ||
+    (codePoint >= 0x26c4 && codePoint <= 0x26c5) ||
+    codePoint === 0x26c8 ||
+    (codePoint >= 0x26ce && codePoint <= 0x26d1) ||
+    codePoint === 0x26d3 ||
+    codePoint === 0x26d4 ||
+    codePoint === 0x26e9 ||
+    codePoint === 0x26ea ||
+    (codePoint >= 0x26f0 && codePoint <= 0x26f5) ||
+    (codePoint >= 0x26f7 && codePoint <= 0x26fa) ||
+    codePoint === 0x26fd ||
+    codePoint === 0x2702 ||
+    codePoint === 0x2705 ||
+    (codePoint >= 0x2708 && codePoint <= 0x270d) ||
+    codePoint === 0x2728 ||
+    codePoint === 0x274c ||
+    codePoint === 0x274e ||
+    codePoint === 0x274f ||
+    (codePoint >= 0x2756 && codePoint <= 0x275e) ||
+    codePoint === 0x2761 ||
+    codePoint === 0x2763 ||
+    codePoint === 0x2764 ||
+    (codePoint >= 0x2795 && codePoint <= 0x2797) ||
+    codePoint === 0x27a1 ||
+    (codePoint >= 0x27a3 && codePoint <= 0x27a4) ||
+    (codePoint >= 0x2b05 && codePoint <= 0x2b07) ||
+    (codePoint >= 0x2b1b && codePoint <= 0x2b1c) ||
+    codePoint === 0x2b50 ||
+    codePoint === 0x2b55 ||
+    codePoint === 0x2b56 ||
+    codePoint === 0x203c ||
+    codePoint === 0x2049 ||
+    codePoint === 0x3030 ||
+    codePoint === 0x303d ||
+    codePoint === 0x3297 ||
+    codePoint === 0x3299
+  );
+}
+
+/** @param {number} codePoint @returns {boolean} */
+function isEmojiCapable(codePoint) {
+  return (
+    isDefaultEmoji(codePoint) ||
+    (codePoint >= 0x2100 && codePoint <= 0x21ff) ||
     (codePoint >= 0x2300 && codePoint <= 0x23ff) ||
+    (codePoint >= 0x2460 && codePoint <= 0x24ff) ||
+    (codePoint >= 0x25a0 && codePoint <= 0x25ff) ||
     (codePoint >= 0x2600 && codePoint <= 0x27bf) ||
     (codePoint >= 0x2b00 && codePoint <= 0x2bff) ||
     codePoint === 0x203c ||
     codePoint === 0x2049 ||
-    codePoint === 0x2122 ||
-    codePoint === 0x2139 ||
     codePoint === 0x3030 ||
     codePoint === 0x303d ||
     codePoint === 0x3297 ||
@@ -114,11 +198,17 @@ function isEmojiCodePoint(codePoint) {
 /** @param {string} grapheme @returns {number} */
 export function graphemeWidth(grapheme) {
   let emoji = false;
+  let variationEmoji = false;
   let textPresentation = false;
   let hangul = false;
+  let capable = false;
   let width = 0;
   for (const codePoint of codePointsOf(grapheme)) {
     if (codePoint === 0x200d) {
+      continue;
+    }
+    if (codePoint === 0xfe0f) {
+      variationEmoji = true;
       continue;
     }
     if (codePoint === 0xfe0e) {
@@ -129,8 +219,11 @@ export function graphemeWidth(grapheme) {
       hangul = true;
       continue;
     }
-    if (isEmojiCodePoint(codePoint) || codePoint === 0xfe0f || codePoint === 0x20e3) {
+    if (isDefaultEmoji(codePoint) || codePoint === 0x20e3) {
       emoji = true;
+    }
+    if (isEmojiCapable(codePoint)) {
+      capable = true;
     }
     width += codePointWidth(codePoint);
   }
@@ -140,7 +233,7 @@ export function graphemeWidth(grapheme) {
   if (textPresentation) {
     return width;
   }
-  return emoji ? 2 : width;
+  return emoji || (variationEmoji && capable) ? 2 : width;
 }
 
 /** @param {string} value @returns {number} */
@@ -203,6 +296,12 @@ export function wrapLine(line, maxWidth) {
       const candidate = current ? `${current}${prefix}${piece}` : piece;
       if (cellWidth(candidate) <= maxWidth) {
         current = candidate;
+      } else if (prefix && /^ +$/.test(prefix) && cellWidth(`${prefix}${piece}`) > maxWidth) {
+        const head = prefix.slice(0, Math.max(0, maxWidth - cellWidth(current)));
+        const tail = prefix.slice(head.length);
+        const lead = tail.slice(0, Math.max(0, maxWidth - cellWidth(piece)));
+        wrapped.push(`${current}${head}`);
+        current = `${lead}${piece}`;
       } else {
         if (current) {
           wrapped.push(current);
