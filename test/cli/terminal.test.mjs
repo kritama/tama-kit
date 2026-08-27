@@ -291,8 +291,44 @@ test("renderBox wraps content to maxWidth and stays rectangular", () => {
 test("renderBox preserves literal tabs and keeps borders aligned", () => {
   const lines = renderBox({ lines: ["abc\tdefgh"], color: false, maxWidth: 30 });
   assert.ok(lines.some((line) => line.includes("abc\tdefgh")));
-  assert.equal(new Set(lines.map((line) => cellWidthAt(line, 0))).size, 1);
-  assert.ok(lines.every((line) => cellWidthAt(line, 0) <= 34));
+  // Measured from column 1: where the left border really sits at the left
+  // edge of the terminal, so tab widths land on the same stops the box
+  // renders at.
+  assert.equal(new Set(lines.map((line) => cellWidthAt(line, 1))).size, 1);
+  assert.ok(lines.every((line) => cellWidthAt(line, 1) <= 34));
+});
+
+test("renderBox keeps tabs in gutter rows inside the border", () => {
+  const command = "cmd 'abc\tdefghijklmnopqrstuvwxyz'";
+  for (const maxWidth of [14, 16, 18, 20]) {
+    const lines = renderBox({
+      title: "Next",
+      lines: [command],
+      color: false,
+      maxWidth,
+      continuation: true,
+    });
+    const widths = lines.map((line) => cellWidthAt(line, 1));
+    const border = widths[0];
+    assert.ok(
+      widths.every((width) => width <= border),
+      `maxWidth=${maxWidth}: a row is ${widths.filter((w) => w > border).length} cell(s) wider than the border`,
+    );
+  }
+});
+
+test("renderBox keeps mixed-quote tabs on tab stops inside the border", () => {
+  const value = "/.`0.'Y.漢$a$$ \\`0\\\t.Y-`🙂-`b'";
+  const lines = renderBox({
+    title: "Next",
+    lines: [`docker compose -f ${value} up -d tama`],
+    color: false,
+    maxWidth: 20,
+    continuation: true,
+  });
+  const widths = lines.map((line) => cellWidthAt(line, 1));
+  const border = widths[0];
+  assert.ok(widths.every((width) => width <= border));
 });
 
 test("wrapLine preserves tabs inside quoted tokens when hard-breaking them", () => {

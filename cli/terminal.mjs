@@ -246,21 +246,31 @@ export function cellWidth(value) {
 }
 
 /**
+ * Splits at the last grapheme boundary whose width fits from every start
+ * column: the same text can be one cell wider when a tab lands on a
+ * tab stop, so pieces must be safe at each column a row can start in.
  * @param {string} value
  * @param {number} maxWidth
- * @param {number} [startColumn]
+ * @param {number[]} startColumns
  * @returns {[string, string]}
  */
-function breakAtWidth(value, maxWidth, startColumn = CONTENT_COLUMN) {
+function breakAtWidthAll(value, maxWidth, startColumns) {
   const graphemes = toGraphemes(value);
+  const columns = [...startColumns];
   let index = 0;
-  let column = startColumn;
   for (const grapheme of graphemes) {
-    const width = graphemeWidthAt(grapheme, column);
-    if (column + width - startColumn > maxWidth) {
+    let fits = true;
+    for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
+      const width = graphemeWidthAt(grapheme, columns[columnIndex]);
+      if (columns[columnIndex] + width - startColumns[columnIndex] > maxWidth) {
+        fits = false;
+        break;
+      }
+      columns[columnIndex] += width;
+    }
+    if (!fits) {
       break;
     }
-    column += width;
     index += 1;
   }
   if (index === 0) {
@@ -417,7 +427,10 @@ function canonicalPieces(token, maxWidth) {
   const quoteRun = (run) => {
     let rest = run;
     while (rest !== "") {
-      const [head, tail] = breakAtWidth(rest, Math.max(1, maxWidth - 2), CONTENT_COLUMN + 1);
+      const [head, tail] = breakAtWidthAll(rest, Math.max(1, maxWidth - 2), [
+        CONTENT_COLUMN + 1,
+        CONTENT_COLUMN + 2,
+      ]);
       pieces.push(`'${head}'`);
       rest = tail;
     }
@@ -497,13 +510,22 @@ function rawTokenPieces(token, maxWidth) {
   while (start < token.length) {
     const rest = token.slice(start);
     const graphemes = Array.from(rest);
-    let width = 0;
+    let columnA = CONTENT_COLUMN;
+    let columnB = CONTENT_COLUMN + 1;
+    let widthA = 0;
+    let widthB = 0;
     let length = 0;
     let cut = 0;
     for (let index = 0; index < graphemes.length; index += 1) {
-      width += graphemeWidthAt(graphemes[index], CONTENT_COLUMN + width);
-      length += graphemes[index].length;
-      if (width <= maxWidth && safe.has(start + length)) {
+      const grapheme = graphemes[index];
+      const widthGraphemeA = graphemeWidthAt(grapheme, columnA);
+      const widthGraphemeB = graphemeWidthAt(grapheme, columnB);
+      columnA += widthGraphemeA;
+      columnB += widthGraphemeB;
+      widthA += widthGraphemeA;
+      widthB += widthGraphemeB;
+      length += grapheme.length;
+      if (widthA <= maxWidth && widthB <= maxWidth && safe.has(start + length)) {
         cut = length;
       }
     }
@@ -548,8 +570,15 @@ function plainPieces(token, maxWidth) {
   /** @type {string[]} */
   const pieces = [];
   let rest = token;
-  while (rest !== "" && cellWidthAt(rest, CONTENT_COLUMN) > maxWidth) {
-    const [head, tail] = breakAtWidth(rest, Math.max(1, maxWidth));
+  while (
+    rest !== "" &&
+    (cellWidthAt(rest, CONTENT_COLUMN) > maxWidth ||
+      cellWidthAt(rest, CONTENT_COLUMN + 1) > maxWidth)
+  ) {
+    const [head, tail] = breakAtWidthAll(rest, Math.max(1, maxWidth), [
+      CONTENT_COLUMN,
+      CONTENT_COLUMN + 1,
+    ]);
     pieces.push(head);
     rest = tail;
   }
@@ -566,7 +595,7 @@ function plainPieces(token, maxWidth) {
  * @returns {{line: string, midToken: boolean, tokenContinuation: boolean}[]}
  */
 function wrapLineDetailed(line, maxWidth, shell = true) {
-  if (cellWidthAt(line, CONTENT_COLUMN) <= maxWidth) {
+  if (cellWidthAt(line, CONTENT_COLUMN + 1) <= maxWidth) {
     return [{ line, midToken: false, tokenContinuation: false }];
   }
   const tokens = (shell ? tokenizeLine : tokenizeDisplay)(line.trim());
@@ -574,6 +603,11 @@ function wrapLineDetailed(line, maxWidth, shell = true) {
   const wrapped = [];
   let current = "";
   let currentContinues = false;
+  // A rendered row's line string starts one cell right of the left border
+  // plus a gutter unless it continues a token; tabs are measured from that
+  // actual column or a row can silently overflow the box.
+  /** @param {boolean} continues */
+  const rowColumn = (continues) => CONTENT_COLUMN + (continues ? 0 : 1);
   for (const { separator, token } of tokens) {
     if (token === "") {
       continue;
@@ -600,7 +634,9 @@ function wrapLineDetailed(line, maxWidth, shell = true) {
       const prefix = pieceIndex === 0 ? separator : "";
       const continuesToken = pieceIndex > 0;
       const candidate = current !== "" ? `${current}${prefix}${piece}` : piece;
-      if (cellWidthAt(candidate, CONTENT_COLUMN) <= maxWidth) {
+      const candidateColumn =
+        current === "" ? rowColumn(continuesToken) : rowColumn(currentContinues);
+      if (cellWidthAt(candidate, candidateColumn) <= maxWidth) {
         if (current === "") {
           currentContinues = continuesToken;
         }
@@ -608,10 +644,13 @@ function wrapLineDetailed(line, maxWidth, shell = true) {
       } else if (
         prefix !== "" &&
         /^ +$/.test(prefix) &&
-        cellWidthAt(`${prefix}${piece}`, CONTENT_COLUMN) > maxWidth
+        cellWidthAt(`${prefix}${piece}`, CONTENT_COLUMN + 1) > maxWidth
       ) {
         let spaces = prefix.length;
-        const take = Math.min(spaces, Math.max(0, maxWidth - cellWidthAt(current, CONTENT_COLUMN)));
+        const take = Math.min(
+          spaces,
+          Math.max(0, maxWidth - cellWidthAt(current, candidateColumn)),
+        );
         wrapped.push({
           line: `${current}${" ".repeat(take)}`,
           midToken: false,
@@ -622,8 +661,8 @@ function wrapLineDetailed(line, maxWidth, shell = true) {
           wrapped.push({ line: " ".repeat(maxWidth), midToken: false, tokenContinuation: false });
           spaces -= maxWidth;
         }
-        if (spaces + cellWidthAt(piece, CONTENT_COLUMN) > maxWidth) {
-          const lead = Math.max(0, maxWidth - cellWidthAt(piece, CONTENT_COLUMN));
+        if (spaces + cellWidthAt(piece, CONTENT_COLUMN + 1 + spaces) > maxWidth) {
+          const lead = Math.max(0, maxWidth - cellWidthAt(piece, CONTENT_COLUMN + 1 + spaces));
           if (spaces - lead > 1) {
             wrapped.push({
               line: " ".repeat(spaces - lead),
@@ -638,9 +677,9 @@ function wrapLineDetailed(line, maxWidth, shell = true) {
       } else if (
         prefix !== "" &&
         /^[\t ]+$/.test(prefix) &&
-        cellWidthAt(`${prefix}${piece}`, CONTENT_COLUMN) > maxWidth
+        cellWidthAt(`${prefix}${piece}`, CONTENT_COLUMN + 1) > maxWidth
       ) {
-        const prefixFits = cellWidthAt(`${current}${prefix}`, CONTENT_COLUMN) <= maxWidth;
+        const prefixFits = cellWidthAt(`${current}${prefix}`, candidateColumn) <= maxWidth;
         wrapped.push({
           line: prefixFits ? `${current}${prefix}` : current,
           midToken: false,
@@ -657,7 +696,7 @@ function wrapLineDetailed(line, maxWidth, shell = true) {
           });
         }
         const next = `${prefix}${piece}`;
-        current = cellWidthAt(next, CONTENT_COLUMN) <= maxWidth ? next : piece;
+        current = cellWidthAt(next, rowColumn(continuesToken)) <= maxWidth ? next : piece;
         currentContinues = continuesToken;
       }
     });
@@ -719,11 +758,14 @@ export function renderBox({ title, lines, color, style, maxWidth, continuation =
     }));
   });
   const titleLines = title === undefined ? [] : wrap(title).map((r) => r.line);
-  /** @param {string} line */
-  const measure = (line) => cellWidthAt(stripAnsi(line), CONTENT_COLUMN);
+  /** @param {string} line @param {boolean} continues */
+  const measure = (line, continues) =>
+    cellWidthAt(stripAnsi(line), CONTENT_COLUMN + (continues ? 0 : 1));
   const rowWidths = [
-    ...titleLines.map((line) => measure(line)),
-    ...contentRows.map((r) => measure(r.line) + (r.continues ? (r.midToken ? 1 : 2) : 0)),
+    ...titleLines.map((line) => measure(line, false)),
+    ...contentRows.map(
+      (r) => measure(r.line, r.tokenContinuation) + (r.continues ? (r.midToken ? 1 : 2) : 0),
+    ),
   ];
   const width = rowWidths.reduce((max, rowWidth) => Math.max(max, rowWidth), 0);
   const inner = width + 2;
@@ -736,7 +778,7 @@ export function renderBox({ title, lines, color, style, maxWidth, continuation =
       return `${dim("│")}${lead}${displayed}\\${dim("│")}`;
     }
     const tail = continues ? " \\" : "";
-    const pad = inner - measure(plain) - lead.length - tail.length;
+    const pad = inner - measure(plain, tokenContinuation) - lead.length - tail.length;
     return `${dim("│")}${lead}${displayed}${" ".repeat(pad)}${tail}${dim("│")}`;
   };
   const output = [
