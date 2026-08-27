@@ -29,6 +29,11 @@ export function visibleLength(value) {
 
 /** @param {string} value @param {number | undefined} maxWidth */
 function wrapLine(value, maxWidth) {
+  // wrap-ansi normalizes Unicode before wrapping. Keep normalization-sensitive
+  // payloads (such as Linux filenames) byte-for-byte intact instead.
+  if (value !== value.normalize()) {
+    return [value];
+  }
   const columns = maxWidth ?? Math.max(1, value.length * 8);
   return wrapAnsi(value, Math.max(1, columns), {
     hard: false,

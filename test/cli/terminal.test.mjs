@@ -52,6 +52,14 @@ test("renderBox handles wide and zero-width Unicode through string-width", () =>
   assert.ok(lines.every((line) => visibleLength(line) <= 14));
 });
 
+test("renderBox preserves normalization-sensitive Unicode payloads", () => {
+  const command = "docker compose -f 'cafe\u0301/compose.yaml' up -d tama";
+  const lines = renderBox({ lines: [command], color: false, maxWidth: 80 });
+
+  assert.ok(lines.some((line) => line.includes(command)));
+  assert.ok(lines.every((line) => !line.includes(command.normalize())));
+});
+
 test("renderBox expands prose tabs before measuring rows", () => {
   const lines = renderBox({ lines: ["abc\tdefgh"], color: false, maxWidth: 30 });
 
