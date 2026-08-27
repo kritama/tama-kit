@@ -239,7 +239,7 @@ function printHuman(io, result, color, setupUrl) {
 
   /** @param {{title?: string, lines: string[], style?: import("../terminal.mjs").PaintStyle}} box */
   function printBox(box) {
-    const maxWidth = io.columns === undefined ? undefined : Math.max(20, io.columns - 4);
+    const maxWidth = io.columns === undefined ? undefined : Math.max(1, io.columns - 4);
     for (const line of renderBox({ ...box, color, maxWidth })) {
       io.stdout(line);
     }

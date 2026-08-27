@@ -118,10 +118,10 @@ export function graphemeWidth(grapheme) {
   let emoji = false;
   let width = 0;
   for (const codePoint of codePointsOf(grapheme)) {
-    if (codePoint === 0x200d || codePoint === 0xfe0f) {
+    if (codePoint === 0x200d) {
       continue;
     }
-    if (isEmojiCodePoint(codePoint)) {
+    if (isEmojiCodePoint(codePoint) || codePoint === 0xfe0f || codePoint === 0x20e3) {
       emoji = true;
     }
     width += codePointWidth(codePoint);
@@ -193,7 +193,8 @@ export function wrapLine(line, maxWidth) {
         if (current) {
           wrapped.push(current);
         }
-        current = piece;
+        const next = `${prefix}${piece}`;
+        current = cellWidth(next) <= maxWidth ? next : piece;
       }
     });
   }

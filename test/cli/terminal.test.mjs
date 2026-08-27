@@ -50,6 +50,7 @@ test("graphemeWidth measures wide, emoji, combining, and ZWJ characters", () => 
   assert.equal(graphemeWidth("\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}"), 2);
   assert.equal(graphemeWidth("\u{1f44d}\u{1f3fd}"), 2);
   assert.equal(graphemeWidth("☀\ufe0f"), 2);
+  assert.equal(graphemeWidth("1\ufe0f\u20e3"), 2);
 });
 
 test("cellWidth sums display cells across grapheme clusters", () => {
@@ -72,18 +73,24 @@ test("wrapLine preserves original whitespace runs on unbroken lines", () => {
   assert.deepEqual(wrapLine("a  b   c", 30), ["a  b   c"]);
 });
 
+test("wrapLine carries a multi-space separator onto the continuation row", () => {
+  const wrapped = wrapLine("run -f 'a  b' up", 9);
+  assert.deepEqual(wrapped, ["run -f 'a", "  b' up"]);
+  assert.equal(wrapped.join(""), "run -f 'a  b' up");
+});
+
 test("wrapLine never splits a ZWJ emoji cluster", () => {
   const family = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}";
   const wrapped = wrapLine(`${family} hello world`, 8);
-  assert.deepEqual(wrapped, [`${family} hello`, "world"]);
+  assert.deepEqual(wrapped, [`${family} hello`, " world"]);
 });
 
 test("wrapLine keeps short lines intact and breaks long lines at word boundaries", () => {
   assert.deepEqual(wrapLine("short", 20), ["short"]);
   assert.deepEqual(wrapLine("The quick brown fox jumps over the lazy dog", 19), [
     "The quick brown fox",
-    "jumps over the lazy",
-    "dog",
+    " jumps over the",
+    " lazy dog",
   ]);
 });
 
@@ -109,7 +116,7 @@ test("renderBox wraps content to maxWidth and stays rectangular", () => {
   }
   assert.equal(new Set(lines.map((line) => line.length)).size, 1);
   assert.ok(lines[1].startsWith("│ Copy this prompt i"));
-  assert.ok(lines.some((line) => line.startsWith("│ coding agent")));
+  assert.ok(lines.some((line) => line.startsWith("│  coding agent")));
   assert.ok(lines.some((line) => line.startsWith("│ This is a fairly long prompt")));
 });
 
