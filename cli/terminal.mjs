@@ -95,18 +95,38 @@ function codePointsOf(value) {
   return codePoints;
 }
 
+/** @param {number} codePoint @returns {boolean} */
+function isEmojiCodePoint(codePoint) {
+  return (
+    (codePoint >= 0x1f000 && codePoint <= 0x1faff) ||
+    (codePoint >= 0x2300 && codePoint <= 0x23ff) ||
+    (codePoint >= 0x2600 && codePoint <= 0x27bf) ||
+    (codePoint >= 0x2b00 && codePoint <= 0x2bff) ||
+    codePoint === 0x203c ||
+    codePoint === 0x2049 ||
+    codePoint === 0x2122 ||
+    codePoint === 0x2139 ||
+    codePoint === 0x3030 ||
+    codePoint === 0x303d ||
+    codePoint === 0x3297 ||
+    codePoint === 0x3299
+  );
+}
+
 /** @param {string} grapheme @returns {number} */
 export function graphemeWidth(grapheme) {
+  let emoji = false;
   let width = 0;
-  let joined = false;
   for (const codePoint of codePointsOf(grapheme)) {
-    if (codePoint === 0x200d) {
-      joined = true;
+    if (codePoint === 0x200d || codePoint === 0xfe0f) {
       continue;
+    }
+    if (isEmojiCodePoint(codePoint)) {
+      emoji = true;
     }
     width += codePointWidth(codePoint);
   }
-  return joined && width > 2 ? 2 : width;
+  return emoji ? 2 : width;
 }
 
 /** @param {string} value @returns {number} */
@@ -146,20 +166,27 @@ export function wrapLine(line, maxWidth) {
   if (cellWidth(line) <= maxWidth) {
     return [line];
   }
+  const tokens = line.trim().match(/\S+|\s+/gu) ?? [];
   const wrapped = [];
   let current = "";
-  for (const word of line.trim().split(/\s+/u)) {
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token.trim() === "") {
+      continue;
+    }
+    const separator = index > 0 ? tokens[index - 1] : "";
     /** @type {string[]} */
     const pieces = [];
-    let rest = word;
+    let rest = token;
     while (cellWidth(rest) > maxWidth) {
       const [head, tail] = breakAtWidth(rest, maxWidth);
       pieces.push(head);
       rest = tail;
     }
     pieces.push(rest);
-    for (const piece of pieces) {
-      const candidate = current ? `${current} ${piece}` : piece;
+    pieces.forEach((piece, pieceIndex) => {
+      const prefix = pieceIndex === 0 ? separator : "";
+      const candidate = current ? `${current}${prefix}${piece}` : piece;
       if (cellWidth(candidate) <= maxWidth) {
         current = candidate;
       } else {
@@ -168,7 +195,7 @@ export function wrapLine(line, maxWidth) {
         }
         current = piece;
       }
-    }
+    });
   }
   if (current) {
     wrapped.push(current);

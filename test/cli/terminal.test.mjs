@@ -48,6 +48,8 @@ test("graphemeWidth measures wide, emoji, combining, and ZWJ characters", () => 
   assert.equal(graphemeWidth("é"), 1);
   assert.equal(graphemeWidth("e\u0301"), 1);
   assert.equal(graphemeWidth("\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}"), 2);
+  assert.equal(graphemeWidth("\u{1f44d}\u{1f3fd}"), 2);
+  assert.equal(graphemeWidth("☀\ufe0f"), 2);
 });
 
 test("cellWidth sums display cells across grapheme clusters", () => {
@@ -63,6 +65,11 @@ test("wrapLine breaks CJK text on cell width without losing characters", () => {
   const wrapped = wrapLine("漢字のテストです", 6);
   assert.deepEqual(wrapped, ["漢字の", "テスト", "です"]);
   assert.equal(wrapped.join(""), "漢字のテストです");
+});
+
+test("wrapLine preserves original whitespace runs on unbroken lines", () => {
+  assert.deepEqual(wrapLine("a  bbb ccccccccc", 8), ["a  bbb", "cccccccc", "c"]);
+  assert.deepEqual(wrapLine("a  b   c", 30), ["a  b   c"]);
 });
 
 test("wrapLine never splits a ZWJ emoji cluster", () => {
