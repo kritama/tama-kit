@@ -191,6 +191,34 @@ test("renderBox keeps quoted paths with whitespace as one shell word", () => {
   );
 });
 
+test("wrapLine re-quotes compound apostrophe tokens as double-quoted chunks", () => {
+  const value = "/tmp/tama project's/deploy/compose.yaml";
+  const token = `'${value.replaceAll("'", "'\\''")}'`;
+  const wrapped = wrapLine(token, 18);
+  assert.ok(wrapped.every((row) => row.startsWith('"') && row.endsWith('"')));
+  assert.equal(wrapped.map((row) => row.slice(1, -1)).join(""), value);
+  assert.ok(wrapped.every((row) => cellWidthAt(row, 2) <= 18));
+});
+
+test("wrapLine breaks words that mix apostrophes and $ only outside quoted spans", () => {
+  assert.deepEqual(wrapLine("run 'a'\\''b$c'", 6), ["run", " 'a'\\'", "'b$c'"]);
+});
+
+test("wrapLine treats prose apostrophes as ordinary characters in display mode", () => {
+  assert.deepEqual(wrapLine("Guide Tama's user", 5, false), ["Guide", "Tama'", "s", " user"]);
+});
+
+test("renderBox display boxes wrap prose apostrophes instead of swallowing the line", () => {
+  const line =
+    "3. Guide me through Tama's interactive first-run setup at http://localhost:4000 now.";
+  const lines = renderBox({ title: "Prompt", lines: [line], color: false, maxWidth: 30 });
+  assert.ok(
+    lines.every((row) => visibleLength(row) <= 34),
+    lines.join("\n"),
+  );
+  assert.equal(new Set(lines.map((row) => visibleLength(row))).size, 1);
+});
+
 test("renderBox wraps content to maxWidth and stays rectangular", () => {
   const lines = renderBox({
     title: "Copy this prompt into your coding agent",

@@ -300,11 +300,40 @@ function tokenizeLine(value) {
       index += 1;
       continue;
     }
-    if (char === "'" || char === '"') {
-      const close = value.indexOf(char, index + 1);
-      const end = close === -1 ? value.length : close + 1;
-      token += value.slice(index, end);
-      index = end;
+    if (char === "'") {
+      token += char;
+      index += 1;
+      while (index < value.length && value[index] !== "'") {
+        token += value[index];
+        index += 1;
+      }
+      if (index < value.length) {
+        token += value[index];
+        index += 1;
+      }
+      continue;
+    }
+    if (char === '"') {
+      token += char;
+      index += 1;
+      while (index < value.length && value[index] !== '"') {
+        if (value[index] === "\\" && index + 1 < value.length) {
+          token += value.slice(index, index + 2);
+          index += 2;
+          continue;
+        }
+        token += value[index];
+        index += 1;
+      }
+      if (index < value.length) {
+        token += value[index];
+        index += 1;
+      }
+      continue;
+    }
+    if (char === "\\") {
+      token += value.slice(index, index + 2);
+      index += 2;
       continue;
     }
     token += char;
@@ -315,15 +344,212 @@ function tokenizeLine(value) {
 }
 
 /**
+ * Reduces a shell word to the literal value it expands to.
+ * @param {string} token
+ * @returns {{value: string, consumed: boolean}}
+ */
+function parseShellWord(token) {
+  let value = "";
+  let index = 0;
+  while (index < token.length) {
+    const char = token[index];
+    if (char === "'") {
+      const close = token.indexOf("'", index + 1);
+      if (close === -1) {
+        break;
+      }
+      value += token.slice(index + 1, close);
+      index = close + 1;
+      continue;
+    }
+    if (char === '"') {
+      const close = token.indexOf('"', index + 1);
+      if (close === -1) {
+        break;
+      }
+      let cursor = index + 1;
+      while (cursor < close) {
+        if (token[cursor] === "\\" && cursor + 1 < close) {
+          const next = token[cursor + 1];
+          if (next === "\n") {
+            cursor += 2;
+            continue;
+          }
+          value += '"$`\\'.includes(next) ? next : `\\${next}`;
+          cursor += 2;
+          continue;
+        }
+        value += token[cursor];
+        cursor += 1;
+      }
+      index = close + 1;
+      continue;
+    }
+    if (char === "\\" && index + 1 < token.length) {
+      value += token[index + 1];
+      index += 2;
+      continue;
+    }
+    value += char;
+    index += 1;
+  }
+  return { value, consumed: index === token.length };
+}
+
+/**
+ * Re-quotes a shell word as one span that can be hard-broken at any cell
+ * boundary, or null when no such quoting exists.
+ * @param {string} token
+ * @returns {{quote: string, value: string} | null}
+ */
+function canonicalSpan(token) {
+  const { value, consumed } = parseShellWord(token);
+  if (!consumed) {
+    return null;
+  }
+  if (!value.includes("'") && !value.includes("$") && !value.includes("`")) {
+    return { quote: "'", value };
+  }
+  if (value.includes("'") && !/["$`"\\]/.test(value)) {
+    return { quote: '"', value };
+  }
+  return null;
+}
+
+/**
+ * Character offsets at which a raw continuation backslash may follow a token
+ * prefix without landing inside a quoted span.
+ * @param {string} token
+ * @returns {Set<number>}
+ */
+function shellSafeBreaks(token) {
+  const safe = new Set([0]);
+  let inSingle = false;
+  let inDouble = false;
+  for (let index = 0; index < token.length; index += 1) {
+    const char = token[index];
+    if (inSingle) {
+      if (char === "'") {
+        inSingle = false;
+        safe.add(index + 1);
+      }
+      continue;
+    }
+    if (inDouble) {
+      if (char === "\\") {
+        index += 1;
+        continue;
+      }
+      if (char === '"') {
+        inDouble = false;
+        safe.add(index + 1);
+      }
+      continue;
+    }
+    if (char === "'") {
+      inSingle = true;
+      continue;
+    }
+    if (char === '"') {
+      inDouble = true;
+      continue;
+    }
+    if (char === "\\") {
+      index += 1;
+    }
+    safe.add(index + 1);
+  }
+  return safe;
+}
+
+/**
+ * Splits a shell word into verbatim chunks, breaking only where the
+ * continuation backslash stays outside quotes.
+ * @param {string} token
+ * @param {number} maxWidth
+ * @returns {string[]}
+ */
+function rawTokenPieces(token, maxWidth) {
+  const safe = shellSafeBreaks(token);
+  /** @type {string[]} */
+  const pieces = [];
+  let start = 0;
+  while (start < token.length) {
+    const rest = token.slice(start);
+    const graphemes = Array.from(rest);
+    let width = 0;
+    let length = 0;
+    let cut = 0;
+    for (let index = 0; index < graphemes.length; index += 1) {
+      width += graphemeWidthAt(graphemes[index], CONTENT_COLUMN + width);
+      length += graphemes[index].length;
+      if (width <= maxWidth && safe.has(start + length)) {
+        cut = length;
+      }
+    }
+    if (cut === 0) {
+      pieces.push(rest);
+      break;
+    }
+    pieces.push(rest.slice(0, cut));
+    start += cut;
+  }
+  return pieces;
+}
+
+/**
+ * Splits a line into display words: whitespace-separated, with quotes
+ * treated as ordinary characters.
+ * @param {string} value
+ * @returns {{separator: string, token: string}[]}
+ */
+function tokenizeDisplay(value) {
+  /** @type {{separator: string, token: string}[]} */
+  const parts = [];
+  let separator = "";
+  for (const entry of value.match(/\S+|\s+/gu) ?? []) {
+    if (entry.trim() === "") {
+      separator += entry;
+    } else {
+      parts.push({ separator, token: entry });
+      separator = "";
+    }
+  }
+  return parts;
+}
+
+/**
+ * Splits a display word into verbatim chunks without any shell quoting.
+ * @param {string} token
+ * @param {number} maxWidth
+ * @returns {string[]}
+ */
+function plainPieces(token, maxWidth) {
+  /** @type {string[]} */
+  const pieces = [];
+  let rest = token;
+  while (rest !== "" && cellWidthAt(rest, CONTENT_COLUMN) > maxWidth) {
+    const [head, tail] = breakAtWidth(rest, Math.max(1, maxWidth));
+    pieces.push(head);
+    rest = tail;
+  }
+  if (rest !== "" || pieces.length === 0) {
+    pieces.push(rest);
+  }
+  return pieces;
+}
+
+/**
  * @param {string} line
  * @param {number} maxWidth
+ * @param {boolean} shell
  * @returns {{line: string, midToken: boolean, tokenContinuation: boolean}[]}
  */
-function wrapLineDetailed(line, maxWidth) {
+function wrapLineDetailed(line, maxWidth, shell = true) {
   if (cellWidthAt(line, CONTENT_COLUMN) <= maxWidth) {
     return [{ line, midToken: false, tokenContinuation: false }];
   }
-  const tokens = tokenizeLine(line.trim());
+  const tokens = (shell ? tokenizeLine : tokenizeDisplay)(line.trim());
   /** @type {{line: string, midToken: boolean, tokenContinuation: boolean}[]} */
   const wrapped = [];
   let current = "";
@@ -332,38 +558,36 @@ function wrapLineDetailed(line, maxWidth) {
     if (token === "") {
       continue;
     }
-    // A fully-quoted token is broken so every chunk is itself quoted: the
-    // continuation backslash then sits outside the quotes and the adjacent
-    // quoted chunks concatenate into the original word.
-    /** @type {{text: string, quoted: boolean}[]} */
+    // Shell lines: quoted words are re-quoted as one canonical span so
+    // every chunk is itself quoted: the continuation backslash then sits
+    // outside the quotes and adjacent quoted chunks concatenate into the
+    // original word. Words that cannot be re-quoted are broken verbatim,
+    // only where a continuation backslash stays outside quotes. Display
+    // lines keep quotes as ordinary characters and break words verbatim.
+    /** @type {string[]} */
     const pieces = [];
-    const quote =
-      token.length >= 2 && (token[0] === "'" || token[0] === '"') && token.endsWith(token[0])
-        ? token[0]
-        : "";
-    let rest = quote !== "" ? token.slice(1, -1) : token;
-    while (rest !== "" && cellWidthAt(rest, CONTENT_COLUMN) + (quote !== "" ? 2 : 0) > maxWidth) {
-      const [head, tail] = breakAtWidth(
-        rest,
-        Math.max(1, maxWidth - (quote !== "" ? 2 : 0)),
-        quote !== "" ? CONTENT_COLUMN + 1 : CONTENT_COLUMN,
-      );
-      pieces.push({
-        text: quote !== "" ? `${quote}${head}${quote}` : head,
-        quoted: quote !== "",
-      });
-      rest = tail;
-    }
-    if (rest !== "" || pieces.length === 0) {
-      pieces.push({
-        text: quote !== "" ? `${quote}${rest}${quote}` : rest,
-        quoted: quote !== "",
-      });
+    if (shell) {
+      const span = /['"]/.test(token) ? canonicalSpan(token) : null;
+      if (span !== null) {
+        let rest = span.value;
+        while (rest !== "" && cellWidthAt(rest, CONTENT_COLUMN) + 2 > maxWidth) {
+          const [head, tail] = breakAtWidth(rest, Math.max(1, maxWidth - 2), CONTENT_COLUMN + 1);
+          pieces.push(`${span.quote}${head}${span.quote}`);
+          rest = tail;
+        }
+        if (rest !== "" || pieces.length === 0) {
+          pieces.push(`${span.quote}${rest}${span.quote}`);
+        }
+      } else {
+        pieces.push(...rawTokenPieces(token, maxWidth));
+      }
+    } else {
+      pieces.push(...plainPieces(token, maxWidth));
     }
     pieces.forEach((piece, pieceIndex) => {
       const prefix = pieceIndex === 0 ? separator : "";
       const continuesToken = pieceIndex > 0;
-      const candidate = current !== "" ? `${current}${prefix}${piece.text}` : piece.text;
+      const candidate = current !== "" ? `${current}${prefix}${piece}` : piece;
       if (cellWidthAt(candidate, CONTENT_COLUMN) <= maxWidth) {
         if (current === "") {
           currentContinues = continuesToken;
@@ -372,7 +596,7 @@ function wrapLineDetailed(line, maxWidth) {
       } else if (
         prefix !== "" &&
         /^ +$/.test(prefix) &&
-        cellWidthAt(`${prefix}${piece.text}`, CONTENT_COLUMN) > maxWidth
+        cellWidthAt(`${prefix}${piece}`, CONTENT_COLUMN) > maxWidth
       ) {
         let spaces = prefix.length;
         const take = Math.min(spaces, Math.max(0, maxWidth - cellWidthAt(current, CONTENT_COLUMN)));
@@ -386,8 +610,8 @@ function wrapLineDetailed(line, maxWidth) {
           wrapped.push({ line: " ".repeat(maxWidth), midToken: false, tokenContinuation: false });
           spaces -= maxWidth;
         }
-        if (spaces + cellWidthAt(piece.text, CONTENT_COLUMN) > maxWidth) {
-          const lead = Math.max(0, maxWidth - cellWidthAt(piece.text, CONTENT_COLUMN));
+        if (spaces + cellWidthAt(piece, CONTENT_COLUMN) > maxWidth) {
+          const lead = Math.max(0, maxWidth - cellWidthAt(piece, CONTENT_COLUMN));
           if (spaces - lead > 1) {
             wrapped.push({
               line: " ".repeat(spaces - lead),
@@ -397,12 +621,12 @@ function wrapLineDetailed(line, maxWidth) {
           }
           spaces = lead;
         }
-        current = `${" ".repeat(spaces)}${piece.text}`;
+        current = `${" ".repeat(spaces)}${piece}`;
         currentContinues = false;
       } else if (
         prefix !== "" &&
         /^[\t ]+$/.test(prefix) &&
-        cellWidthAt(`${prefix}${piece.text}`, CONTENT_COLUMN) > maxWidth
+        cellWidthAt(`${prefix}${piece}`, CONTENT_COLUMN) > maxWidth
       ) {
         const prefixFits = cellWidthAt(`${current}${prefix}`, CONTENT_COLUMN) <= maxWidth;
         wrapped.push({
@@ -410,7 +634,7 @@ function wrapLineDetailed(line, maxWidth) {
           midToken: false,
           tokenContinuation: currentContinues,
         });
-        current = piece.text;
+        current = piece;
         currentContinues = false;
       } else {
         if (current !== "") {
@@ -420,8 +644,8 @@ function wrapLineDetailed(line, maxWidth) {
             tokenContinuation: currentContinues,
           });
         }
-        const next = `${prefix}${piece.text}`;
-        current = cellWidthAt(next, CONTENT_COLUMN) <= maxWidth ? next : piece.text;
+        const next = `${prefix}${piece}`;
+        current = cellWidthAt(next, CONTENT_COLUMN) <= maxWidth ? next : piece;
         currentContinues = continuesToken;
       }
     });
@@ -435,10 +659,11 @@ function wrapLineDetailed(line, maxWidth) {
 /**
  * @param {string} line
  * @param {number} maxWidth
+ * @param {boolean} [shell]
  * @returns {string[]}
  */
-export function wrapLine(line, maxWidth) {
-  return wrapLineDetailed(line, maxWidth).map((row) => row.line);
+export function wrapLine(line, maxWidth, shell = true) {
+  return wrapLineDetailed(line, maxWidth, shell).map((row) => row.line);
 }
 
 const CONTENT_COLUMN = 2;
@@ -470,7 +695,7 @@ export function renderBox({ title, lines, color, style, maxWidth, continuation =
   const wrap = (line) =>
     wrapWidth === undefined
       ? [{ line, midToken: false, tokenContinuation: false }]
-      : wrapLineDetailed(line, wrapWidth);
+      : wrapLineDetailed(line, wrapWidth, continuation);
   /** @type {{line: string, continues: boolean, midToken: boolean, tokenContinuation: boolean}[]} */
   const contentRows = lines.flatMap((line) => {
     const wrapped = wrap(line);
