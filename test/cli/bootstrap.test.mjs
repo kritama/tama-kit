@@ -1202,6 +1202,13 @@ test("the next-step command includes and safely quotes the selected Compose file
   );
 });
 
+test("the next-step command visibly escapes filename control characters", () => {
+  assert.equal(
+    formatComposeUpCommand("nested/a\nb\tcompose.yaml"),
+    "docker compose -f $'nested/a\\nb\\tcompose.yaml' up -d tama",
+  );
+});
+
 test("the next-step output references the Compose file relative to the working directory", async (context) => {
   try {
     execFileSync("docker", ["compose", "version", "--short"], {
@@ -1219,37 +1226,31 @@ test("the next-step output references the Compose file relative to the working d
     cwd: root,
     interactive: false,
     color: false,
-    columns: 100,
+    columns: 60,
     write: () => {},
     stdout: (message) => output.push(message),
     stderr: () => {},
   });
 
   assert.equal(exitCode, EXIT_CODES.SUCCESS);
-  assert.ok(output.every((message) => message.length <= 100));
   const text = output.join("\n");
-  assert.match(text, /│\s+Next\s+│/u);
-  assert.match(text, /│\s+docker compose -f 'compose\.yaml' up -d tama\s+│/u);
-  assert.match(text, /│\s+Private setup URL\s+│/u);
-  assert.match(text, /│\s+http:\/\/localhost:4000\/setup\/root\?token=\S+\s+│/u);
+  assert.match(text, /^Next:$/mu);
+  assert.ok(output.includes("  docker compose -f 'compose.yaml' up -d tama"));
+  assert.match(text, /^Private setup URL:$/mu);
+  const setupUrl = output.find((message) =>
+    message.startsWith("  http://localhost:4000/setup/root?token="),
+  );
+  assert.ok(setupUrl);
+  assert.ok(setupUrl.length > 60, "the copyable URL should remain one logical line");
+  assert.doesNotMatch(setupUrl, /[\r\n]/u);
   assert.doesNotMatch(text, new RegExp(`${root}/compose.yaml`, "g"));
 
-  /** @type {string[][]} */
-  const blocks = [];
-  /** @type {string[][]} */
-  const openBlocks = [];
-  for (const message of output) {
-    if (message.startsWith("┌")) {
-      openBlocks.push([message]);
-    } else if (message.startsWith("└")) {
-      openBlocks.at(-1)?.push(message);
-      blocks.push(openBlocks.pop());
-    } else if (openBlocks.length > 0) {
-      openBlocks.at(-1)?.push(message);
-    }
-  }
-  assert.ok(blocks.length >= 3);
-  for (const block of blocks) {
-    assert.equal(new Set(block.map((line) => line.length)).size, 1);
-  }
+  assert.ok(output.includes("Copy this prompt into your coding agent"));
+  const promptSetupUrl = output.find((message) => message.includes("private onboarding URL is"));
+  assert.ok(promptSetupUrl);
+  assert.doesNotMatch(promptSetupUrl, /[\r\n]/u);
+  assert.ok(
+    output.every((message) => !message.startsWith("┌")),
+    "the prompt should fall back to unboxed text instead of hard-breaking its private URL",
+  );
 });
