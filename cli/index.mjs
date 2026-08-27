@@ -40,6 +40,7 @@ function defaultIO() {
     write: (message) => process.stdout.write(message),
     interactive,
     color: Boolean(process.stdout.isTTY && !("NO_COLOR" in process.env)),
+    columns: process.stdout.columns,
     prompt: async (question) => {
       const readline = createInterface({ input: process.stdin, output: process.stdout });
       try {
