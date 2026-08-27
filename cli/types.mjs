@@ -151,6 +151,7 @@
  * @property {(question: string) => Promise<string>} [prompt]
  * @property {boolean} [interactive]
  * @property {boolean} [color]
+ * @property {number} [columns]
  * @property {boolean} [includeErrorDetails]
  */
 

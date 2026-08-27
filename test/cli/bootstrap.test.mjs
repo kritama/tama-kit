@@ -1201,3 +1201,55 @@ test("the next-step command includes and safely quotes the selected Compose file
     "docker compose -f '/tmp/tama project'\\''s/deploy/compose.yaml' up -d tama",
   );
 });
+
+test("the next-step output references the Compose file relative to the working directory", async (context) => {
+  try {
+    execFileSync("docker", ["compose", "version", "--short"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    context.skip("Docker Compose is not available");
+    return;
+  }
+
+  const root = project();
+  const output = [];
+  const exitCode = await run(["bootstrap", root, "--no-color", "--skills", "manual"], {
+    cwd: root,
+    interactive: false,
+    color: false,
+    columns: 100,
+    write: () => {},
+    stdout: (message) => output.push(message),
+    stderr: () => {},
+  });
+
+  assert.equal(exitCode, EXIT_CODES.SUCCESS);
+  assert.ok(output.every((message) => message.length <= 100));
+  const text = output.join("\n");
+  assert.match(text, /│\s+Next\s+│/u);
+  assert.match(text, /│\s+docker compose -f 'compose\.yaml' up -d tama\s+│/u);
+  assert.match(text, /│\s+Private setup URL\s+│/u);
+  assert.match(text, /│\s+http:\/\/localhost:4000\/setup\/root\?token=\S+\s+│/u);
+  assert.doesNotMatch(text, new RegExp(`${root}/compose.yaml`, "g"));
+
+  /** @type {string[][]} */
+  const blocks = [];
+  /** @type {string[][]} */
+  const openBlocks = [];
+  for (const message of output) {
+    if (message.startsWith("┌")) {
+      openBlocks.push([message]);
+    } else if (message.startsWith("└")) {
+      openBlocks.at(-1)?.push(message);
+      blocks.push(openBlocks.pop());
+    } else if (openBlocks.length > 0) {
+      openBlocks.at(-1)?.push(message);
+    }
+  }
+  assert.ok(blocks.length >= 3);
+  for (const block of blocks) {
+    assert.equal(new Set(block.map((line) => line.length)).size, 1);
+  }
+});

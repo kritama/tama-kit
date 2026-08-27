@@ -11,7 +11,7 @@ import { createBootstrapPlan, publicPlan } from "../bootstrap/plan.mjs";
 import { startCompose, validateCompose, validateComposePrerequisite } from "../bootstrap/start.mjs";
 import { applyOperationsTransactionally } from "../bootstrap/write.mjs";
 import { CLIError, EXIT_CODES, usageError } from "../errors.mjs";
-import { createProgressBar, paint } from "../terminal.mjs";
+import { createProgressBar, paint, renderBox } from "../terminal.mjs";
 
 /** @typedef {import("../types.mjs").BootstrapPlan} BootstrapPlan */
 /** @typedef {import("../types.mjs").BootstrapResult} BootstrapResult */
@@ -237,23 +237,40 @@ function printHuman(io, result, color, setupUrl) {
     io.stdout(`  ${paint(color, "cyan", "codex plugin add tama-kit@upmaru")}`);
   }
 
+  /** @param {{title?: string, lines: string[], style?: import("../terminal.mjs").PaintStyle}} box */
+  function printBox(box) {
+    const maxWidth = io.columns === undefined ? undefined : Math.max(20, io.columns - 4);
+    for (const line of renderBox({ ...box, color, maxWidth })) {
+      io.stdout(line);
+    }
+  }
+
+  /** @param {string | null} url */
+  function printSetupUrlBox(url) {
+    if (!url) {
+      return;
+    }
+    io.stdout("");
+    printBox({ title: "Private setup URL", lines: [url], style: "magenta" });
+  }
+
   if (result.started) {
     io.stdout("");
     io.stdout(`Tama is healthy at ${result.healthUrl}`);
-    io.stdout(`${paint(color, "magenta", "Private setup URL:")} ${setupUrl}`);
+    printSetupUrlBox(setupUrl);
   } else if (result.mode !== "dry-run") {
+    const composeReference = relative(io.cwd, result.composeFile) || result.composeFile;
     io.stdout("");
-    io.stdout(`Next: ${formatComposeUpCommand(result.composeFile)}`);
-    io.stdout(`${paint(color, "magenta", "Private setup URL:")} ${setupUrl}`);
+    printBox({ title: "Next", lines: [formatComposeUpCommand(composeReference)], style: "cyan" });
+    printSetupUrlBox(setupUrl);
   }
 
   if (result.agentPrompt) {
     io.stdout("");
-    io.stdout(paint(color, "bold", "Copy this prompt into your coding agent:"));
-    io.stdout("");
-    io.stdout("```text");
-    io.stdout(result.agentPrompt);
-    io.stdout("```");
+    printBox({
+      title: "Copy this prompt into your coding agent",
+      lines: result.agentPrompt.split("\n"),
+    });
   }
 }
 
