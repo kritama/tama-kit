@@ -62,6 +62,20 @@ function parseEnvironment(content, filename) {
   return values;
 }
 
+/** @param {string} root */
+export function readSetupUrl(root) {
+  const filename = join(root, ".tama.env");
+  const values = parseEnvironment(readFileSync(filename, "utf8"), filename);
+  const port = values.get("TAMA_PORT");
+  const setupToken = values.get("TAMA_SETUP_TOKEN");
+  if (!port || !setupToken) {
+    throw ownershipError(`${filename} must define TAMA_PORT and TAMA_SETUP_TOKEN`, {
+      path: filename,
+    });
+  }
+  return `http://localhost:${port}/setup/root?token=${encodeURIComponent(setupToken)}`;
+}
+
 /** @param {string} content @param {Record<string, string | number>} updates */
 function updateEnvironment(content, updates) {
   const remaining = new Map(Object.entries(updates));

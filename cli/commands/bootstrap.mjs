@@ -2,11 +2,16 @@
 
 import { relative } from "node:path";
 import { parseArgs } from "node:util";
+import { formatAgentSetupPrompt } from "../bootstrap/agent-prompt.mjs";
 import { formatComposeUpCommand } from "../bootstrap/compose-command.mjs";
+import { inspectProject } from "../bootstrap/detect-project.mjs";
+import { readSetupUrl } from "../bootstrap/environment.mjs";
+import { readAgentSkillMode } from "../bootstrap/manifest.mjs";
 import { createBootstrapPlan, publicPlan } from "../bootstrap/plan.mjs";
 import { startCompose, validateCompose, validateComposePrerequisite } from "../bootstrap/start.mjs";
 import { applyOperationsTransactionally } from "../bootstrap/write.mjs";
 import { CLIError, EXIT_CODES, usageError } from "../errors.mjs";
+import { createProgressBar, paint } from "../terminal.mjs";
 
 /** @typedef {import("../types.mjs").BootstrapPlan} BootstrapPlan */
 /** @typedef {import("../types.mjs").BootstrapResult} BootstrapResult */
@@ -19,9 +24,11 @@ import { CLIError, EXIT_CODES, usageError } from "../errors.mjs";
  * @property {string} [composePath]
  * @property {number} [port]
  * @property {string} [image]
+ * @property {import("../types.mjs").AgentSkillMode} [skillMode]
  * @property {boolean} dryRun
  * @property {boolean} start
  * @property {boolean} json
+ * @property {boolean} noColor
  * @property {boolean} help
  */
 
@@ -33,9 +40,11 @@ function usage() {
     "  --compose <path>       Select an existing Compose file",
     "  --port <port>          Host port for Tama (default: 4000)",
     "  --image <reference>    Override the tested Tama image",
+    "  --skills <mode>        Agent skills: local or manual",
     "  --dry-run              Inspect and report without writing",
     "  --start                Start Compose and wait for Tama health",
     "  --json                 Emit machine-readable output",
+    "  --no-color             Disable terminal colors",
     "  -h, --help             Show help",
   ].join("\n");
 }
@@ -69,6 +78,14 @@ function validateImage(value) {
   return value;
 }
 
+/** @param {string | undefined} value */
+function parseSkillMode(value) {
+  if (value === undefined || value === "local" || value === "manual") {
+    return value;
+  }
+  throw usageError(`skills must be either local or manual: ${value}`);
+}
+
 /** @param {string[]} argv @returns {BootstrapCommandOptions} */
 function parse(argv) {
   let parsed;
@@ -79,9 +96,11 @@ function parse(argv) {
         compose: { type: "string" },
         port: { type: "string" },
         image: { type: "string" },
+        skills: { type: "string" },
         "dry-run": { type: "boolean", default: false },
         start: { type: "boolean", default: false },
         json: { type: "boolean", default: false },
+        "no-color": { type: "boolean", default: false },
         help: { type: "boolean", short: "h", default: false },
       },
       allowPositionals: true,
@@ -102,11 +121,58 @@ function parse(argv) {
     composePath: parsed.values.compose,
     port: parsePort(parsed.values.port),
     image: validateImage(parsed.values.image),
+    skillMode: parseSkillMode(parsed.values.skills),
     dryRun: parsed.values["dry-run"] ?? false,
     start: parsed.values.start ?? false,
     json: parsed.values.json ?? false,
+    noColor: parsed.values["no-color"] ?? false,
     help: parsed.values.help ?? false,
   };
+}
+
+/**
+ * @param {BootstrapCommandOptions} options
+ * @param {CommandIO} io
+ * @param {string} tamaDirectory
+ * @returns {Promise<import("../types.mjs").AgentSkillMode>}
+ */
+async function selectSkillMode(options, io, tamaDirectory) {
+  const recorded = readAgentSkillMode(tamaDirectory);
+  if (recorded === "local") {
+    if (options.skillMode === "manual") {
+      throw usageError(
+        "repository-local Tama Kit skills are already managed; --skills manual does not uninstall them",
+      );
+    }
+    return "local";
+  }
+  if (options.skillMode) {
+    return options.skillMode;
+  }
+  if (recorded) {
+    return recorded;
+  }
+  if (options.json || !io.interactive || !io.prompt) {
+    return "manual";
+  }
+
+  while (true) {
+    const answer = (
+      await io.prompt(
+        "Install Tama Kit's graph-builder and graph-audit skills in this repository? " +
+          "Choose no to install them yourself later. [Y/n] ",
+      )
+    )
+      .trim()
+      .toLowerCase();
+    if (answer === "" || answer === "y" || answer === "yes") {
+      return "local";
+    }
+    if (answer === "n" || answer === "no") {
+      return "manual";
+    }
+    io.stderr("Please answer yes or no.");
+  }
 }
 
 /**
@@ -121,42 +187,73 @@ function resultEnvelope(plan, { dryRun, started, healthUrl }) {
     mode: dryRun ? "dry-run" : "write",
     started,
     healthUrl: healthUrl ?? null,
+    agentPrompt: dryRun ? null : formatAgentSetupPrompt(plan),
     ...result,
   };
 }
 
-/** @param {CommandIO} io @param {BootstrapResult} result */
-function printHuman(io, result) {
-  io.stdout(`Tama Kit bootstrap (${result.mode})`);
-  io.stdout(`Project: ${result.root}`);
-  io.stdout(`Framework: ${result.framework}`);
-  io.stdout(`Compose: ${relative(result.root, result.composeFile)}`);
-  io.stdout(`Global foundation: ${result.terraform.foundation}`);
+/**
+ * @param {CommandIO} io
+ * @param {BootstrapResult} result
+ * @param {boolean} color
+ * @param {string | null} setupUrl
+ */
+function printHuman(io, result, color, setupUrl) {
+  io.stdout(paint(color, "bold", `Tama Kit bootstrap (${result.mode})`));
+  io.stdout(`${paint(color, "dim", "Project:")} ${result.root}`);
+  io.stdout(`${paint(color, "dim", "Framework:")} ${result.framework}`);
+  io.stdout(`${paint(color, "dim", "Compose:")} ${relative(result.root, result.composeFile)}`);
+  io.stdout(`${paint(color, "dim", "Global foundation:")} ${result.terraform.foundation}`);
+  io.stdout(
+    `${paint(color, "dim", "Agent skills:")} ${
+      result.skillMode === "local"
+        ? paint(color, "green", "repository-local (.agents/skills)")
+        : paint(color, "yellow", "manual installation")
+    }`,
+  );
   io.stdout("");
 
   const changes = result.changes.filter((change) => change.action !== "unchanged");
   if (changes.length === 0) {
-    io.stdout("No changes required.");
+    io.stdout(paint(color, "green", "No changes required."));
   } else {
-    io.stdout("Changes:");
+    io.stdout(paint(color, "bold", "Changes:"));
     for (const change of changes) {
       const display = relative(result.root, change.path) || ".";
-      io.stdout(`  ${change.action.padEnd(6)} ${display}${change.sensitive ? " (sensitive)" : ""}`);
+      const actionStyle = change.action === "create" ? "green" : "yellow";
+      const action = paint(color, actionStyle, change.action.padEnd(6));
+      const sensitive = change.sensitive ? paint(color, "magenta", " (sensitive)") : "";
+      io.stdout(`  ${action} ${display}${sensitive}`);
     }
+  }
+
+  if (result.skillMode === "manual") {
+    io.stdout("");
+    io.stdout(paint(color, "bold", "Install the agent skills later with either:"));
+    io.stdout(`  ${paint(color, "cyan", "npx skills add kritama/tama-kit --agent codex --yes")}`);
+    io.stdout("");
+    io.stdout("Or install the Tama Kit Codex plugin:");
+    io.stdout(`  ${paint(color, "cyan", "codex plugin marketplace add kritama/tama-kit")}`);
+    io.stdout(`  ${paint(color, "cyan", "codex plugin add tama-kit@upmaru")}`);
   }
 
   if (result.started) {
     io.stdout("");
     io.stdout(`Tama is healthy at ${result.healthUrl}`);
-    io.stdout(
-      `Setup: load .tama.env, then open http://localhost:\${TAMA_PORT}/setup/root?token=\${TAMA_SETUP_TOKEN}`,
-    );
+    io.stdout(`${paint(color, "magenta", "Private setup URL:")} ${setupUrl}`);
   } else if (result.mode !== "dry-run") {
     io.stdout("");
     io.stdout(`Next: ${formatComposeUpCommand(result.composeFile)}`);
-    io.stdout(
-      `Setup: load .tama.env, then open http://localhost:\${TAMA_PORT}/setup/root?token=\${TAMA_SETUP_TOKEN}`,
-    );
+    io.stdout(`${paint(color, "magenta", "Private setup URL:")} ${setupUrl}`);
+  }
+
+  if (result.agentPrompt) {
+    io.stdout("");
+    io.stdout(paint(color, "bold", "Copy this prompt into your coding agent:"));
+    io.stdout("");
+    io.stdout("```text");
+    io.stdout(result.agentPrompt);
+    io.stdout("```");
   }
 }
 
@@ -168,23 +265,51 @@ async function executeBootstrap(argv, io) {
     return EXIT_CODES.SUCCESS;
   }
 
-  const plan = createBootstrapPlan({
+  const inspection = inspectProject({
     cwd: io.cwd,
     targetPath: options.targetPath,
     composePath: options.composePath,
-    port: options.port,
-    image: options.image,
+  });
+  const skillMode = await selectSkillMode(options, io, inspection.tamaDirectory);
+  const color = Boolean(io.color && !options.noColor && !options.json);
+  const progress = createProgressBar(io, {
+    enabled: !options.json,
+    color,
+    total: options.dryRun ? 1 : options.start ? 5 : 4,
   });
 
+  progress.update(0, "Planning bootstrap changes");
+  /** @type {BootstrapPlan} */
+  let plan;
   let healthUrl;
-  if (!options.dryRun) {
-    validateComposePrerequisite();
-    await applyOperationsTransactionally(plan.operations, () =>
-      validateCompose(plan, { checkPrerequisite: false }),
-    );
-    if (options.start) {
-      healthUrl = await startCompose(plan, { quiet: options.json });
+  try {
+    plan = createBootstrapPlan({
+      cwd: io.cwd,
+      targetPath: options.targetPath,
+      composePath: options.composePath,
+      port: options.port,
+      image: options.image,
+      skillMode,
+    });
+    if (options.dryRun) {
+      progress.finish("Plan ready");
+    } else {
+      progress.update(1, "Checking Docker Compose");
+      validateComposePrerequisite();
+      progress.update(2, "Writing managed files");
+      await applyOperationsTransactionally(plan.operations, () => {
+        progress.update(3, "Validating Compose configuration");
+        return validateCompose(plan, { checkPrerequisite: false });
+      });
+      if (options.start) {
+        progress.update(4, "Starting Tama services");
+        healthUrl = await startCompose(plan, { quiet: options.json });
+      }
+      progress.finish(options.start ? "Tama is ready" : "Bootstrap complete");
     }
+  } catch (error) {
+    progress.stop();
+    throw error;
   }
 
   const result = resultEnvelope(plan, {
@@ -195,7 +320,11 @@ async function executeBootstrap(argv, io) {
   if (options.json) {
     io.stdout(JSON.stringify(result, null, 2));
   } else {
-    printHuman(io, result);
+    const setupUrl = options.dryRun ? null : readSetupUrl(plan.root);
+    if (setupUrl) {
+      result.agentPrompt = formatAgentSetupPrompt(plan, { setupUrl });
+    }
+    printHuman(io, result, color, setupUrl);
   }
   return EXIT_CODES.SUCCESS;
 }

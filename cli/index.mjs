@@ -2,6 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
 import { runBootstrap } from "./commands/bootstrap.mjs";
@@ -31,10 +32,22 @@ function usage() {
 
 /** @returns {CommandIO} */
 function defaultIO() {
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
   return {
     cwd: process.cwd(),
     stdout: (message = "") => console.log(message),
     stderr: (message = "") => console.error(message),
+    write: (message) => process.stdout.write(message),
+    interactive,
+    color: Boolean(process.stdout.isTTY && !("NO_COLOR" in process.env)),
+    prompt: async (question) => {
+      const readline = createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        return await readline.question(question);
+      } finally {
+        readline.close();
+      }
+    },
   };
 }
 

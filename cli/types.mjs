@@ -40,6 +40,7 @@
  */
 
 /** @typedef {"rails" | "phoenix" | "node" | "generic"} Framework */
+/** @typedef {"local" | "manual"} AgentSkillMode */
 
 /**
  * @typedef {object} FrameworkDetection
@@ -54,6 +55,7 @@
  * @property {string} [composePath]
  * @property {number} [port]
  * @property {string} [image]
+ * @property {AgentSkillMode} [skillMode]
  */
 
 /**
@@ -99,6 +101,7 @@
  * @property {number} port
  * @property {string} tamaImage
  * @property {string} postgresImage
+ * @property {AgentSkillMode} skillMode
  * @property {{foundation: "created" | "preserved", providerVersion: string | null, globalModuleVersion: string | null}} terraform
  * @property {FileOperation[]} operations
  */
@@ -124,6 +127,7 @@
  * @property {number} port
  * @property {string} tamaImage
  * @property {string} postgresImage
+ * @property {AgentSkillMode} skillMode
  * @property {{foundation: "created" | "preserved", providerVersion: string | null, globalModuleVersion: string | null}} terraform
  * @property {PublicChange[]} changes
  */
@@ -133,7 +137,8 @@
  *   ok: true,
  *   mode: "dry-run" | "write",
  *   started: boolean,
- *   healthUrl: string | null
+ *   healthUrl: string | null,
+ *   agentPrompt: string | null
  * }} BootstrapResult
  */
 
@@ -142,6 +147,10 @@
  * @property {string} cwd
  * @property {(message?: string) => void} stdout
  * @property {(message?: string) => void} stderr
+ * @property {(message: string) => void} [write]
+ * @property {(question: string) => Promise<string>} [prompt]
+ * @property {boolean} [interactive]
+ * @property {boolean} [color]
  * @property {boolean} [includeErrorDetails]
  */
 
