@@ -139,16 +139,47 @@ test("renderBox keeps continuation backslashes outside quoted tokens", () => {
     continuation: true,
   });
   for (const row of lines) {
-    if (!/ \\│$/.test(row)) {
+    if (!/\\│$/.test(row)) {
       continue;
     }
-    const content = row.slice(2, -3);
+    let content = row.slice(0, -2);
+    if (content.startsWith("│ ")) {
+      content = content.slice(2);
+    } else if (content.startsWith("│")) {
+      content = content.slice(1);
+    }
+    content = content.replace(/\s+$/, "");
     assert.equal(
       (content.match(/'/g) ?? []).length % 2,
       0,
       `backslash must sit outside quotes: ${row}`,
     );
   }
+});
+
+test("wrapLine terminates for quoted tokens narrower than the quote overhead", () => {
+  assert.deepEqual(wrapLine("'abcd'", 1), ["'a'", "'b'", "'c'", "'d'"]);
+});
+
+test("renderBox continuations rejoin into the original command", () => {
+  const command = "docker compose -f 'averyveryverylongdirectory/compose.yaml' up -d tama";
+  const lines = renderBox({
+    title: "Next",
+    lines: [command],
+    color: false,
+    maxWidth: 24,
+    continuation: true,
+  });
+  const contentOf = (row) => {
+    const body = row.endsWith("\\│") ? row.slice(0, -2) : row.slice(0, -1);
+    return body.startsWith("│ ") ? body.slice(2) : body.slice(1);
+  };
+  const joined = lines.slice(3, -1).map(contentOf).join("");
+  const stripQuotes = (value) => value.replace(/'/g, "");
+  assert.equal(
+    stripQuotes(joined).replace(/\s+/g, " ").trim(),
+    stripQuotes(command).replace(/\s+/g, " ").trim(),
+  );
 });
 
 test("renderBox wraps content to maxWidth and stays rectangular", () => {

@@ -272,15 +272,17 @@ function breakAtWidth(value, maxWidth, startColumn = CONTENT_COLUMN) {
 /**
  * @param {string} line
  * @param {number} maxWidth
- * @returns {string[]}
+ * @returns {{line: string, midToken: boolean, tokenContinuation: boolean}[]}
  */
-export function wrapLine(line, maxWidth) {
+function wrapLineDetailed(line, maxWidth) {
   if (cellWidthAt(line, CONTENT_COLUMN) <= maxWidth) {
-    return [line];
+    return [{ line, midToken: false, tokenContinuation: false }];
   }
   const tokens = line.trim().match(/\S+|\s+/gu) ?? [];
+  /** @type {{line: string, midToken: boolean, tokenContinuation: boolean}[]} */
   const wrapped = [];
   let current = "";
+  let currentContinues = false;
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
     if (token.trim() === "") {
@@ -294,16 +296,22 @@ export function wrapLine(line, maxWidth) {
         ? token[0]
         : "";
     let rest = quote ? token.slice(1, -1) : token;
-    while (cellWidthAt(rest, CONTENT_COLUMN) + (quote ? 2 : 0) > maxWidth) {
+    while (rest !== "" && cellWidthAt(rest, CONTENT_COLUMN) + (quote ? 2 : 0) > maxWidth) {
       const [head, tail] = breakAtWidth(rest, Math.max(1, maxWidth - (quote ? 2 : 0)));
       pieces.push(quote ? `${quote}${head}${quote}` : head);
       rest = tail;
     }
-    pieces.push(quote ? `${quote}${rest}${quote}` : rest);
+    if (rest !== "" || pieces.length === 0) {
+      pieces.push(quote ? `${quote}${rest}${quote}` : rest);
+    }
     pieces.forEach((piece, pieceIndex) => {
       const prefix = pieceIndex === 0 ? separator : "";
+      const continuesToken = prefix === "" && pieceIndex > 0;
       const candidate = current ? `${current}${prefix}${piece}` : piece;
       if (cellWidthAt(candidate, CONTENT_COLUMN) <= maxWidth) {
+        if (!current) {
+          currentContinues = continuesToken;
+        }
         current = candidate;
       } else if (
         prefix &&
@@ -316,47 +324,75 @@ export function wrapLine(line, maxWidth) {
             spaces,
             Math.max(0, maxWidth - cellWidthAt(current, CONTENT_COLUMN)),
           );
-          wrapped.push(`${current}${" ".repeat(take)}`);
+          wrapped.push({
+            line: `${current}${" ".repeat(take)}`,
+            midToken: false,
+            tokenContinuation: currentContinues,
+          });
           spaces -= take;
           current = "";
         }
         while (spaces >= maxWidth) {
-          wrapped.push(" ".repeat(maxWidth));
+          wrapped.push({ line: " ".repeat(maxWidth), midToken: false, tokenContinuation: false });
           spaces -= maxWidth;
         }
         if (spaces + cellWidthAt(piece, CONTENT_COLUMN) > maxWidth) {
           const lead = Math.max(0, maxWidth - cellWidthAt(piece, CONTENT_COLUMN));
           if (spaces - lead > 1) {
-            wrapped.push(" ".repeat(spaces - lead));
+            wrapped.push({
+              line: " ".repeat(spaces - lead),
+              midToken: false,
+              tokenContinuation: false,
+            });
           }
           spaces = lead;
         }
         current = `${" ".repeat(spaces)}${piece}`;
+        currentContinues = false;
       } else if (
         prefix &&
         /^[\t ]+$/.test(prefix) &&
         cellWidthAt(`${prefix}${piece}`, CONTENT_COLUMN) > maxWidth
       ) {
         if (cellWidthAt(`${current}${prefix}`, CONTENT_COLUMN) <= maxWidth) {
-          wrapped.push(`${current}${prefix}`);
+          wrapped.push({
+            line: `${current}${prefix}`,
+            midToken: false,
+            tokenContinuation: currentContinues,
+          });
           current = piece;
         } else {
-          wrapped.push(current);
+          wrapped.push({ line: current, midToken: false, tokenContinuation: currentContinues });
           current = piece;
         }
+        currentContinues = false;
       } else {
         if (current) {
-          wrapped.push(current);
+          wrapped.push({
+            line: current,
+            midToken: continuesToken,
+            tokenContinuation: currentContinues,
+          });
         }
         const next = `${prefix}${piece}`;
         current = cellWidthAt(next, CONTENT_COLUMN) <= maxWidth ? next : piece;
+        currentContinues = continuesToken;
       }
     });
   }
   if (current) {
-    wrapped.push(current);
+    wrapped.push({ line: current, midToken: false, tokenContinuation: currentContinues });
   }
   return wrapped;
+}
+
+/**
+ * @param {string} line
+ * @param {number} maxWidth
+ * @returns {string[]}
+ */
+export function wrapLine(line, maxWidth) {
+  return wrapLineDetailed(line, maxWidth).map((row) => row.line);
 }
 
 const CONTENT_COLUMN = 2;
@@ -385,42 +421,57 @@ export function cellWidthAt(value, startColumn) {
 export function renderBox({ title, lines, color, style, maxWidth, continuation = false }) {
   const wrapWidth = continuation && maxWidth !== undefined ? Math.max(1, maxWidth - 2) : maxWidth;
   /** @param {string} line */
-  const wrap = (line) => (wrapWidth === undefined ? [line] : wrapLine(line, wrapWidth));
-  /** @type {{line: string, continues: boolean}[]} */
+  const wrap = (line) =>
+    wrapWidth === undefined
+      ? [{ line, midToken: false, tokenContinuation: false }]
+      : wrapLineDetailed(line, wrapWidth);
+  /** @type {{line: string, continues: boolean, midToken: boolean, tokenContinuation: boolean}[]} */
   const contentRows = lines.flatMap((line) => {
     const wrapped = wrap(line);
     return wrapped.map((rowLine, index) => ({
-      line: rowLine,
+      line: rowLine.line,
       continues: continuation && index < wrapped.length - 1,
+      midToken: rowLine.midToken,
+      tokenContinuation: rowLine.tokenContinuation,
     }));
   });
-  const titleLines = title === undefined ? [] : wrap(title);
+  const titleLines = title === undefined ? [] : wrap(title).map((r) => r.line);
   /** @param {string} line */
   const measure = (line) => cellWidthAt(stripAnsi(line), CONTENT_COLUMN);
   const rowWidths = [
     ...titleLines.map((line) => measure(line)),
-    ...contentRows.map((row) => measure(row.line) + (row.continues ? 2 : 0)),
+    ...contentRows.map((r) => measure(r.line) + (r.continues ? (r.midToken ? 1 : 2) : 0)),
   ];
   const width = rowWidths.reduce((max, rowWidth) => Math.max(max, rowWidth), 0);
   const inner = width + 2;
   /** @param {string} value */
   const dim = (value) => paint(color, "dim", value);
-  /** @param {string} plain @param {string} displayed @param {boolean} continues */
-  const row = (plain, displayed, continues) => {
+  /** @param {string} plain @param {string} displayed @param {boolean} continues @param {boolean} midToken @param {boolean} tokenContinuation */
+  const row = (plain, displayed, continues, midToken, tokenContinuation) => {
+    const lead = tokenContinuation ? "" : " ";
+    if (continues && midToken) {
+      return `${dim("│")}${lead}${displayed}\\${dim("│")}`;
+    }
     const tail = continues ? " \\" : "";
-    const pad = inner - measure(plain) - 1 - tail.length;
-    return `${dim("│")} ${displayed}${" ".repeat(pad)}${tail}${dim("│")}`;
+    const pad = inner - measure(plain) - lead.length - tail.length;
+    return `${dim("│")}${lead}${displayed}${" ".repeat(pad)}${tail}${dim("│")}`;
   };
   const output = [
     dim(`┌${"─".repeat(inner)}┐`),
-    ...titleLines.map((line) => row(line, paint(color, "bold", line), false)),
+    ...titleLines.map((line) => row(line, paint(color, "bold", line), false, false, false)),
   ];
   if (title !== undefined) {
     output.push(dim(`├${"─".repeat(inner)}┤`));
   }
   output.push(
     ...contentRows.map((r) =>
-      row(r.line, style === undefined ? r.line : paint(color, style, r.line), r.continues),
+      row(
+        r.line,
+        style === undefined ? r.line : paint(color, style, r.line),
+        r.continues,
+        r.midToken,
+        r.tokenContinuation,
+      ),
     ),
     dim(`└${"─".repeat(inner)}┘`),
   );
