@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   cellWidth,
+  expandTabs,
   graphemeWidth,
   renderBox,
   toGraphemes,
@@ -131,6 +132,43 @@ test("renderBox wraps content to maxWidth and stays rectangular", () => {
   assert.ok(lines[1].startsWith("│ Copy this prompt i"));
   assert.ok(lines.some((line) => line.startsWith("│  coding agent")));
   assert.ok(lines.some((line) => line.startsWith("│ This is a fairly long prompt")));
+});
+
+test("expandTabs expands tabs to terminal tab stops from the content column", () => {
+  assert.equal(expandTabs("abc\tdefgh"), "abc   defgh");
+  assert.equal(expandTabs("abcdefgh\tij"), "abcdefgh      ij");
+  assert.equal(expandTabs("no tabs"), "no tabs");
+});
+
+test("renderBox expands tabs at terminal tab stops", () => {
+  const lines = renderBox({ lines: ["abc\tdefgh"], color: false, maxWidth: 30 });
+  assert.ok(lines.every((line) => !line.includes("\t")));
+  assert.ok(lines.some((line) => line.startsWith("│ abc   defgh")));
+  assert.equal(new Set(lines.map((line) => line.length)).size, 1);
+});
+
+test("renderBox appends shell continuations to wrapped value rows", () => {
+  const command = "docker compose -f 'compose.yaml' up -d tama";
+  const lines = renderBox({
+    title: "Next",
+    lines: [command],
+    color: false,
+    maxWidth: 20,
+    continuation: true,
+  });
+  assert.ok(lines.every((line) => line.length <= 24));
+  assert.equal(new Set(lines.map((line) => line.length)).size, 1);
+  const contentRows = lines.slice(3, -1);
+  assert.ok(contentRows.length > 1);
+  for (const row of contentRows.slice(0, -1)) {
+    assert.ok(/ \\\s*│$/.test(row));
+  }
+  assert.ok(!contentRows.at(-1)?.includes("\\"));
+  const logical = contentRows
+    .map((row) => row.slice(2, -1))
+    .map((row) => row.replace(/ \\\s*$/, ""))
+    .join("");
+  assert.equal(logical.replace(/\s+/g, " ").trim(), command.replace(/\s+/g, " ").trim());
 });
 
 test("renderBox applies the content style to every wrapped row", () => {

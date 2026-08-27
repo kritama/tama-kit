@@ -237,7 +237,7 @@ function printHuman(io, result, color, setupUrl) {
     io.stdout(`  ${paint(color, "cyan", "codex plugin add tama-kit@upmaru")}`);
   }
 
-  /** @param {{title?: string, lines: string[], style?: import("../terminal.mjs").PaintStyle}} box */
+  /** @param {{title?: string, lines: string[], style?: import("../terminal.mjs").PaintStyle, continuation?: boolean}} box */
   function printBox(box) {
     const maxWidth = io.columns === undefined ? undefined : Math.max(1, io.columns - 4);
     for (const line of renderBox({ ...box, color, maxWidth })) {
@@ -251,7 +251,7 @@ function printHuman(io, result, color, setupUrl) {
       return;
     }
     io.stdout("");
-    printBox({ title: "Private setup URL", lines: [url], style: "magenta" });
+    printBox({ title: "Private setup URL", lines: [url], style: "magenta", continuation: true });
   }
 
   if (result.started) {
@@ -261,7 +261,12 @@ function printHuman(io, result, color, setupUrl) {
   } else if (result.mode !== "dry-run") {
     const composeReference = relative(io.cwd, result.composeFile) || result.composeFile;
     io.stdout("");
-    printBox({ title: "Next", lines: [formatComposeUpCommand(composeReference)], style: "cyan" });
+    printBox({
+      title: "Next",
+      lines: [formatComposeUpCommand(composeReference)],
+      style: "cyan",
+      continuation: true,
+    });
     printSetupUrlBox(setupUrl);
   }
 

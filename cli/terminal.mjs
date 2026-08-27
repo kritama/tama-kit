@@ -317,14 +317,40 @@ export function wrapLine(line, maxWidth) {
   return wrapped;
 }
 
+/** @param {string} value @param {number} [startColumn] @returns {string} */
+export function expandTabs(value, startColumn = 2) {
+  let column = startColumn;
+  let expanded = "";
+  for (const grapheme of toGraphemes(value)) {
+    if (grapheme === "\t") {
+      const stop = (Math.floor(column / 8) + 1) * 8;
+      expanded += " ".repeat(stop - column);
+      column = stop;
+    } else {
+      expanded += grapheme;
+      column += graphemeWidth(grapheme);
+    }
+  }
+  return expanded;
+}
+
 /**
- * @param {{title?: string, lines: string[], color: boolean, style?: PaintStyle, maxWidth?: number}} options
+ * @param {{title?: string, lines: string[], color: boolean, style?: PaintStyle, maxWidth?: number, continuation?: boolean}} options
  * @returns {string[]}
  */
-export function renderBox({ title, lines, color, style, maxWidth }) {
+export function renderBox({ title, lines, color, style, maxWidth, continuation = false }) {
+  const wrapWidth = continuation && maxWidth !== undefined ? Math.max(1, maxWidth - 2) : maxWidth;
   /** @param {string} line */
-  const wrap = (line) => (maxWidth === undefined ? [line] : wrapLine(line, maxWidth));
-  const contentLines = lines.flatMap(wrap);
+  const wrap = (line) => {
+    const expanded = expandTabs(line);
+    return wrapWidth === undefined ? [expanded] : wrapLine(expanded, wrapWidth);
+  };
+  /** @param {string[]} wrapped */
+  const continued = (wrapped) =>
+    continuation && wrapped.length > 1
+      ? wrapped.map((line, index) => (index < wrapped.length - 1 ? `${line} \\` : line))
+      : wrapped;
+  const contentLines = lines.flatMap((line) => continued(wrap(line)));
   const titleLines = title === undefined ? [] : wrap(title);
   /** @param {string} line */
   const measure = (line) => cellWidth(stripAnsi(line));
