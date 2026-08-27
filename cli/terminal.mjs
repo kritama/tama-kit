@@ -27,9 +27,114 @@ function stripAnsi(value) {
 
 /** @typedef {keyof typeof ANSI} PaintStyle */
 
+const SEGMENTER = new Intl.Segmenter("und", { granularity: "grapheme" });
+
+/** @param {string} value @returns {string[]} */
+export function toGraphemes(value) {
+  return [...SEGMENTER.segment(value)].map((segment) => segment.segment);
+}
+
 /** @param {string} value */
 export function visibleLength(value) {
   return stripAnsi(value).length;
+}
+
+/** @param {number} codePoint @returns {number} */
+function codePointWidth(codePoint) {
+  if (
+    (codePoint >= 0x0300 && codePoint <= 0x036f) ||
+    (codePoint >= 0x1ab0 && codePoint <= 0x1aff) ||
+    (codePoint >= 0x1dc0 && codePoint <= 0x1dff) ||
+    (codePoint >= 0x20d0 && codePoint <= 0x20ff) ||
+    (codePoint >= 0xfe00 && codePoint <= 0xfe0f) ||
+    codePoint === 0x00ad ||
+    codePoint === 0x200c ||
+    codePoint === 0x200d ||
+    (codePoint >= 0xe0000 && codePoint <= 0xe007f)
+  ) {
+    return 0;
+  }
+  if (
+    (codePoint >= 0x1100 && codePoint <= 0x115f) ||
+    (codePoint >= 0x2e80 && codePoint <= 0x303e) ||
+    (codePoint >= 0x3041 && codePoint <= 0x33ff) ||
+    (codePoint >= 0x3400 && codePoint <= 0x4dbf) ||
+    (codePoint >= 0x4e00 && codePoint <= 0x9fff) ||
+    (codePoint >= 0xa000 && codePoint <= 0xa4cf) ||
+    (codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
+    (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+    (codePoint >= 0xfe10 && codePoint <= 0xfe19) ||
+    (codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
+    (codePoint >= 0xff00 && codePoint <= 0xff60) ||
+    (codePoint >= 0xffe0 && codePoint <= 0xffe6) ||
+    (codePoint >= 0x1f300 && codePoint <= 0x1f64f) ||
+    (codePoint >= 0x1f900 && codePoint <= 0x1f9ff) ||
+    (codePoint >= 0x1fa70 && codePoint <= 0x1faff) ||
+    (codePoint >= 0x20000 && codePoint <= 0x3fffd)
+  ) {
+    return 2;
+  }
+  return 1;
+}
+
+/** @param {string} value @returns {number[]} */
+function codePointsOf(value) {
+  const codePoints = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const high = value.charCodeAt(index);
+    if (high >= 0xd800 && high <= 0xdbff && index + 1 < value.length) {
+      const low = value.charCodeAt(index + 1);
+      if (low >= 0xdc00 && low <= 0xdfff) {
+        codePoints.push(0x10000 + ((high - 0xd800) << 10) + (low - 0xdc00));
+        index += 1;
+        continue;
+      }
+    }
+    codePoints.push(high);
+  }
+  return codePoints;
+}
+
+/** @param {string} grapheme @returns {number} */
+export function graphemeWidth(grapheme) {
+  let width = 0;
+  let joined = false;
+  for (const codePoint of codePointsOf(grapheme)) {
+    if (codePoint === 0x200d) {
+      joined = true;
+      continue;
+    }
+    width += codePointWidth(codePoint);
+  }
+  return joined && width > 2 ? 2 : width;
+}
+
+/** @param {string} value @returns {number} */
+export function cellWidth(value) {
+  let width = 0;
+  for (const grapheme of toGraphemes(value)) {
+    width += graphemeWidth(grapheme);
+  }
+  return width;
+}
+
+/** @param {string} value @param {number} maxWidth @returns {[string, string]} */
+function breakAtWidth(value, maxWidth) {
+  const graphemes = toGraphemes(value);
+  let index = 0;
+  let used = 0;
+  for (const grapheme of graphemes) {
+    const width = graphemeWidth(grapheme);
+    if (used + width > maxWidth) {
+      break;
+    }
+    used += width;
+    index += 1;
+  }
+  if (index === 0) {
+    index = 1;
+  }
+  return [graphemes.slice(0, index).join(""), graphemes.slice(index).join("")];
 }
 
 /**
@@ -38,27 +143,31 @@ export function visibleLength(value) {
  * @returns {string[]}
  */
 export function wrapLine(line, maxWidth) {
-  if (line.length <= maxWidth) {
+  if (cellWidth(line) <= maxWidth) {
     return [line];
   }
   const wrapped = [];
   let current = "";
   for (const word of line.trim().split(/\s+/u)) {
+    /** @type {string[]} */
+    const pieces = [];
     let rest = word;
-    while (rest.length > maxWidth) {
-      if (current) {
-        wrapped.push(current);
-        current = "";
-      }
-      wrapped.push(rest.slice(0, maxWidth));
-      rest = rest.slice(maxWidth);
+    while (cellWidth(rest) > maxWidth) {
+      const [head, tail] = breakAtWidth(rest, maxWidth);
+      pieces.push(head);
+      rest = tail;
     }
-    const candidate = current ? `${current} ${rest}` : rest;
-    if (candidate.length <= maxWidth) {
-      current = candidate;
-    } else {
-      wrapped.push(current);
-      current = rest;
+    pieces.push(rest);
+    for (const piece of pieces) {
+      const candidate = current ? `${current} ${piece}` : piece;
+      if (cellWidth(candidate) <= maxWidth) {
+        current = candidate;
+      } else {
+        if (current) {
+          wrapped.push(current);
+        }
+        current = piece;
+      }
     }
   }
   if (current) {
@@ -74,26 +183,33 @@ export function wrapLine(line, maxWidth) {
 export function renderBox({ title, lines, color, style, maxWidth }) {
   /** @param {string} line */
   const wrap = (line) => (maxWidth === undefined ? [line] : wrapLine(line, maxWidth));
-  const content = lines
-    .flatMap(wrap)
-    .map((line) => (style === undefined ? line : paint(color, style, line)));
-  const titleLines =
-    title === undefined ? [] : wrap(title).map((line) => paint(color, "bold", line));
-  const width = [...titleLines, ...content].reduce(
-    (max, line) => Math.max(max, visibleLength(line)),
+  const contentLines = lines.flatMap(wrap);
+  const titleLines = title === undefined ? [] : wrap(title);
+  /** @param {string} line */
+  const measure = (line) => cellWidth(stripAnsi(line));
+  const width = [...titleLines, ...contentLines].reduce(
+    (max, line) => Math.max(max, measure(line)),
     0,
   );
   const inner = width + 2;
   /** @param {string} value */
   const dim = (value) => paint(color, "dim", value);
-  /** @param {string} line */
-  const row = (line) =>
-    `${dim("│")} ${line}${" ".repeat(inner - visibleLength(line) - 1)}${dim("│")}`;
-  const output = [dim(`┌${"─".repeat(inner)}┐`), ...titleLines.map(row)];
+  /** @param {string} plain @param {string} displayed */
+  const row = (plain, displayed) =>
+    `${dim("│")} ${displayed}${" ".repeat(inner - measure(plain) - 1)}${dim("│")}`;
+  const output = [
+    dim(`┌${"─".repeat(inner)}┐`),
+    ...titleLines.map((line) => row(line, paint(color, "bold", line))),
+  ];
   if (title !== undefined) {
     output.push(dim(`├${"─".repeat(inner)}┤`));
   }
-  output.push(...content.map(row), dim(`└${"─".repeat(inner)}┘`));
+  output.push(
+    ...contentLines.map((line) =>
+      row(line, style === undefined ? line : paint(color, style, line)),
+    ),
+    dim(`└${"─".repeat(inner)}┘`),
+  );
   return output;
 }
 

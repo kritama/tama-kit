@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderBox, visibleLength, wrapLine } from "../../cli/terminal.mjs";
+import {
+  cellWidth,
+  graphemeWidth,
+  renderBox,
+  toGraphemes,
+  visibleLength,
+  wrapLine,
+} from "../../cli/terminal.mjs";
 
 test("visibleLength ignores ANSI escape sequences", () => {
   assert.equal(visibleLength("\u001b[36mhello\u001b[0m"), 5);
@@ -32,6 +39,36 @@ test("renderBox without a title omits the separator row", () => {
   assert.ok(lines[0].startsWith("┌"));
   assert.ok(lines[1].startsWith("│ value ") && lines[1].endsWith("│"));
   assert.ok(lines[2].startsWith("└"));
+});
+
+test("graphemeWidth measures wide, emoji, combining, and ZWJ characters", () => {
+  assert.equal(graphemeWidth("a"), 1);
+  assert.equal(graphemeWidth("漢"), 2);
+  assert.equal(graphemeWidth("🙂"), 2);
+  assert.equal(graphemeWidth("é"), 1);
+  assert.equal(graphemeWidth("e\u0301"), 1);
+  assert.equal(graphemeWidth("\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}"), 2);
+});
+
+test("cellWidth sums display cells across grapheme clusters", () => {
+  assert.equal(cellWidth("ab漢"), 4);
+  assert.equal(cellWidth("漢字のパス"), 10);
+  assert.equal(cellWidth("\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}xy"), 4);
+  assert.deepEqual(toGraphemes("\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}"), [
+    "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}",
+  ]);
+});
+
+test("wrapLine breaks CJK text on cell width without losing characters", () => {
+  const wrapped = wrapLine("漢字のテストです", 6);
+  assert.deepEqual(wrapped, ["漢字の", "テスト", "です"]);
+  assert.equal(wrapped.join(""), "漢字のテストです");
+});
+
+test("wrapLine never splits a ZWJ emoji cluster", () => {
+  const family = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}";
+  const wrapped = wrapLine(`${family} hello world`, 8);
+  assert.deepEqual(wrapped, [`${family} hello`, "world"]);
 });
 
 test("wrapLine keeps short lines intact and breaks long lines at word boundaries", () => {
@@ -87,6 +124,21 @@ test("renderBox applies the content style to every wrapped row", () => {
     assert.ok(row.endsWith(`│${reset}`));
   }
   assert.equal(new Set(lines.map(visibleLength)).size, 1);
+});
+
+test("renderBox pads wide characters by display cells, not code units", () => {
+  const lines = renderBox({
+    title: "Next",
+    lines: ["docker compose -f '漢字のプロジェクト/compose.yaml' up -d tama"],
+    color: false,
+    maxWidth: 30,
+  });
+
+  for (const line of lines) {
+    assert.ok(cellWidth(line) <= 34, `line exceeds maxWidth: ${line}`);
+  }
+  assert.equal(new Set(lines.map((line) => cellWidth(line))).size, 1);
+  assert.ok(lines.some((line) => line.includes("漢字のプロジェクト")));
 });
 
 test("renderBox keeps painted content aligned with the dimmed borders", () => {
