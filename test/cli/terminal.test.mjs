@@ -143,6 +143,13 @@ test("renderBox preserves literal tabs and keeps borders aligned", () => {
   assert.ok(lines.every((line) => cellWidthAt(line, 0) <= 34));
 });
 
+test("wrapLine preserves tab separators when they do not fit beside the next token", () => {
+  const value = "docker compose -f 'nested/a\tb/compose.yaml' up -d tama";
+  const wrapped = wrapLine(value, 18);
+  assert.equal(wrapped.join(""), value);
+  assert.ok(wrapped.every((row) => cellWidthAt(row, 2) <= 18));
+});
+
 test("renderBox appends shell continuations to wrapped value rows", () => {
   const command = "docker compose -f 'compose.yaml' up -d tama";
   const lines = renderBox({
@@ -157,7 +164,7 @@ test("renderBox appends shell continuations to wrapped value rows", () => {
   const contentRows = lines.slice(3, -1);
   assert.ok(contentRows.length > 1);
   for (const row of contentRows.slice(0, -1)) {
-    assert.ok(/ \\\s*│$/.test(row));
+    assert.ok(/ \\│$/.test(row), `backslash must be the final character before the border: ${row}`);
   }
   assert.ok(!contentRows.at(-1)?.includes("\\"));
   const logical = contentRows

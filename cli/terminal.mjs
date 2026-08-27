@@ -328,6 +328,18 @@ export function wrapLine(line, maxWidth) {
           spaces = lead;
         }
         current = `${" ".repeat(spaces)}${piece}`;
+      } else if (
+        prefix &&
+        /^[\t ]+$/.test(prefix) &&
+        cellWidthAt(`${prefix}${piece}`, CONTENT_COLUMN) > maxWidth
+      ) {
+        if (cellWidthAt(`${current}${prefix}`, CONTENT_COLUMN) <= maxWidth) {
+          wrapped.push(`${current}${prefix}`);
+          current = piece;
+        } else {
+          wrapped.push(current);
+          current = piece;
+        }
       } else {
         if (current) {
           wrapped.push(current);
@@ -370,35 +382,41 @@ export function renderBox({ title, lines, color, style, maxWidth, continuation =
   const wrapWidth = continuation && maxWidth !== undefined ? Math.max(1, maxWidth - 2) : maxWidth;
   /** @param {string} line */
   const wrap = (line) => (wrapWidth === undefined ? [line] : wrapLine(line, wrapWidth));
-  /** @param {string[]} wrapped */
-  const continued = (wrapped) =>
-    continuation && wrapped.length > 1
-      ? wrapped.map((line, index) => (index < wrapped.length - 1 ? `${line} \\` : line))
-      : wrapped;
-  const contentLines = lines.flatMap((line) => continued(wrap(line)));
+  /** @type {{line: string, continues: boolean}[]} */
+  const contentRows = lines.flatMap((line) => {
+    const wrapped = wrap(line);
+    return wrapped.map((rowLine, index) => ({
+      line: rowLine,
+      continues: continuation && index < wrapped.length - 1,
+    }));
+  });
   const titleLines = title === undefined ? [] : wrap(title);
   /** @param {string} line */
   const measure = (line) => cellWidthAt(stripAnsi(line), CONTENT_COLUMN);
-  const width = [...titleLines, ...contentLines].reduce(
-    (max, line) => Math.max(max, measure(line)),
-    0,
-  );
+  const rowWidths = [
+    ...titleLines.map((line) => measure(line)),
+    ...contentRows.map((row) => measure(row.line) + (row.continues ? 2 : 0)),
+  ];
+  const width = rowWidths.reduce((max, rowWidth) => Math.max(max, rowWidth), 0);
   const inner = width + 2;
   /** @param {string} value */
   const dim = (value) => paint(color, "dim", value);
-  /** @param {string} plain @param {string} displayed */
-  const row = (plain, displayed) =>
-    `${dim("│")} ${displayed}${" ".repeat(inner - measure(plain) - 1)}${dim("│")}`;
+  /** @param {string} plain @param {string} displayed @param {boolean} continues */
+  const row = (plain, displayed, continues) => {
+    const tail = continues ? " \\" : "";
+    const pad = inner - measure(plain) - 1 - tail.length;
+    return `${dim("│")} ${displayed}${" ".repeat(pad)}${tail}${dim("│")}`;
+  };
   const output = [
     dim(`┌${"─".repeat(inner)}┐`),
-    ...titleLines.map((line) => row(line, paint(color, "bold", line))),
+    ...titleLines.map((line) => row(line, paint(color, "bold", line), false)),
   ];
   if (title !== undefined) {
     output.push(dim(`├${"─".repeat(inner)}┤`));
   }
   output.push(
-    ...contentLines.map((line) =>
-      row(line, style === undefined ? line : paint(color, style, line)),
+    ...contentRows.map((r) =>
+      row(r.line, style === undefined ? r.line : paint(color, style, r.line), r.continues),
     ),
     dim(`└${"─".repeat(inner)}┘`),
   );
