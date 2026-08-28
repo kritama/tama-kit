@@ -26,8 +26,8 @@ const TERRAFORM_MANAGED_BLOCK = [
 ].join("\n");
 const SECRET_FILES = [".tama.env", ".tama.postgres.env"];
 
-/** @param {string} root */
-export function validateSecretFilesUntracked(root) {
+/** @param {string} root @param {string[]} [secretFiles] */
+export function validateSecretFilesUntracked(root, secretFiles = SECRET_FILES) {
   const worktree = spawnSync("git", ["-C", root, "rev-parse", "--is-inside-work-tree"], {
     encoding: "utf8",
     env: { ...process.env, LC_ALL: "C" },
@@ -44,7 +44,7 @@ export function validateSecretFilesUntracked(root) {
     });
   }
 
-  const tracked = spawnSync("git", ["-C", root, "ls-files", "--cached", "--", ...SECRET_FILES], {
+  const tracked = spawnSync("git", ["-C", root, "ls-files", "--cached", "--", ...secretFiles], {
     encoding: "utf8",
     env: { ...process.env, LC_ALL: "C" },
   });
