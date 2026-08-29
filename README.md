@@ -84,11 +84,14 @@ npx @kritama/tama-kit dev setup
 
 This command is intentionally separate from `bootstrap`. It generates a private
 `.envrc`, starts only the pgvector PostgreSQL service declared by Tama's
-repository-owned `compose.yml`, waits for the container to become healthy, and
-runs `mix setup`, and provisions Tama's test foundation with the generated environment. Phoenix remains a native host
-process. Development and test connections use loopback port `55432` by default,
-so they do not select a PostgreSQL server listening on the host's standard
-`5432` port.
+repository-owned `compose.yml`, waits for the container to become healthy, runs
+`mix setup`, and provisions Tama's test foundation. It installs only the
+OpenTofu version declared by the checkout when that tool is missing and `mise`
+is available; it does not install or use a host PostgreSQL. Phoenix remains a
+native host process. Development and test connections use loopback port `55432`
+by default, so they do not select a PostgreSQL server listening on the host's
+standard `5432` port. The generated environment also bounds local ExUnit
+concurrency so high-core development machines do not overwhelm the container.
 
 Choose another isolated loopback port when necessary:
 

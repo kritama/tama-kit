@@ -7,7 +7,12 @@ import { validateCompose, validateComposePrerequisite } from "../bootstrap/start
 import { applyOperationsTransactionally } from "../bootstrap/write.mjs";
 import { processEnvironment, readDevSetupUrl } from "../dev/environment.mjs";
 import { createDevSetupPlan, publicDevSetupPlan } from "../dev/plan.mjs";
-import { runMixSetup, runTestFoundationSetup, startDevDatabase } from "../dev/start.mjs";
+import {
+  ensureOpenTofu,
+  runMixSetup,
+  runTestFoundationSetup,
+  startDevDatabase,
+} from "../dev/start.mjs";
 import { CLIError, EXIT_CODES, usageError } from "../errors.mjs";
 import { createProgressBar, paint } from "../terminal.mjs";
 
@@ -179,7 +184,7 @@ async function executeDev(argv, io) {
   const progress = createProgressBar(io, {
     enabled: !options.json,
     color,
-    total: options.dryRun ? 1 : fullSetup ? 7 : 2,
+    total: options.dryRun ? 1 : fullSetup ? 8 : 2,
   });
   progress.update(0, "Planning development setup");
   /** @type {DevSetupPlan} */
@@ -209,10 +214,12 @@ async function executeDev(argv, io) {
       });
       progress.update(4, "Starting isolated PostgreSQL");
       await startDevDatabase(plan, { quiet: options.json });
-      progress.update(5, "Running mix setup");
+      progress.update(5, "Ensuring the OpenTofu toolchain");
+      const tofuRunner = await ensureOpenTofu(plan, { quiet: options.json });
+      progress.update(6, "Running mix setup");
       await runMixSetup(plan, { quiet: options.json });
-      progress.update(6, "Provisioning the test foundation");
-      await runTestFoundationSetup(plan, { quiet: options.json });
+      progress.update(7, "Ensuring the test foundation");
+      await runTestFoundationSetup(plan, { quiet: options.json, tofuRunner });
       progress.finish("Development environment ready");
     }
   } catch (error) {

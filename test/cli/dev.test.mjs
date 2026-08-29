@@ -46,6 +46,8 @@ test("development setup creates private idempotent Compose database environment"
   assert.equal(first.environment.get("POSTGRES_TEST_HOSTNAME"), "127.0.0.1");
   assert.equal(first.environment.get("POSTGRES_PORT"), "55432");
   assert.equal(first.environment.get("POSTGRES_TEST_PORT"), "55432");
+  assert.equal(first.environment.get("TAMA_MAX_VECTOR_DIMENSIONS"), "1024");
+  assert.equal(first.environment.get("TAMA_TEST_MAX_CASES"), "16");
   applyOperations(first.operations);
 
   assert.equal(statSync(join(root, ".envrc")).mode & 0o777, 0o600);
@@ -59,6 +61,29 @@ test("development setup creates private idempotent Compose database environment"
   assert.ok(second.operations.every((operation) => operation.action === "unchanged"));
   applyOperations(second.operations);
   assert.equal(readFileSync(join(root, ".envrc"), "utf8"), before);
+});
+
+test("development setup upgrades an older generated environment without rotating secrets", () => {
+  const root = tamaProject();
+  const first = createDevSetupPlan({ cwd: root, targetPath: root });
+  applyOperations(first.operations);
+  const filename = join(root, ".envrc");
+  const before = readFileSync(filename, "utf8").replace(
+    "export TAMA_MAX_VECTOR_DIMENSIONS=1024\nexport TAMA_TEST_MAX_CASES=16\n",
+    "",
+  );
+  writeFileSync(filename, before);
+
+  const upgraded = createDevSetupPlan({ cwd: root, targetPath: root });
+  applyOperations(upgraded.operations);
+  const after = readFileSync(filename, "utf8");
+
+  assert.match(after, /^export TAMA_MAX_VECTOR_DIMENSIONS=1024$/mu);
+  assert.match(after, /^export TAMA_TEST_MAX_CASES=16$/mu);
+  assert.equal(
+    after.match(/^export TAMA_VAULT_KEY=(.+)$/mu)[1],
+    before.match(/^export TAMA_VAULT_KEY=(.+)$/mu)[1],
+  );
 });
 
 test("development setup changes only database ports and preserves secrets", () => {
