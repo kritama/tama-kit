@@ -86,12 +86,14 @@ This command is intentionally separate from `bootstrap`. It generates a private
 `.envrc`, starts only the pgvector PostgreSQL service declared by Tama's
 repository-owned `compose.yml`, waits for the container to become healthy, runs
 `mix setup`, and provisions Tama's test foundation. It installs only the
-OpenTofu version declared by the checkout when that tool is missing and `mise`
-is available; it does not install or use a host PostgreSQL. Phoenix remains a
-native host process. Development and test connections use loopback port `55432`
-by default, so they do not select a PostgreSQL server listening on the host's
-standard `5432` port. The generated environment also bounds local ExUnit
-concurrency so high-core development machines do not overwhelm the container.
+OpenTofu version declared by the checkout when foundation provisioning is
+required, that tool is missing, and `mise` is available. It also maintains
+repository ignore rules for the generated credentials before writing them. It
+does not install or use a host PostgreSQL. Phoenix remains a native host process.
+Development and test connections use loopback port `55432` by default, so they
+do not select a PostgreSQL server listening on the host's standard `5432` port.
+The generated environment also bounds local ExUnit concurrency so high-core
+development machines do not overwhelm the container.
 
 Choose another isolated loopback port when necessary:
 

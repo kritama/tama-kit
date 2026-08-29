@@ -107,21 +107,29 @@ async function testFoundationReady(plan) {
   );
 }
 
-/** @param {import("../types.mjs").DevSetupPlan} plan @param {{quiet?: boolean, tofuRunner?: "direct" | "mise"}} [options] */
-export async function runTestFoundationSetup(plan, { quiet = false, tofuRunner = "direct" } = {}) {
+/**
+ * @param {import("../types.mjs").DevSetupPlan} plan
+ * @param {{quiet?: boolean, tofuRunner?: "direct" | "mise"}} [options]
+ * @returns {Promise<"preserved" | "created">}
+ */
+export async function runTestFoundationSetup(plan, { quiet = false, tofuRunner } = {}) {
   if (await testFoundationReady(plan)) {
-    return;
+    return "preserved";
   }
+  const resolvedTofuRunner = tofuRunner ?? (await ensureOpenTofu(plan, { quiet }));
   try {
     const command = "source .envrc && MIX_ENV=test mix cmd ./scripts/setup.sh";
-    const executable = tofuRunner === "mise" ? "mise" : "bash";
+    const executable = resolvedTofuRunner === "mise" ? "mise" : "bash";
     const args =
-      tofuRunner === "mise" ? ["exec", "opentofu", "--", "bash", "-c", command] : ["-c", command];
+      resolvedTofuRunner === "mise"
+        ? ["exec", "opentofu", "--", "bash", "-c", command]
+        : ["-c", command];
     await runProcess(executable, args, {
       cwd: plan.root,
       env: processEnvironment(plan.environment),
       stdio: quiet ? "ignore" : "inherit",
     });
+    return "created";
   } catch (error) {
     throw startupError(`test foundation setup failed: ${errorMessage(error)}`);
   }

@@ -24,6 +24,11 @@ const TERRAFORM_MANAGED_BLOCK = [
   "*.tfstate",
   "*.tfstate.*",
 ].join("\n");
+const DEV_ROOT_MANAGED_BLOCK = [
+  "# Tama Kit development environment",
+  "/.envrc",
+  "/.tama.dev.postgres.env",
+].join("\n");
 const SECRET_FILES = [".tama.env", ".tama.postgres.env"];
 
 /** @param {string} root @param {string[]} [secretFiles] */
@@ -101,4 +106,9 @@ export function planGitignore(root) {
     planIgnoreFile(join(root, ".gitignore"), ROOT_MANAGED_BLOCK, [LEGACY_ROOT_MANAGED_BLOCK]),
     planIgnoreFile(join(root, "tama", ".gitignore"), TERRAFORM_MANAGED_BLOCK),
   ];
+}
+
+/** @param {string} root @returns {FileOperation[]} */
+export function planDevGitignore(root) {
+  return [planIgnoreFile(join(root, ".gitignore"), DEV_ROOT_MANAGED_BLOCK)];
 }

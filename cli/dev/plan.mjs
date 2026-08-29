@@ -1,6 +1,6 @@
 // @ts-check
 
-import { validateSecretFilesUntracked } from "../bootstrap/gitignore.mjs";
+import { planDevGitignore, validateSecretFilesUntracked } from "../bootstrap/gitignore.mjs";
 import { planDevEnvironment } from "./environment.mjs";
 import { inspectDevProject } from "./project.mjs";
 
@@ -15,7 +15,7 @@ export function createDevSetupPlan(options) {
     postgresPort: environment.postgresPort,
     tamaPort: environment.tamaPort,
     environment: environment.values,
-    operations: environment.operations,
+    operations: [...planDevGitignore(project.root), ...environment.operations],
   };
 }
 

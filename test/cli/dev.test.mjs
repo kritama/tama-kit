@@ -1,11 +1,21 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { applyOperations } from "../../cli/bootstrap/write.mjs";
 import { createDevSetupPlan } from "../../cli/dev/plan.mjs";
+import { runTestFoundationSetup } from "../../cli/dev/start.mjs";
 import { CLIError, EXIT_CODES } from "../../cli/errors.mjs";
 import { run } from "../../cli/index.mjs";
 
@@ -52,6 +62,8 @@ test("development setup creates private idempotent Compose database environment"
 
   assert.equal(statSync(join(root, ".envrc")).mode & 0o777, 0o600);
   assert.equal(statSync(join(root, ".tama.dev.postgres.env")).mode & 0o777, 0o600);
+  assert.match(readFileSync(join(root, ".gitignore"), "utf8"), /^\/\.envrc$/mu);
+  assert.match(readFileSync(join(root, ".gitignore"), "utf8"), /^\/\.tama\.dev\.postgres\.env$/mu);
   const before = readFileSync(join(root, ".envrc"), "utf8");
   const postgresEnvironment = readFileSync(join(root, ".tama.dev.postgres.env"), "utf8");
   assert.match(postgresEnvironment, /^POSTGRES_PASSWORD=.+$/mu);
@@ -61,6 +73,82 @@ test("development setup creates private idempotent Compose database environment"
   assert.ok(second.operations.every((operation) => operation.action === "unchanged"));
   applyOperations(second.operations);
   assert.equal(readFileSync(join(root, ".envrc"), "utf8"), before);
+});
+
+test("development setup appends secret ignores after later negations", () => {
+  const root = tamaProject();
+  execFileSync("git", ["init", "--quiet"], { cwd: root });
+  writeFileSync(
+    join(root, ".gitignore"),
+    ["/.envrc", "!/.envrc", "/.tama.dev.postgres.env", "!/.tama.dev.postgres.env", ""].join("\n"),
+  );
+
+  applyOperations(createDevSetupPlan({ cwd: root, targetPath: root }).operations);
+
+  for (const secretFile of [".envrc", ".tama.dev.postgres.env"]) {
+    assert.doesNotThrow(() =>
+      execFileSync("git", ["check-ignore", "--quiet", "--no-index", secretFile], {
+        cwd: root,
+      }),
+    );
+  }
+  const content = readFileSync(join(root, ".gitignore"), "utf8");
+  assert.ok(content.lastIndexOf("/.envrc") > content.lastIndexOf("!/.envrc"));
+  assert.ok(
+    content.lastIndexOf("/.tama.dev.postgres.env") >
+      content.lastIndexOf("!/.tama.dev.postgres.env"),
+  );
+  assert.equal((content.match(/# Tama Kit development environment/gu) ?? []).length, 1);
+  assert.ok(
+    createDevSetupPlan({ cwd: root, targetPath: root }).operations.every(
+      (operation) => operation.action === "unchanged",
+    ),
+  );
+});
+
+test("development setup refuses private environment files already tracked by Git", () => {
+  const root = tamaProject();
+  execFileSync("git", ["init", "--quiet"], { cwd: root });
+  applyOperations(createDevSetupPlan({ cwd: root, targetPath: root }).operations);
+  execFileSync("git", ["add", "--force", ".envrc", ".tama.dev.postgres.env"], { cwd: root });
+
+  assert.throws(
+    () => createDevSetupPlan({ cwd: root, targetPath: root }),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      error.details.paths.includes(".envrc") &&
+      error.details.paths.includes(".tama.dev.postgres.env"),
+  );
+});
+
+test("an existing test foundation does not require OpenTofu or mise on a rerun", async () => {
+  const root = mkdtempSync(join(tmpdir(), "tama-kit-dev-ready-"));
+  const bin = join(root, "bin");
+  mkdirSync(bin);
+  for (const command of ["tofu", "mise"]) {
+    const filename = join(bin, command);
+    writeFileSync(filename, "#!/bin/sh\nexit 1\n");
+    chmodSync(filename, 0o755);
+  }
+  const mix = join(bin, "mix");
+  writeFileSync(mix, "#!/bin/sh\nexit 0\n");
+  chmodSync(mix, 0o755);
+  writeFileSync(join(root, ".envrc"), `export PATH=${bin}:/bin\n`);
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${bin}:/bin`;
+  try {
+    const result = await runTestFoundationSetup(
+      /** @type {import("../../cli/types.mjs").DevSetupPlan} */ ({
+        root,
+        environment: new Map(),
+      }),
+      { quiet: true },
+    );
+    assert.equal(result, "preserved");
+  } finally {
+    process.env.PATH = originalPath;
+  }
 });
 
 test("development setup upgrades an older generated environment without rotating secrets", () => {
