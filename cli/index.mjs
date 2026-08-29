@@ -6,6 +6,7 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
 import { runBootstrap } from "./commands/bootstrap.mjs";
+import { runDev } from "./commands/dev.mjs";
 import { CLIError, EXIT_CODES } from "./errors.mjs";
 
 /** @typedef {import("./types.mjs").CommandIO} CommandIO */
@@ -23,6 +24,7 @@ function usage() {
     "Commands:",
     "  bootstrap [path]  Prepare a local Tama runtime and Terraform root",
     "  init [path]       Alias for bootstrap",
+    "  dev setup [path]  Prepare a Tama source checkout for development",
     "",
     "Global options:",
     "  -h, --help        Show help",
@@ -73,6 +75,9 @@ export async function run(argv, providedIO = {}) {
   try {
     if (command === "bootstrap" || command === "init") {
       return await runBootstrap(args, io);
+    }
+    if (command === "dev") {
+      return await runDev(args, io);
     }
     throw new CLIError(`unknown command: ${command}\n\n${usage()}`, {
       category: "usage",

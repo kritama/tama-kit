@@ -146,7 +146,7 @@ function validateDatabaseUrl(values, filename) {
 }
 
 /** @param {string} value */
-function isValidVaultKey(value) {
+export function isValidVaultKey(value) {
   if (Buffer.byteLength(value, "utf8") === 32) {
     return true;
   }

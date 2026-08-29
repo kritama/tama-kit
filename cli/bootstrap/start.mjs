@@ -61,16 +61,17 @@ export function validateComposePrerequisite() {
 }
 
 /**
- * @param {BootstrapPlan} plan
- * @param {{quiet?: boolean, checkPrerequisite?: boolean}} [options]
+ * @param {{root: string, composeFile: string}} plan
+ * @param {{quiet?: boolean, checkPrerequisite?: boolean, env?: NodeJS.ProcessEnv}} [options]
  */
-export async function validateCompose(plan, { quiet = true, checkPrerequisite = true } = {}) {
+export async function validateCompose(plan, { quiet = true, checkPrerequisite = true, env } = {}) {
   if (checkPrerequisite) {
     validateComposePrerequisite();
   }
   try {
     await runProcess("docker", ["compose", "-f", plan.composeFile, "config", "--quiet"], {
       cwd: plan.root,
+      env,
       stdio: quiet ? "ignore" : "inherit",
     });
   } catch (error) {
