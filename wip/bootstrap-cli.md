@@ -578,7 +578,7 @@ provisioner credentials.
 - `--start` prints setup guidance and does not open a browser.
 - Whether a future `tama-kit terraform <args>` command should load
   `.tama.env`, or documentation should keep Terraform invocation explicit.
-- The first validated set is Tama `latest-server`, pgvector
+- The first validated set is Tama `latest`, pgvector
   `0.8.6-pg15-bookworm`, Tama provider `~> 0.6.3`, and global module `0.5.6`.
   The upgrade policy remains open.
 - The supported Tama runtime interface for headless provisioner creation.

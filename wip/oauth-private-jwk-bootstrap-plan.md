@@ -12,13 +12,13 @@ Companion proposal: `wip/oauth-private-jwk-bootstrap.md`
   contract exists only in unreleased Tama `develop`
   (merged via `feature/tama-oauth-library-adoption`).
 - Tama publishes container images **only on release publish**
-  (`.github/workflows/docker.yml` is `on: release: published`); `latest-server`
+  (`.github/workflows/docker.yml` is `on: release: published`); `latest`
   is re-tagged only when a release publishes from the default branch. No
   compatible image exists in GHCR today.
-- **Image pin decision (user):** pin `ghcr.io/upmaru/tama:latest-server` in
-  this change. Because `latest-server` floats per Tama release, a **release
+- **Image pin decision (user):** pin `ghcr.io/upmaru/tama:latest` in
+  this change. Because `latest` floats per Tama release, a **release
   gate** applies: do not publish a Tama Kit release until
-  `validate:bootstrap:runtime` passes against the live `latest-server`
+  `validate:bootstrap:runtime` passes against the live `latest`
   (the JWKS assertions in the harness prove the running image implements the
   new contract). Until Tama publishes, runtime acceptance will fail by design.
 - Development loop before the Tama release: build the local Tama `develop`
@@ -128,7 +128,7 @@ TAMA_OAUTH_PRIVATE_JWK_ID=replace-me
 
 ## 4. Image pin: `cli/bootstrap/constants.mjs`
 
-`DEFAULTS.tamaImage` → `ghcr.io/upmaru/tama:latest-server`. The compose
+`DEFAULTS.tamaImage` → `ghcr.io/upmaru/tama:latest`. The compose
 template consumes `{{TAMA_IMAGE}}` unchanged. Release gate per section 0.
 
 ## 5. Documentation
@@ -213,7 +213,7 @@ and the JWKS/token checks.
    `Generate asymmetric System OAuth signing keys in bootstrap`
 3. Add the marker-aware, fail-closed migration + tests. —
    `Migrate managed bootstrap environments to the private JWK`
-4. Pin `ghcr.io/upmaru/tama:latest-server`; extend
+4. Pin `ghcr.io/upmaru/tama:latest`; extend
    `scripts/validate-bootstrap.mjs` redaction and runtime acceptance. —
    `Pin Tama image and extend bootstrap runtime acceptance`
 5. Update `wip/bootstrap-cli.md` and any other found references; run the full
@@ -222,12 +222,11 @@ and the JWKS/token checks.
 ## 9. Release gate (must be green before publishing Tama Kit)
 
 - Tama publishes a release from `develop` containing the JWK contract,
-  creating `latest-server` (verified 2026-09-01: the tag does not exist
-  on GHCR yet; `latest` is an alias of `0.13.0-server`, which still
-  requires the retired symmetric variables). Until then, the
-  `bootstrap-integration` CI job fails at image pull by design and is
-  intentionally left red.
-- `npm run validate:bootstrap:runtime` passes against live `latest-server`,
+  updating `latest` from its current `0.13.0-server` content, which still
+  requires the retired symmetric variables. Until then, the
+  `bootstrap-integration` CI job fails its runtime-contract validation by
+  design and is intentionally left red.
+- `npm run validate:bootstrap:runtime` passes against live `latest`,
   including the JWKS safety and token-verification assertions.
 - Proposal rollout checklist items all satisfied.
 
@@ -239,7 +238,7 @@ and the JWKS/token checks.
   headlessly. The harness therefore implements JWKS assertions 1–5; token
   signature proof (assertion 6) is satisfied by Tama's own Elixir suite at
   the release gate.
-- `latest-server` is a floating tag; the harness's JWKS assertions are the
+- `latest` is a floating tag; the harness's JWKS assertions are the
   contract check that the currently pinned image implements the new contract.
 - Legacy HS256 System OAuth tokens are intentionally invalidated at cutover;
   note active clients must reauthorize in the release notes.

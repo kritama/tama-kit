@@ -6,7 +6,7 @@ export const BOOTSTRAP_SCHEMA_VERSION = 1;
 export const DEFAULTS = Object.freeze({
   port: 4000,
   containerPort: 4000,
-  tamaImage: "ghcr.io/upmaru/tama:latest-server",
+  tamaImage: "ghcr.io/upmaru/tama:latest",
   postgresImage: "pgvector/pgvector:0.8.6-pg15-bookworm",
   terraformVersion: ">= 1.0.0",
   providerVersion: "~> 0.6.3",
