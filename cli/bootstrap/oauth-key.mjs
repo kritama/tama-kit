@@ -60,8 +60,11 @@ export function generateOAuthPrivateJwk() {
  * `alg`, `use`, and `kid` metadata may be absent or null, JSON member order is
  * irrelevant, and an externally supplied `kid` need not be a thumbprint. The
  * JWK must carry the complete private RSA parameters (`d`, `p`, `q`, `dp`,
- * `dq`, `qi`) because the Node `KeyObject` import and sign/derive checks
- * require them. Every failure is bounded and names the variables without
+ * `dq`, `qi`), and those parameters must be arithmetically consistent with the
+ * advertised `n` and `e` (`n = p*q`, CRT exponents, and `e*d ≡ 1 (mod λ(n))`);
+ * supported Node versions can import a JWK whose public and private members
+ * come from different keys, so the KeyObject sign/derive check alone is not
+ * sufficient. Every failure is bounded and names the variables without
  * quoting their values.
  *
  * @param {string} encodedJwk
@@ -125,6 +128,35 @@ export function validateOAuthPrivateJwk(encodedJwk, kid) {
     throw invalidJwkError();
   }
   if (exponent === null || exponent < 3n || exponent % 2n === 0n || exponent >= modulus) {
+    throw invalidJwkError();
+  }
+
+  // The KeyObject import on supported Node versions can preserve supplied
+  // public members instead of deriving them, so consistency between the
+  // advertised modulus and the private CRT parameters is proven with
+  // independent arithmetic before any key material is trusted.
+  const d = base64urlUnsigned(parsed.d);
+  const p = base64urlUnsigned(parsed.p);
+  const q = base64urlUnsigned(parsed.q);
+  const dp = base64urlUnsigned(parsed.dp);
+  const dq = base64urlUnsigned(parsed.dq);
+  const qi = base64urlUnsigned(parsed.qi);
+  if (
+    d === null ||
+    p === null ||
+    q === null ||
+    dp === null ||
+    dq === null ||
+    qi === null ||
+    p === 1n ||
+    q === 1n ||
+    p === q ||
+    modulus !== p * q ||
+    d % (p - 1n) !== dp ||
+    d % (q - 1n) !== dq ||
+    (q * qi) % p !== 1n ||
+    (exponent * d) % bigIntLeastCommonMultiple(p - 1n, q - 1n) !== 1n
+  ) {
     throw invalidJwkError();
   }
 
@@ -231,6 +263,29 @@ function base64urlUnsigned(value) {
  */
 function bigintBitLength(integer) {
   return integer.toString(2).length;
+}
+
+/**
+ * @param {bigint} a
+ * @param {bigint} b
+ * @returns {bigint}
+ */
+function bigIntGreatestCommonDivisor(a, b) {
+  while (b !== 0n) {
+    const remainder = a % b;
+    a = b;
+    b = remainder;
+  }
+  return a;
+}
+
+/**
+ * @param {bigint} a
+ * @param {bigint} b
+ * @returns {bigint}
+ */
+function bigIntLeastCommonMultiple(a, b) {
+  return a / bigIntGreatestCommonDivisor(a, b) * b;
 }
 
 /** @returns {import("../errors.mjs").CLIError} */

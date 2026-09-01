@@ -263,3 +263,18 @@ test("validation rejects public members that disagree with the private key", () 
   const swapped = { ...first, n: second.n, kid: configuredKid };
   expectInvalid(JSON.stringify(swapped), configuredKid);
 });
+
+test("validation rejects a foreign public pair combined with valid private parameters", () => {
+  const local = rsaPrivateJwk(rsaPrivateKeyObject());
+  const foreignPublic = /** @type {Record<string, string>} */ (
+    createPublicKey(rsaPrivateKeyObject()).export({ format: "jwk" })
+  );
+  const configuredKid = rfc7638ThumbprintKid(foreignPublic);
+  const mixed = {
+    ...local,
+    n: foreignPublic.n,
+    e: foreignPublic.e,
+    kid: configuredKid,
+  };
+  expectInvalid(JSON.stringify(mixed), configuredKid);
+});
