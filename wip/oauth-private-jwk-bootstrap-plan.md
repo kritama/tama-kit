@@ -229,12 +229,12 @@ and the JWKS/token checks.
 
 ## 10. Risks and open items
 
-- Headless consent: the authorization step is a LiveView consent screen.
-  `POST /auth/session` and `POST /auth/tokens` are plain controller
-  endpoints, so the flow is drivable with `fetch`; if consent approval proves
-  flaky, the release gate falls back to JWKS assertions 1–5 plus Tama's own
-  Elixir suite for signature proof. Track as an implementation spike in step
-  4.
+- Headless consent (resolved in step 4): consent approval
+  (`phx-submit="decide"`) and root-user creation are LiveView WebSocket
+  events, not plain-HTTP endpoints, so the harness cannot mint a token
+  headlessly. The harness therefore implements JWKS assertions 1–5; token
+  signature proof (assertion 6) is satisfied by Tama's own Elixir suite at
+  the release gate.
 - `latest-server` is a floating tag; the harness's JWKS assertions are the
   contract check that the currently pinned image implements the new contract.
 - Legacy HS256 System OAuth tokens are intentionally invalidated at cutover;
