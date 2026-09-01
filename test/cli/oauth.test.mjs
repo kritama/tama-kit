@@ -280,7 +280,10 @@ test("--output inside a Git worktree requires an ignored, untracked destination"
 
   writeFileSync(join(cwd, "staged.env"), "placeholder\n");
   execFileSync("git", ["add", "staged.env"], { cwd, stdio: "ignore" });
-  writeFileSync(join(cwd, ".gitignore"), "ignored.env\nstaged.env\n");
+  writeFileSync(
+    join(cwd, ".gitignore"),
+    "ignored.env\nstaged.env\nnested/ignored.env\nnested/nested/decoy.env\n",
+  );
   rmSync(join(cwd, "staged.env"));
 
   captured = capture(cwd);
@@ -297,6 +300,28 @@ test("--output inside a Git worktree requires an ignored, untracked destination"
     EXIT_CODES.SUCCESS,
   );
   assert.ok(existsSync(join(cwd, "ignored.env")));
+
+  captured = capture(cwd);
+  assert.equal(
+    await run(["oauth", "generate-key", "--output", "..oauth.env"], captured.io),
+    EXIT_CODES.OWNERSHIP,
+  );
+  assert.ok(!existsSync(join(cwd, "..oauth.env")));
+
+  mkdirSync(join(cwd, "nested"));
+  captured = capture(cwd);
+  assert.equal(
+    await run(["oauth", "generate-key", "--output", "nested/ignored.env"], captured.io),
+    EXIT_CODES.SUCCESS,
+  );
+  assert.ok(existsSync(join(cwd, "nested", "ignored.env")));
+
+  captured = capture(cwd);
+  assert.equal(
+    await run(["oauth", "generate-key", "--output", "nested/decoy.env"], captured.io),
+    EXIT_CODES.OWNERSHIP,
+  );
+  assert.ok(!existsSync(join(cwd, "nested", "decoy.env")));
 });
 
 test("errors never contain private key material", async () => {

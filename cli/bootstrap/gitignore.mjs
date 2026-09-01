@@ -2,7 +2,7 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 
 import { ownershipError, prerequisiteError } from "../errors.mjs";
 import { operationForContent } from "./files.mjs";
@@ -99,14 +99,24 @@ export function validateNewSecretFile(directory, filename) {
       },
     );
   }
-  const relativePath = relative(worktree.stdout.trim(), filename);
-  if (relativePath === "" || relativePath.startsWith("..")) {
+  const worktreeRoot = worktree.stdout.trim();
+  const relativePath = relative(worktreeRoot, filename);
+  if (
+    relativePath === "" ||
+    relativePath === ".." ||
+    relativePath.startsWith(`..${sep}`) ||
+    isAbsolute(relativePath)
+  ) {
     return;
   }
-  const tracked = spawnSync("git", ["-C", directory, "ls-files", "--cached", "--", relativePath], {
-    encoding: "utf8",
-    env: environment,
-  });
+  const tracked = spawnSync(
+    "git",
+    ["-C", worktreeRoot, "ls-files", "--cached", "--", relativePath],
+    {
+      encoding: "utf8",
+      env: environment,
+    },
+  );
   if (tracked.error || tracked.status !== 0) {
     throw prerequisiteError("Unable to inspect the local Git index before writing the key file", {
       directory,
@@ -119,7 +129,7 @@ export function validateNewSecretFile(directory, filename) {
   }
   const ignored = spawnSync(
     "git",
-    ["-C", directory, "check-ignore", "--no-index", "--quiet", "--", relativePath],
+    ["-C", worktreeRoot, "check-ignore", "--no-index", "--quiet", "--", relativePath],
     { encoding: "utf8", env: environment },
   );
   if (ignored.error || (ignored.status !== 0 && ignored.status !== 1)) {
