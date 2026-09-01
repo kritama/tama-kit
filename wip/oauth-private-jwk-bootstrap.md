@@ -18,6 +18,17 @@ production configuration instead requires a private JSON JWK and signs System
 OAuth access tokens with `RS256`. Tama publishes only the public counterpart at
 `/.well-known/jwks.json`.
 
+Also add a standalone command for operators who need to provision the same key
+pair in staging or another environment that is not managed by bootstrap:
+
+```bash
+tama-kit oauth generate-key --kid staging-2026-09-01-1 --stdout
+```
+
+The command emits the two production environment assignments in dotenv format
+only when stdout is explicitly selected. It can instead create a new
+owner-only file for transfer into a deployment secret manager.
+
 The user-facing generation lifecycle belongs to Tama Kit because bootstrap
 already owns creation, validation, persistence, permissions, redaction, and
 idempotent upgrades of `.tama.env`. The cryptographic contract remains owned by
@@ -33,7 +44,10 @@ still serves Tama's separate Joken API-token path.
 - Generate an RSA private JWK compatible with Tama's `RS256` signing contract.
 - Give the key a stable `kid` and write the same value to
   `TAMA_OAUTH_PRIVATE_JWK_ID`.
-- Store the private JWK only in the ignored, owner-only `.tama.env` file.
+- Provide a standalone command that generates the same contract without a Tama
+  checkout, Mix, Docker, or a bootstrap project.
+- In bootstrap, store the private JWK only in the ignored, owner-only
+  `.tama.env` file.
 - Preserve an existing valid private JWK on every rerun.
 - Upgrade a Tama Kit-managed environment from the obsolete symmetric OAuth
   variables without changing unrelated secrets or configuration.
@@ -48,7 +62,9 @@ still serves Tama's separate Joken API-token path.
 - Adding OAuth key material to `tama-kit dev setup`; Tama development already
   generates an ephemeral RSA key in non-production configuration.
 - Adding a required Tama Mix task or depending on a Tama source checkout.
-- Exposing the private JWK through command output.
+- Exposing the private JWK implicitly through bootstrap, dry-run, general JSON,
+  errors, or logs. The standalone command's explicit `--stdout` destination is
+  the only intentional terminal-output exception.
 - Implementing general-purpose production secret-manager integrations.
 - Implementing automatic key rotation or a multiple-key JWKS overlap window.
 - Migrating unrelated Tama runtime variable names in the same change.
@@ -62,15 +78,95 @@ still serves Tama's separate Joken API-token path.
 | Tama | Read the production environment, validate it at boot, sign System OAuth tokens, verify them, and publish only public key members. |
 | Tama Kit | Generate deployment key material, persist it safely, preserve it across reruns, migrate managed bootstrap files, redact output, and verify compatibility with the pinned image. |
 
-Tama Kit must not invoke `mix` to generate the key. Bootstrap is designed to
-work from an arbitrary application repository and may run before Tama source,
-Elixir, or compiled dependencies are available. Node 20 is already Tama Kit's
-runtime and provides the required asymmetric key APIs.
+Tama Kit must not invoke `mix` to generate the key. Bootstrap and the standalone
+generator must work before Tama source, Elixir, or compiled dependencies are
+available. Node 20 is already Tama Kit's runtime and provides the required
+asymmetric key APIs.
 
-A future optional manual-administration command may wrap the same Tama Kit key
-helper, but it is not required for this migration. A Mix task would only be a
-thin convenience wrapper around `TamaOAuth.SigningKey`; it must not become a
-second owner of deployment persistence or rotation policy.
+A Mix task is unnecessary for this migration. If one is added later, it should
+only be a thin convenience wrapper around `TamaOAuth.SigningKey`; it must not
+become a second owner of deployment persistence or rotation policy.
+
+## Standalone command surface
+
+Add an OAuth command module and route it through the existing top-level CLI
+dispatcher:
+
+```text
+tama-kit oauth generate-key [options]
+
+Options:
+  --kid <identifier>  Set an explicit public key identifier
+  --stdout            Emit dotenv assignments to standard output
+  --output <path>     Create an owner-only dotenv file
+  -h, --help          Show help
+```
+
+Exactly one of `--stdout` or `--output` is required. Requiring an explicit
+destination prevents a user from placing a private key in terminal scrollback
+by merely exploring a new command.
+
+Examples:
+
+```bash
+# Generate copyable staging values explicitly on stdout.
+tama-kit oauth generate-key --kid staging-2026-09-01-1 --stdout
+
+# Prefer an owner-only file when transporting values through a password or
+# deployment-secret manager.
+tama-kit oauth generate-key \
+  --kid staging-2026-09-01-1 \
+  --output /tmp/tama-oauth-staging.env
+```
+
+Standard output in `--stdout` mode contains exactly two newline-terminated
+dotenv assignments and no headings, colors, progress rendering, or explanatory
+text:
+
+```dotenv
+TAMA_OAUTH_PRIVATE_JWK={"alg":"RS256","kid":"staging-2026-09-01-1",...}
+TAMA_OAUTH_PRIVATE_JWK_ID=staging-2026-09-01-1
+```
+
+The abbreviated example does not contain actual private key material. Warnings
+or diagnostics, if any, use stderr and must not quote the generated values.
+This output is dotenv, not a shell script; users paste each value into the
+staging environment or import the file with tooling that supports dotenv
+syntax.
+
+When `--kid` is omitted, derive the identifier from the public-key thumbprint.
+When supplied, validate it using Tama's non-empty, control-free, maximum
+128-byte contract and embed the identical value in the JWK. Do not expose
+algorithm or RSA modulus flags in the first version; the command has one
+supported contract, `RS256` with the selected secure modulus size.
+
+`--output` resolves relative paths against the current working directory,
+requires an existing safe parent directory, creates the final file exclusively
+with mode `0600`, and prints only the resulting path after success. It must
+refuse:
+
+- an existing output file, even if Tama Kit created it previously, because
+  silently replacing it would rotate a signing key;
+- a symbolic-link final path or an existing symbolic-link ancestor;
+- a directory target; and
+- a missing, symbolic, or unwritable parent directory; and
+- a path inside a Git worktree unless it is ignored and absent from the index.
+
+The command must not edit `.gitignore` for an arbitrary operator-selected
+path. Reuse Tama Kit's Git-index and symlink-ancestor safety patterns, moving
+them to a shared helper where necessary. Recommend an external private
+temporary directory or an already ignored deployment-secret path in the
+documentation.
+
+Do not add `--force` initially. Rotation needs an explicit lifecycle and public
+JWKS overlap decision; a generic overwrite flag would make accidental token
+invalidation too easy.
+
+The standalone command does not support the existing general `--json` option
+in its first version. Its dotenv payload is already deterministic and directly
+usable by staging environment tooling. A future structured secret-output mode
+must be explicitly named and documented as secret-bearing rather than
+reusing Tama Kit's normally redacted JSON contract.
 
 ## Generated contract
 
@@ -133,6 +229,13 @@ validateOAuthPrivateJwk(encodedJwk, kid)
 matching `kid`. It does not print, write files, read process environment, or
 make policy decisions about upgrades. Keeping it side-effect-free outside of
 cryptographically secure randomness makes it reusable and testable.
+
+Add `cli/commands/oauth.mjs` to parse `generate-key`, call this helper, and own
+the explicit stdout-or-file destination behavior. Import `runOAuth` from
+`cli/index.mjs`, add the command to top-level usage, and follow the existing
+`CLIError`, `usageError`, `CommandIO`, and stable exit-code conventions. The
+command should not create a progress bar because its stdout may be piped
+directly into staging tooling.
 
 `validateOAuthPrivateJwk()` must:
 
@@ -249,14 +352,21 @@ The existing sensitive-file invariants apply to the new private key:
 - bootstrap refuses to write when the secret file is tracked or staged;
 - `.tama.postgres.env`, Compose, Terraform, the manifest, and generated agent
   guidance never receive the JWK;
-- private JWK content never appears in normal human output, progress messages,
-  JSON output, dry-run output, errors, debug logs, snapshots, or telemetry;
+- private JWK content never appears in bootstrap human output, progress
+  messages, general JSON output, dry-run output, errors, debug logs, snapshots,
+  or telemetry;
 - JSON change records may label `.tama.env` as sensitive and report its digest,
   but never its content;
 - exceptions from Node crypto or JSON parsing are mapped to bounded generic
   errors; and
 - tests use freshly generated ephemeral keys and never commit production-like
   private fixtures.
+
+The standalone command is the narrow exception: `--stdout` deliberately emits
+the generated secret because the operator explicitly selected that destination.
+`--output` writes it only to the requested file and does not echo it. Neither
+mode may copy the JWK to stderr, error details, progress output, or a secondary
+result envelope.
 
 Dry-run may perform generation in memory if required by the existing planning
 architecture, but it must not persist or expose the discarded key. A later real
@@ -295,6 +405,26 @@ run may generate a different key because no key was committed by dry-run.
   JWK or its private RSA parameters.
 - The safe example contains placeholders only.
 
+### Standalone command tests
+
+- Top-level and OAuth-specific help list `oauth generate-key` and its options.
+- The command requires exactly one of `--stdout` or `--output`.
+- Unknown subcommands and options return the stable usage exit code.
+- `--stdout` emits exactly two dotenv assignments with no ANSI, progress,
+  heading, or extra JSON envelope.
+- The stdout JWK and ID pass the shared validator and match each other.
+- An explicit valid `--kid` is embedded in both values; invalid, blank,
+  control-bearing, or oversized identifiers are rejected without generation.
+- `--output` creates a mode-`0600` file, prints only its path, and leaves stderr
+  free of key material.
+- Existing files, final symlinks, and symlinked ancestors fail closed without
+  modification.
+- A failed write does not leave a temporary private file behind.
+- Errors generated before or after key creation contain none of the private
+  JWK, `d`, `p`, `q`, `dp`, `dq`, or `qi` values.
+- The packaged `bin/tama-kit.mjs` entry point can run the command without a Tama
+  source checkout.
+
 ### Runtime acceptance
 
 Against the newly pinned Tama image:
@@ -329,19 +459,24 @@ git diff --check
 
 1. Add the isolated Node RSA JWK generation, thumbprint, and validation helper.
 2. Add focused cryptographic contract tests with output-leak assertions.
-3. Replace the obsolete variables for newly generated bootstrap environments.
-4. Add the guarded, marker-aware migration for existing managed `.tama.env`
+3. Add `oauth generate-key`, top-level routing, explicit destination handling,
+   and standalone command tests.
+4. Replace the obsolete variables for newly generated bootstrap environments.
+5. Add the guarded, marker-aware migration for existing managed `.tama.env`
    files.
-5. Update the safe environment example and bootstrap documentation.
-6. Select the compatible Tama image and update the pinned bootstrap contract.
-7. Add runtime acceptance for startup, public JWKS safety, and token
+6. Update the safe environment example, CLI usage, and README documentation.
+7. Select the compatible Tama image and update the pinned bootstrap contract.
+8. Add runtime acceptance for startup, public JWKS safety, and token
    verification.
-8. Run the complete Tama Kit validation and package inspection.
+9. Run the complete Tama Kit validation and package inspection.
 
 ## Rollout checklist
 
 - [ ] Tama Kit no longer generates `TAMA_OAUTH_SIGNING_KEY`.
 - [ ] Tama Kit no longer generates `TAMA_OAUTH_SIGNING_KEY_ID`.
+- [ ] `tama-kit oauth generate-key` works without a Tama checkout or Mix.
+- [ ] The standalone command requires an explicit stdout or file destination.
+- [ ] Output files are exclusive, symlink-safe, and mode `0600`.
 - [ ] New bootstrap environments contain one valid private RSA JWK and matching
       ID.
 - [ ] Existing managed environments migrate once without unrelated changes.

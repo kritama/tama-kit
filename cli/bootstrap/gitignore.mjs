@@ -2,7 +2,7 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 import { ownershipError, prerequisiteError } from "../errors.mjs";
 import { operationForContent } from "./files.mjs";
@@ -63,6 +63,73 @@ export function validateSecretFilesUntracked(root, secretFiles = SECRET_FILES) {
     throw ownershipError(
       `Refusing to continue because private environment files are tracked by Git: ${paths.join(", ")}. Untrack them with: git rm --cached -- ${paths.join(" ")}`,
       { paths },
+    );
+  }
+}
+
+/**
+ * Validates that a new secret file may be created at `filename` without
+ * touching Git-managed content. A path outside any Git worktree is accepted
+ * as-is. Inside a worktree, the path must be absent from the index and must
+ * match a Git ignore rule; the command never edits `.gitignore` to satisfy
+ * this check, so the operator chooses an already ignored path or a private
+ * directory outside the repository.
+ *
+ * @param {string} directory
+ *   Directory used to locate the Git worktree that would contain `filename`.
+ * @param {string} filename
+ */
+export function validateNewSecretFile(directory, filename) {
+  const environment = { ...process.env, LC_ALL: "C" };
+  const worktree = spawnSync("git", ["-C", directory, "rev-parse", "--show-toplevel"], {
+    encoding: "utf8",
+    env: environment,
+  });
+  const gitMissing = worktree.error && "code" in worktree.error && worktree.error.code === "ENOENT";
+  const notRepository =
+    typeof worktree.stderr === "string" && worktree.stderr.includes("not a git repository");
+  if (gitMissing || notRepository) {
+    return;
+  }
+  if (worktree.error || worktree.status !== 0) {
+    throw prerequisiteError(
+      "Unable to inspect the local Git worktree before writing the key file",
+      {
+        directory,
+      },
+    );
+  }
+  const relativePath = relative(worktree.stdout.trim(), filename);
+  if (relativePath === "" || relativePath.startsWith("..")) {
+    return;
+  }
+  const tracked = spawnSync("git", ["-C", directory, "ls-files", "--cached", "--", relativePath], {
+    encoding: "utf8",
+    env: environment,
+  });
+  if (tracked.error || tracked.status !== 0) {
+    throw prerequisiteError("Unable to inspect the local Git index before writing the key file", {
+      directory,
+    });
+  }
+  if (tracked.stdout.trim() !== "") {
+    throw ownershipError(
+      "Refusing to create the key file because the destination is in the Git index. Choose an untracked path or remove it from the index first.",
+    );
+  }
+  const ignored = spawnSync(
+    "git",
+    ["-C", directory, "check-ignore", "--no-index", "--quiet", "--", relativePath],
+    { encoding: "utf8", env: environment },
+  );
+  if (ignored.error || (ignored.status !== 0 && ignored.status !== 1)) {
+    throw prerequisiteError("Unable to inspect Git ignore rules before writing the key file", {
+      directory,
+    });
+  }
+  if (ignored.status === 1) {
+    throw ownershipError(
+      "Refusing to create the key file because the destination is not ignored by Git. Ignore the path or choose a private directory outside the repository.",
     );
   }
 }

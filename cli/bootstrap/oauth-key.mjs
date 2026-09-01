@@ -11,6 +11,18 @@ export const OAUTH_JWK_MAX_ENCODED_BYTES = 65_536;
 export const OAUTH_JWK_MAX_KID_BYTES = 128;
 
 /**
+ * Reports whether a value is an identifier that Tama accepts for a System
+ * OAuth private JWK: non-empty, control-character-free, and no larger than
+ * the contract maximum.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function isValidOAuthKid(value) {
+  return isBoundedKid(value);
+}
+
+/**
  * @typedef {object} OAuthPrivateJwk
  * @property {string} jwk
  * @property {string} kid
@@ -20,12 +32,19 @@ export const OAUTH_JWK_MAX_KID_BYTES = 128;
  * Generates the asymmetric System OAuth signing key pair.
  *
  * The result is a single-line private JWK with normalized RS256 signing
- * metadata and a `kid` derived from the RFC 7638 thumbprint of the public
- * key. This function is side-effect-free outside of cryptographic randomness.
+ * metadata. An explicit identifier is validated against the Tama contract
+ * before any key material is generated and embedded in the JWK; when
+ * omitted, the `kid` is derived from the RFC 7638 thumbprint of the public
+ * key. This function is side-effect-free outside of cryptographic
+ * randomness.
  *
+ * @param {string} [kid] Explicit public key identifier.
  * @returns {OAuthPrivateJwk}
  */
-export function generateOAuthPrivateJwk() {
+export function generateOAuthPrivateJwk(kid = undefined) {
+  if (kid !== undefined && !isBoundedKid(kid)) {
+    throw invalidKidError();
+  }
   const { privateKey, publicKey } = generateKeyPairSync("rsa", {
     modulusLength: OAUTH_JWK_MODULUS_BITS,
     publicExponent: 0x10001,
@@ -34,10 +53,10 @@ export function generateOAuthPrivateJwk() {
   const publicJwk = /** @type {Record<string, string>} */ (publicKey.export({ format: "jwk" }));
   const canonical = JSON.stringify({ e: publicJwk.e, kty: "RSA", n: publicJwk.n });
   const thumbprint = createHash("sha256").update(canonical, "utf8").digest("base64url");
-  const kid = `oauth-${thumbprint}`;
+  const keyIdentifier = kid ?? `oauth-${thumbprint}`;
   const jwk = JSON.stringify({
     alg: OAUTH_JWK_ALGORITHM,
-    kid,
+    kid: keyIdentifier,
     kty: "RSA",
     use: "sig",
     n: privateJwk.n,
@@ -49,7 +68,7 @@ export function generateOAuthPrivateJwk() {
     dq: privateJwk.dq,
     qi: privateJwk.qi,
   });
-  return { jwk, kid };
+  return { jwk, kid: keyIdentifier };
 }
 
 /**

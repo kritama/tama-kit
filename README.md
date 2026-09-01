@@ -106,6 +106,40 @@ To generate the private files without starting Docker or running Mix, use
 secrets are preserved on every rerun; changing the PostgreSQL port updates only
 the development and test port exports.
 
+## Generate a staging OAuth key
+
+For environments that bootstrap does not manage, such as a staging deployment
+whose configuration lives in a secret manager, generate the same System OAuth
+signing key pair standalone:
+
+```bash
+tama-kit oauth generate-key --kid staging-2026-09-01-1 --stdout
+```
+
+The command works without a Tama checkout, Mix, or Docker and requires exactly
+one destination. With `--stdout` it prints exactly two dotenv assignments and
+nothing else:
+
+```dotenv
+TAMA_OAUTH_PRIVATE_JWK={"alg":"RS256","kid":"staging-2026-09-01-1",...}
+TAMA_OAUTH_PRIVATE_JWK_ID=staging-2026-09-01-1
+```
+
+`--kid` is optional; when omitted, the identifier is derived from the
+public-key thumbprint. Paste each value into the staging environment, or
+create an owner-only file for transfer with `--output`:
+
+```bash
+tama-kit oauth generate-key --kid staging-2026-09-01-1 --output /tmp/tama-oauth-staging.env
+```
+
+`--output` resolves relative paths against the current working directory,
+creates the file exclusively with mode `0600`, and prints only the resulting
+path. It refuses existing files, symbolic links, missing or unwritable parent
+directories, and paths inside a Git worktree that are not ignored and
+untracked. It never edits `.gitignore` and never replaces an existing file, so
+rotating the signing key always uses an explicit new destination.
+
 ## Installation
 
 ### Codex
