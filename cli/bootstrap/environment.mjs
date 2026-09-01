@@ -6,8 +6,10 @@ import { join } from "node:path";
 
 import { ownershipError } from "../errors.mjs";
 import { DEFAULTS } from "./constants.mjs";
-import { operationForContent } from "./files.mjs";
+import { hasManagedMarker, operationForContent } from "./files.mjs";
 import { generateOAuthPrivateJwk, validateOAuthPrivateJwk } from "./oauth-key.mjs";
+
+const RETIRED_OAUTH_VARIABLES = ["TAMA_OAUTH_SIGNING_KEY", "TAMA_OAUTH_SIGNING_KEY_ID"];
 
 /** @typedef {import("../types.mjs").EnvironmentPlan} EnvironmentPlan */
 
@@ -146,6 +148,31 @@ function validateDatabaseUrl(values, filename) {
   }
 }
 
+/**
+ * Replace the retired TAMA_OAUTH_SIGNING_KEY/TAMA_OAUTH_SIGNING_KEY_ID lines
+ * in place with a fresh private JWK pair, preserving every other line.
+ * @param {string} content
+ */
+function migrateOAuthKeyPair(content) {
+  const oauth = generateOAuthPrivateJwk();
+  let replaced = 0;
+  const lines = content.split(/\r?\n/u).map((line) => {
+    if (line.startsWith("TAMA_OAUTH_SIGNING_KEY=")) {
+      replaced += 1;
+      return `TAMA_OAUTH_PRIVATE_JWK=${oauth.jwk}`;
+    }
+    if (line.startsWith("TAMA_OAUTH_SIGNING_KEY_ID=")) {
+      replaced += 1;
+      return `TAMA_OAUTH_PRIVATE_JWK_ID=${oauth.kid}`;
+    }
+    return line;
+  });
+  if (replaced !== 2) {
+    throw new Error("internal error: retired OAuth signing key lines are missing");
+  }
+  return lines.join("\n");
+}
+
 /** @param {string} value */
 export function isValidVaultKey(value) {
   if (Buffer.byteLength(value, "utf8") === 32) {
@@ -177,6 +204,15 @@ function validateRuntimeSecrets(values, filename) {
 
 /** @param {Map<string, string>} values @param {string} filename @param {number} port */
 function validateEnvironment(values, filename, port) {
+  if (
+    Boolean(values.get("TAMA_OAUTH_PRIVATE_JWK")) !==
+    Boolean(values.get("TAMA_OAUTH_PRIVATE_JWK_ID"))
+  ) {
+    throw ownershipError(
+      `${filename} must define TAMA_OAUTH_PRIVATE_JWK and TAMA_OAUTH_PRIVATE_JWK_ID together`,
+      { path: filename, variables: ["TAMA_OAUTH_PRIVATE_JWK", "TAMA_OAUTH_PRIVATE_JWK_ID"] },
+    );
+  }
   const missing = REQUIRED_ENVIRONMENT_VARIABLES.filter((name) => !values.get(name));
   if (missing.length > 0) {
     throw ownershipError(
@@ -307,20 +343,43 @@ export function planEnvironment(root, requestedPort) {
     throw ownershipError(`.tama.env has an invalid TAMA_PORT: ${rawExistingPort}`);
   }
   const port = requestedPort ?? existingPort;
-  const content =
-    requestedPort === undefined
-      ? original
-      : updateEnvironment(original, {
-          TAMA_PORT: port,
-          TAMA_OAUTH_ISSUER: `http://localhost:${port}`,
-          TAMA_MCP_RESOURCE: `http://localhost:${port}/mcp`,
-          TAMA_MCP_ALLOWED_ORIGINS: updateAllowedOrigins(
-            values.get("TAMA_MCP_ALLOWED_ORIGINS"),
-            existingPort,
-            port,
-          ),
-          TAMA_BASE_URL: `http://localhost:${port}`,
-        });
+  let content = original;
+  if (!values.get("TAMA_OAUTH_PRIVATE_JWK") && !values.get("TAMA_OAUTH_PRIVATE_JWK_ID")) {
+    const retiredKey = values.get("TAMA_OAUTH_SIGNING_KEY");
+    const retiredKeyId = values.get("TAMA_OAUTH_SIGNING_KEY_ID");
+    if (Boolean(retiredKey) !== Boolean(retiredKeyId)) {
+      throw ownershipError(
+        `${filename} has an incomplete retired OAuth signing key pair: ${RETIRED_OAUTH_VARIABLES.join(
+          " and ",
+        )} must be present together or replaced by TAMA_OAUTH_PRIVATE_JWK and TAMA_OAUTH_PRIVATE_JWK_ID`,
+        { path: filename, variables: RETIRED_OAUTH_VARIABLES },
+      );
+    }
+    if (retiredKey) {
+      if (!hasManagedMarker(original)) {
+        throw ownershipError(
+          `${filename} still uses the retired ${RETIRED_OAUTH_VARIABLES.join(
+            " and ",
+          )} variables but is not a Tama Kit managed file; replace them manually with a valid TAMA_OAUTH_PRIVATE_JWK and TAMA_OAUTH_PRIVATE_JWK_ID pair`,
+          { path: filename, variables: RETIRED_OAUTH_VARIABLES },
+        );
+      }
+      content = migrateOAuthKeyPair(original);
+    }
+  }
+  if (requestedPort !== undefined) {
+    content = updateEnvironment(content, {
+      TAMA_PORT: port,
+      TAMA_OAUTH_ISSUER: `http://localhost:${port}`,
+      TAMA_MCP_RESOURCE: `http://localhost:${port}/mcp`,
+      TAMA_MCP_ALLOWED_ORIGINS: updateAllowedOrigins(
+        values.get("TAMA_MCP_ALLOWED_ORIGINS"),
+        existingPort,
+        port,
+      ),
+      TAMA_BASE_URL: `http://localhost:${port}`,
+    });
+  }
   const updatedValues = parseEnvironment(content, filename);
   validateEnvironment(updatedValues, filename, port);
   return {

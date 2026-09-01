@@ -15,7 +15,7 @@ export function contentDigest(content) {
 }
 
 /** @param {string} content */
-function hasManagedMarker(content) {
+export function hasManagedMarker(content) {
   const firstLine = content.split(/\r?\n/u, 1)[0];
   return (
     firstLine.startsWith(`# ${MANAGED_MARKER}`) || firstLine.startsWith(`<!-- ${MANAGED_MARKER}`)

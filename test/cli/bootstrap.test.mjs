@@ -1074,6 +1074,142 @@ test("bootstrap fails closed when only one half of the private JWK pair is prese
   );
 });
 
+test("bootstrap migrates a managed environment from the retired signing key pair", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  const before = readFileSync(filename, "utf8");
+  const migrated = before
+    .replace(/^TAMA_OAUTH_PRIVATE_JWK=.*$/mu, "TAMA_OAUTH_SIGNING_KEY=legacy-symmetric-secret")
+    .replace(/^TAMA_OAUTH_PRIVATE_JWK_ID=.*$/mu, "TAMA_OAUTH_SIGNING_KEY_ID=oauth-local-1");
+  writeFileSync(filename, migrated);
+  const retiredIndex = migrated
+    .split("\n")
+    .findIndex((line) => line.startsWith("TAMA_OAUTH_SIGNING_KEY="));
+
+  applyOperations(planFor(root).operations);
+  const after = readFileSync(filename, "utf8");
+  const afterLines = after.split("\n");
+  assert.ok(afterLines[retiredIndex].startsWith("TAMA_OAUTH_PRIVATE_JWK="));
+  assert.ok(afterLines[retiredIndex + 1].startsWith("TAMA_OAUTH_PRIVATE_JWK_ID="));
+  assert.doesNotMatch(after, /TAMA_OAUTH_SIGNING_KEY/u);
+  assert.deepEqual(
+    migrated.split("\n").filter((line) => !line.startsWith("TAMA_OAUTH_SIGNING_KEY")),
+    afterLines.filter((line) => !line.startsWith("TAMA_OAUTH_PRIVATE_JWK")),
+  );
+
+  const { jwk, id } = oauthJwkLines(after);
+  const parsed = /** @type {Record<string, string>} */ (JSON.parse(jwk));
+  assert.equal(parsed.kid, id);
+  assert.equal(createPrivateKey({ key: parsed, format: "jwk" }).asymmetricKeyType, "rsa");
+
+  const second = planFor(root);
+  assert.equal(
+    second.operations.find((operation) => operation.path.endsWith(".tama.env"))?.action,
+    "unchanged",
+  );
+});
+
+test("bootstrap migrates the retired pair and applies a port change in one pass", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8")
+      .replace(/^TAMA_OAUTH_PRIVATE_JWK=.*$/mu, "TAMA_OAUTH_SIGNING_KEY=legacy-symmetric-secret")
+      .replace(/^TAMA_OAUTH_PRIVATE_JWK_ID=.*$/mu, "TAMA_OAUTH_SIGNING_KEY_ID=oauth-local-1"),
+  );
+
+  applyOperations(planFor(root, { port: 4567 }).operations);
+  const after = readFileSync(filename, "utf8");
+  assert.match(after, /^TAMA_PORT=4567$/mu);
+  assert.match(after, /^TAMA_BASE_URL=http:\/\/localhost:4567$/mu);
+  assert.doesNotMatch(after, /TAMA_OAUTH_SIGNING_KEY/u);
+  assert.ok(oauthJwkLines(after).jwk);
+});
+
+test("bootstrap fails closed for an incomplete retired signing key pair", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8")
+      .replace(/^TAMA_OAUTH_PRIVATE_JWK=.*$/mu, "TAMA_OAUTH_SIGNING_KEY=legacy-symmetric-secret")
+      .replace(/^TAMA_OAUTH_PRIVATE_JWK_ID=.*$/mu, ""),
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      error.message.includes("TAMA_OAUTH_SIGNING_KEY") &&
+      error.message.includes("TAMA_OAUTH_SIGNING_KEY_ID"),
+  );
+});
+
+test("bootstrap fails closed when exactly one half of the new pair is present", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8").replace(
+      /^TAMA_OAUTH_PRIVATE_JWK=.*$/mu,
+      "TAMA_OAUTH_SIGNING_KEY=legacy-symmetric-secret",
+    ),
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      error.message.includes("TAMA_OAUTH_PRIVATE_JWK and TAMA_OAUTH_PRIVATE_JWK_ID"),
+  );
+});
+
+test("bootstrap fails closed for a managed environment with an invalid private JWK", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8").replace(
+      /^TAMA_OAUTH_PRIVATE_JWK=.*$/mu,
+      "TAMA_OAUTH_PRIVATE_JWK=not-a-jwk",
+    ),
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      error.message.includes("not a valid RSA private JWK for RS256 signing"),
+  );
+  assert.match(readFileSync(filename, "utf8"), /TAMA_OAUTH_PRIVATE_JWK=not-a-jwk/u);
+});
+
+test("bootstrap leaves a valid new pair untouched when retired variables are also present", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8") +
+      "TAMA_OAUTH_SIGNING_KEY=legacy-symmetric-secret\nTAMA_OAUTH_SIGNING_KEY_ID=oauth-local-1\n",
+  );
+
+  const plan = planFor(root);
+  assert.equal(
+    plan.operations.find((operation) => operation.path.endsWith(".tama.env"))?.action,
+    "unchanged",
+  );
+});
+
 test("bootstrap rejects a persisted internal port that disagrees with Compose", () => {
   const root = project();
   const first = planFor(root);
