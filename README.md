@@ -74,6 +74,38 @@ The first release uses Tama's supported interactive setup flow to create root
 and provisioner credentials. Bootstrap does not use the test-only provisioner
 path and never runs `terraform apply`.
 
+## Prepare a Tama source checkout
+
+Tama contributors can prepare a newly cloned Tama repository with:
+
+```bash
+npx @kritama/tama-kit dev setup
+```
+
+This command is intentionally separate from `bootstrap`. It generates a private
+`.envrc`, starts only the pgvector PostgreSQL service declared by Tama's
+repository-owned `compose.yml`, waits for the container to become healthy, runs
+`mix setup`, and provisions Tama's test foundation. It installs only the
+OpenTofu version declared by the checkout when foundation provisioning is
+required, that tool is missing, and `mise` is available. It also maintains
+repository ignore rules for the generated credentials before writing them. It
+does not install or use a host PostgreSQL. Phoenix remains a native host process.
+Development and test connections use loopback port `55432` by default, so they
+do not select a PostgreSQL server listening on the host's standard `5432` port.
+The generated environment also bounds local ExUnit concurrency so high-core
+development machines do not overwhelm the container.
+
+Choose another isolated loopback port when necessary:
+
+```bash
+npx @kritama/tama-kit dev setup --postgres-port 55433
+```
+
+To generate the private files without starting Docker or running Mix, use
+`--prepare-only`. Use `--dry-run` or `--json` for a secret-free plan. Existing
+secrets are preserved on every rerun; changing the PostgreSQL port updates only
+the development and test port exports.
+
 ## Installation
 
 ### Codex

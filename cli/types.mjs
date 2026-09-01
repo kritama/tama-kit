@@ -143,6 +143,16 @@
  */
 
 /**
+ * @typedef {object} DevSetupPlan
+ * @property {string} root
+ * @property {string} composeFile
+ * @property {number} postgresPort
+ * @property {number} tamaPort
+ * @property {Map<string, string>} environment
+ * @property {FileOperation[]} operations
+ */
+
+/**
  * @typedef {object} CommandIO
  * @property {string} cwd
  * @property {(message?: string) => void} stdout
