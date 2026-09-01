@@ -5,7 +5,6 @@ import {
   chmodSync,
   constants as fsConstants,
   lstatSync,
-  realpathSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -116,11 +115,6 @@ function assertWritable(directory) {
   }
 }
 
-/** @param {string} anchor @param {string} path @returns {boolean} */
-function isInsideAnchor(anchor, path) {
-  return path === anchor || path.startsWith(anchor + "/");
-}
-
 /**
  * Resolves the requested destination and verifies that creating a file there
  * cannot be redirected through a symbolic link, an existing target, or a
@@ -132,16 +126,18 @@ function isInsideAnchor(anchor, path) {
  */
 function assertSafeOutputPath(cwd, outputPath) {
   const absolutePath = resolve(cwd, outputPath);
-  const anchor = realpathSync(cwd);
   const parent = dirname(absolutePath);
 
-  assertRealDirectory(parent);
-  assertWritable(parent);
   let current = parent;
-  while (isInsideAnchor(anchor, current) && current !== anchor) {
-    current = dirname(current);
+  while (true) {
     assertRealDirectory(current);
+    const ancestor = dirname(current);
+    if (ancestor === current) {
+      break;
+    }
+    current = ancestor;
   }
+  assertWritable(parent);
 
   let existing = null;
   try {
@@ -219,7 +215,7 @@ export async function runOAuth(argv, io) {
   const hasStdout = options.stdout;
   const hasOutput = options.output !== undefined;
   if (hasStdout === hasOutput) {
-    throw usageError("choose exactly one of --stdout or --output\n\n" + generateKeyUsage());
+    throw usageError(`choose exactly one of --stdout or --output\n\n${generateKeyUsage()}`);
   }
   if (options.kid !== undefined && !isValidOAuthKid(options.kid)) {
     throw usageError(

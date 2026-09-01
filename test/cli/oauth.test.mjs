@@ -196,6 +196,23 @@ test("existing files, final symlinks, and symlinked ancestors fail closed", asyn
   );
   assert.equal(captured.stdout.length, 0);
   assert.ok(!existsSync(join(outside, "secret.env")), "no file may be created through the link");
+
+  const externalAnchor = mkdtempSync(join(tmpdir(), "tama-kit-oauth-external-anchor-"));
+  const externalTarget = mkdtempSync(join(tmpdir(), "tama-kit-oauth-external-target-"));
+  mkdirSync(join(externalTarget, "sub"));
+  symlinkSync(externalTarget, join(externalAnchor, "linked"), "dir");
+  const externalOutput = join(externalAnchor, "linked", "sub", "secret.env");
+  captured = capture(cwd);
+  assert.equal(
+    await run(["oauth", "generate-key", "--output", externalOutput], captured.io),
+    EXIT_CODES.OWNERSHIP,
+  );
+  assert.equal(captured.stdout.length, 0);
+  assertNoKeyMaterial(captured.stderr);
+  assert.ok(
+    !existsSync(join(externalTarget, "sub", "secret.env")),
+    "no file may be created through an external ancestor link",
+  );
 });
 
 test("a failed write leaves no private file behind", async (context) => {
