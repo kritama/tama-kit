@@ -18,6 +18,7 @@ import { createProgressBar, paint } from "../terminal.mjs";
 /**
  * @typedef {object} DevCommandOptions
  * @property {string} [targetPath]
+ * @property {number} [port]
  * @property {number} [postgresPort]
  * @property {boolean} prepareOnly
  * @property {boolean} dryRun
@@ -34,6 +35,7 @@ function usage() {
     "pgvector PostgreSQL database managed by compose.yml.",
     "",
     "Options:",
+    "  --port <port>           Loopback port for native Tama Phoenix (default: 4001)",
     "  --postgres-port <port>  Loopback port for Compose PostgreSQL (default: 55432)",
     "  --prepare-only          Generate private environment files without starting services",
     "  --dry-run               Inspect and report without writing or starting services",
@@ -43,17 +45,17 @@ function usage() {
   ].join("\n");
 }
 
-/** @param {string | undefined} value */
-function parsePort(value) {
+/** @param {string | undefined} value @param {string} name */
+function parsePort(value, name) {
   if (value === undefined) {
     return undefined;
   }
   if (!/^\d+$/u.test(value)) {
-    throw usageError(`postgres port must be an integer: ${value}`);
+    throw usageError(`${name} must be an integer: ${value}`);
   }
   const port = Number.parseInt(value, 10);
   if (port < 1 || port > 65_535) {
-    throw usageError(`postgres port must be between 1 and 65535: ${value}`);
+    throw usageError(`${name} must be between 1 and 65535: ${value}`);
   }
   return port;
 }
@@ -78,6 +80,7 @@ function parse(argv) {
     parsed = parseArgs({
       args,
       options: {
+        port: { type: "string" },
         "postgres-port": { type: "string" },
         "prepare-only": { type: "boolean", default: false },
         "dry-run": { type: "boolean", default: false },
@@ -97,7 +100,8 @@ function parse(argv) {
   }
   return {
     targetPath: parsed.positionals[0],
-    postgresPort: parsePort(parsed.values["postgres-port"]),
+    port: parsePort(parsed.values.port, "port"),
+    postgresPort: parsePort(parsed.values["postgres-port"], "postgres port"),
     prepareOnly: parsed.values["prepare-only"] ?? false,
     dryRun: parsed.values["dry-run"] ?? false,
     json: parsed.values.json ?? false,
@@ -111,6 +115,9 @@ function printHuman(io, result, color, setupUrl) {
   io.stdout(paint(color, "bold", `Tama Kit development setup (${result.mode})`));
   io.stdout(`${paint(color, "dim", "Project:")} ${result.root}`);
   io.stdout(`${paint(color, "dim", "Compose:")} ${relative(result.root, result.composeFile)}`);
+  io.stdout(
+    `${paint(color, "dim", "Tama:")} native Phoenix at http://127.0.0.1:${result.tamaPort}`,
+  );
   io.stdout(
     `${paint(color, "dim", "PostgreSQL:")} isolated container at 127.0.0.1:${result.postgres.port}`,
   );
@@ -188,6 +195,7 @@ async function executeDev(argv, io) {
     plan = createDevSetupPlan({
       cwd: io.cwd,
       targetPath: options.targetPath,
+      tamaPort: options.port,
       postgresPort: options.postgresPort,
     });
     if (options.dryRun) {
