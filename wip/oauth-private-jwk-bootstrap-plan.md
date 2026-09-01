@@ -222,7 +222,11 @@ and the JWKS/token checks.
 ## 9. Release gate (must be green before publishing Tama Kit)
 
 - Tama publishes a release from `develop` containing the JWK contract,
-  moving `latest-server`.
+  creating `latest-server` (verified 2026-09-01: the tag does not exist
+  on GHCR yet; `latest` is an alias of `0.13.0-server`, which still
+  requires the retired symmetric variables). Until then, the
+  `bootstrap-integration` CI job fails at image pull by design and is
+  intentionally left red.
 - `npm run validate:bootstrap:runtime` passes against live `latest-server`,
   including the JWKS safety and token-verification assertions.
 - Proposal rollout checklist items all satisfied.
