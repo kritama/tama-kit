@@ -52,10 +52,12 @@ test("development setup creates private idempotent Compose database environment"
   const first = createDevSetupPlan({ cwd: root, targetPath: root });
 
   assert.equal(first.postgresPort, 55432);
+  assert.equal(first.tamaPort, 4001);
   assert.equal(first.environment.get("POSTGRES_HOST"), "127.0.0.1");
   assert.equal(first.environment.get("POSTGRES_TEST_HOSTNAME"), "127.0.0.1");
   assert.equal(first.environment.get("POSTGRES_PORT"), "55432");
   assert.equal(first.environment.get("POSTGRES_TEST_PORT"), "55432");
+  assert.equal(first.environment.get("PORT"), "4001");
   assert.equal(first.environment.get("TAMA_MAX_VECTOR_DIMENSIONS"), "1024");
   assert.equal(first.environment.get("TAMA_TEST_MAX_CASES"), "16");
   applyOperations(first.operations);
@@ -191,6 +193,59 @@ test("development setup changes only database ports and preserves secrets", () =
   assert.equal(after.match(/^export TAMA_SETUP_TOKEN=(.+)$/mu)[1], setupToken);
 });
 
+test("development setup changes only the Tama port and preserves secrets", () => {
+  const root = tamaProject();
+  applyOperations(createDevSetupPlan({ cwd: root, targetPath: root }).operations);
+  const filename = join(root, ".envrc");
+  const before = readFileSync(filename, "utf8");
+
+  const changed = createDevSetupPlan({ cwd: root, targetPath: root, tamaPort: 4567 });
+  applyOperations(changed.operations);
+  const after = readFileSync(filename, "utf8");
+
+  assert.equal(changed.tamaPort, 4567);
+  assert.equal(after, before.replace(/^export PORT=.*$/mu, "export PORT=4567"));
+  assert.match(after, /^export POSTGRES_PORT=55432$/mu);
+  assert.match(after, /^export POSTGRES_TEST_PORT=55432$/mu);
+  assert.ok(
+    createDevSetupPlan({ cwd: root, targetPath: root, tamaPort: 4567 }).operations.every(
+      (operation) => operation.action === "unchanged",
+    ),
+  );
+});
+
+test("development setup preserves an existing Tama port when no override is supplied", () => {
+  const root = tamaProject();
+  applyOperations(createDevSetupPlan({ cwd: root, targetPath: root }).operations);
+  const filename = join(root, ".envrc");
+  const existing = readFileSync(filename, "utf8").replace(/^export PORT=.*$/mu, "export PORT=4000");
+  writeFileSync(filename, existing);
+
+  const preserved = createDevSetupPlan({ cwd: root, targetPath: root });
+
+  assert.equal(preserved.tamaPort, 4000);
+  assert.ok(preserved.operations.every((operation) => operation.action === "unchanged"));
+});
+
+test("development setup rejects a loopback port collision before writing", () => {
+  const root = tamaProject();
+
+  assert.throws(
+    () =>
+      createDevSetupPlan({
+        cwd: root,
+        targetPath: root,
+        tamaPort: 55432,
+        postgresPort: 55432,
+      }),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      /different loopback ports/u.test(error.message),
+  );
+  assert.equal(existsSync(join(root, ".envrc")), false);
+});
+
 test("development setup refuses an environment that can select host PostgreSQL", () => {
   const root = tamaProject();
   const first = createDevSetupPlan({ cwd: root, targetPath: root });
@@ -216,20 +271,24 @@ test("development setup refuses an environment that can select host PostgreSQL",
 test("dev setup dry-run JSON reports only public connection metadata", async () => {
   const root = tamaProject();
   const output = [];
-  const exitCode = await run(["dev", "setup", root, "--dry-run", "--json"], {
-    cwd: root,
-    stdout: (message = "") => output.push(message),
-    stderr: () => {},
-    interactive: false,
-    color: false,
-  });
+  const exitCode = await run(
+    ["dev", "setup", root, "--port", "4567", "--postgres-port", "55433", "--dry-run", "--json"],
+    {
+      cwd: root,
+      stdout: (message = "") => output.push(message),
+      stderr: () => {},
+      interactive: false,
+      color: false,
+    },
+  );
 
   assert.equal(exitCode, EXIT_CODES.SUCCESS);
   assert.equal(existsSync(join(root, ".envrc")), false);
   const payload = JSON.parse(output.join("\n"));
   assert.equal(payload.postgres.host, "127.0.0.1");
-  assert.equal(payload.postgres.port, 55432);
+  assert.equal(payload.postgres.port, 55433);
   assert.equal(payload.postgres.containerPort, 5432);
+  assert.equal(payload.tamaPort, 4567);
   assert.equal(payload.databaseStarted, false);
   assert.doesNotMatch(output.join("\n"), /TAMA_SETUP_TOKEN|POSTGRES_PASSWORD|setup\/root/u);
 });
@@ -237,18 +296,46 @@ test("dev setup dry-run JSON reports only public connection metadata", async () 
 test("dev setup prepare-only writes secrets without invoking Docker or Mix", async () => {
   const root = tamaProject();
   const output = [];
-  const exitCode = await run(["dev", "setup", root, "--prepare-only", "--no-color"], {
-    cwd: root,
-    stdout: (message = "") => output.push(message),
-    stderr: () => {},
-    interactive: false,
-    color: false,
-  });
+  const exitCode = await run(
+    ["dev", "setup", root, "--port", "4567", "--prepare-only", "--no-color"],
+    {
+      cwd: root,
+      stdout: (message = "") => output.push(message),
+      stderr: () => {},
+      interactive: false,
+      color: false,
+    },
+  );
 
   assert.equal(exitCode, EXIT_CODES.SUCCESS);
   assert.ok(existsSync(join(root, ".envrc")));
+  assert.match(readFileSync(join(root, ".envrc"), "utf8"), /^export PORT=4567$/mu);
+  assert.match(output.join("\n"), /Tama: native Phoenix at http:\/\/127\.0\.0\.1:4567/u);
   assert.match(output.join("\n"), /Private setup URL:/u);
   assert.match(output.join("\n"), /tama-kit dev setup/u);
+});
+
+test("dev setup reports named usage errors for invalid ports", async () => {
+  const root = tamaProject();
+
+  for (const [option, value, message] of [
+    ["--port", "invalid", "port must be an integer"],
+    ["--postgres-port", "65536", "postgres port must be between 1 and 65535"],
+  ]) {
+    const output = [];
+    const exitCode = await run(["dev", "setup", root, option, value, "--json"], {
+      cwd: root,
+      stdout: (line = "") => output.push(line),
+      stderr: () => {},
+      interactive: false,
+      color: false,
+    });
+    const payload = JSON.parse(output.join("\n"));
+
+    assert.equal(exitCode, EXIT_CODES.USAGE);
+    assert.match(payload.error.message, new RegExp(message, "u"));
+    assert.equal(existsSync(join(root, ".envrc")), false);
+  }
 });
 
 test("dev setup rejects non-Tama Phoenix repositories", () => {

@@ -4,11 +4,14 @@ import { planDevGitignore, validateSecretFilesUntracked } from "../bootstrap/git
 import { planDevEnvironment } from "./environment.mjs";
 import { inspectDevProject } from "./project.mjs";
 
-/** @param {{cwd: string, targetPath?: string, postgresPort?: number}} options @returns {import("../types.mjs").DevSetupPlan} */
+/** @param {{cwd: string, targetPath?: string, tamaPort?: number, postgresPort?: number}} options @returns {import("../types.mjs").DevSetupPlan} */
 export function createDevSetupPlan(options) {
   const project = inspectDevProject(options);
   validateSecretFilesUntracked(project.root, [".envrc", ".tama.dev.postgres.env"]);
-  const environment = planDevEnvironment(project.root, options.postgresPort);
+  const environment = planDevEnvironment(project.root, {
+    tamaPort: options.tamaPort,
+    postgresPort: options.postgresPort,
+  });
   return {
     root: project.root,
     composeFile: project.composeFile,

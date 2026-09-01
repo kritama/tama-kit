@@ -90,21 +90,30 @@ OpenTofu version declared by the checkout when foundation provisioning is
 required, that tool is missing, and `mise` is available. It also maintains
 repository ignore rules for the generated credentials before writing them. It
 does not install or use a host PostgreSQL. Phoenix remains a native host process.
-Development and test connections use loopback port `55432` by default, so they
-do not select a PostgreSQL server listening on the host's standard `5432` port.
-The generated environment also bounds local ExUnit concurrency so high-core
+Native Phoenix listens on `127.0.0.1:4001` by default. Development and test
+database connections use loopback port `55432` by default, so they do not
+select a PostgreSQL server listening on the host's standard `5432` port. The
+generated environment also bounds local ExUnit concurrency so high-core
 development machines do not overwhelm the container.
 
-Choose another isolated loopback port when necessary:
+Choose another native Phoenix or isolated PostgreSQL loopback port when
+necessary:
 
 ```bash
+npx @kritama/tama-kit dev setup --port 4567
 npx @kritama/tama-kit dev setup --postgres-port 55433
 ```
 
 To generate the private files without starting Docker or running Mix, use
 `--prepare-only`. Use `--dry-run` or `--json` for a secret-free plan. Existing
-secrets are preserved on every rerun; changing the PostgreSQL port updates only
-the development and test port exports.
+secrets and an existing Tama port are preserved on every rerun. Passing
+`--port` updates only the native Phoenix `PORT` export; changing the PostgreSQL
+port updates only the development and test database port exports. For the
+canonical Memovee integration topology, use:
+
+```bash
+npx @kritama/tama-kit dev setup --port 4001 --postgres-port 55432 --json
+```
 
 ## Installation
 
