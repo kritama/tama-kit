@@ -223,13 +223,14 @@ export async function runOAuth(argv, io) {
     );
   }
 
-  const key = generateOAuthPrivateJwk(options.kid);
   if (hasOutput) {
     const absolutePath = assertSafeOutputPath(io.cwd, /** @type {string} */ (options.output));
+    const key = generateOAuthPrivateJwk(options.kid);
     writeExclusiveSecretFile(absolutePath, `${dotenvLines(key).join("\n")}\n`);
     io.stdout(absolutePath);
     return EXIT_CODES.SUCCESS;
   }
+  const key = generateOAuthPrivateJwk(options.kid);
   for (const line of dotenvLines(key)) {
     io.stdout(line);
   }
