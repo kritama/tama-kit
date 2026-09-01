@@ -285,7 +285,7 @@ function bigIntGreatestCommonDivisor(a, b) {
  * @returns {bigint}
  */
 function bigIntLeastCommonMultiple(a, b) {
-  return a / bigIntGreatestCommonDivisor(a, b) * b;
+  return (a / bigIntGreatestCommonDivisor(a, b)) * b;
 }
 
 /** @returns {import("../errors.mjs").CLIError} */
