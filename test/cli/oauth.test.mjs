@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  fchmodSync,
   fstatSync,
   lstatSync,
   mkdirSync,
@@ -336,6 +337,54 @@ test("an ancestor exchange between validation and creation writes no key materia
   assert.ok(lstatSync(parent).isSymbolicLink());
   assert.deepEqual(readdirSync(originalParent), []);
   assert.deepEqual(readdirSync(redirectedParent), []);
+});
+
+test("an ancestor exchange during the descriptor write fails and zeroes the moved file", () => {
+  const cwd = tempCwd();
+  const parent = join(cwd, "keys");
+  const movedParent = join(cwd, "keys-moved");
+  const filename = join(parent, "secret.env");
+  const movedFilename = join(movedParent, "secret.env");
+  mkdirSync(parent);
+
+  assert.throws(
+    () =>
+      writeExclusiveSecretFile(cwd, "keys/secret.env", "private-key-material\n", {
+        fchmodSync: (descriptor, mode) => {
+          fchmodSync(descriptor, mode);
+          renameSync(parent, movedParent);
+          mkdirSync(parent);
+          writeFileSync(filename, "unrelated\n");
+        },
+      }),
+    (error) =>
+      error instanceof Error && "exitCode" in error && error.exitCode === EXIT_CODES.OWNERSHIP,
+  );
+
+  assert.equal(readFileSync(filename, "utf8"), "unrelated\n");
+  assert.equal(statSync(movedFilename).size, 0);
+});
+
+test("a destination replacement during the descriptor write is preserved while the key is zeroed", () => {
+  const cwd = tempCwd();
+  const filename = join(cwd, "secret.env");
+  const movedFilename = join(cwd, "secret-moved.env");
+
+  assert.throws(
+    () =>
+      writeExclusiveSecretFile(cwd, "secret.env", "private-key-material\n", {
+        writeFileSync: (descriptor, content, options) => {
+          writeFileSync(descriptor, content, options);
+          renameSync(filename, movedFilename);
+          writeFileSync(filename, "unrelated\n");
+        },
+      }),
+    (error) =>
+      error instanceof Error && "exitCode" in error && error.exitCode === EXIT_CODES.OWNERSHIP,
+  );
+
+  assert.equal(readFileSync(filename, "utf8"), "unrelated\n");
+  assert.equal(statSync(movedFilename).size, 0);
 });
 
 test("a directory target and a missing parent are refused", async () => {

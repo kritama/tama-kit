@@ -6,6 +6,7 @@ import {
   fchmodSync,
   constants as fsConstants,
   fstatSync,
+  ftruncateSync,
   lstatSync,
   openSync,
   unlinkSync,
@@ -193,6 +194,7 @@ const defaultFileSystem = {
   closeSync,
   fchmodSync,
   fstatSync,
+  ftruncateSync,
   lstatSync,
   openSync,
   unlinkSync,
@@ -205,10 +207,10 @@ function sameFile(left, right) {
 }
 
 /**
- * Ensures no checked directory was exchanged between validation and exclusive
- * creation, and that the path still names the file descriptor we opened.
- * Once this succeeds, all key bytes are written through that descriptor, so a
- * later path rename or symlink exchange cannot redirect the write.
+ * Ensures no checked directory was exchanged and that the path still names
+ * the file descriptor we opened. This runs both before and after the
+ * descriptor write: the first check prevents redirection, while the second
+ * prevents reporting success for a moved or replaced destination.
  *
  * @param {SafeOutputPath} output
  * @param {{dev: number | bigint, ino: number | bigint}} openedFile
@@ -294,6 +296,7 @@ export function writeExclusiveSecretFile(cwd, outputPath, content, fileSystemOve
     assertStableOutputPath(output, openedFile, fileSystem);
     fileSystem.fchmodSync(descriptor, 0o600);
     fileSystem.writeFileSync(descriptor, content, { encoding: "utf8" });
+    assertStableOutputPath(output, openedFile, fileSystem);
     fileSystem.closeSync(descriptor);
     descriptor = undefined;
     return output.absolutePath;
@@ -306,6 +309,11 @@ export function writeExclusiveSecretFile(cwd, outputPath, content, fileSystemOve
       }
     }
     if (descriptor !== undefined) {
+      try {
+        fileSystem.ftruncateSync(descriptor, 0);
+      } catch {
+        // Continue with close and identity-checked path cleanup below.
+      }
       try {
         fileSystem.closeSync(descriptor);
       } catch {
