@@ -448,26 +448,35 @@ test("a sticky world-writable scratch directory owned by the invoking user is ac
   assert.ok((statSync(writtenPath).mode & 0o777) === 0o600);
 });
 
-test("a sticky directory owned by another unprivileged user is refused", (context) => {
+test("directories owned by another unprivileged user are refused", (context) => {
   if (typeof process.getuid !== "function" || process.getuid() !== 0) {
     context.skip("requires root to change directory ownership");
     return;
   }
-  const cwd = tempCwd();
-  const parent = join(cwd, "foreign");
-  mkdirSync(parent);
-  chmodSync(parent, 0o1777);
-  chownSync(parent, 12345, 12345);
+  // 0755 has no group or world write bits, but the owner can still rename
+  // entries; 1777 adds the sticky bit, which the owner bypasses.
+  for (const mode of [0o755, 0o1777]) {
+    const cwd = tempCwd();
+    const parent = join(cwd, `foreign-${mode.toString(8)}`);
+    mkdirSync(parent);
+    chmodSync(parent, mode);
+    chownSync(parent, 12345, 12345);
 
-  assert.throws(
-    () => writeExclusiveSecretFile(cwd, "foreign/secret.env", "private-key-material\n"),
-    (error) =>
-      error instanceof Error &&
-      "exitCode" in error &&
-      error.exitCode === EXIT_CODES.OWNERSHIP &&
-      /writable by other users/.test(error.message),
-  );
-  assert.ok(!existsSync(join(parent, "secret.env")));
+    assert.throws(
+      () =>
+        writeExclusiveSecretFile(
+          cwd,
+          `foreign-${mode.toString(8)}/secret.env`,
+          "private-key-material\n",
+        ),
+      (error) =>
+        error instanceof Error &&
+        "exitCode" in error &&
+        error.exitCode === EXIT_CODES.OWNERSHIP &&
+        /owned by another user/.test(error.message),
+    );
+    assert.ok(!existsSync(join(parent, "secret.env")));
+  }
 });
 
 test("a directory target and a missing parent are refused", async () => {
