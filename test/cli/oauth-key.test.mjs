@@ -65,6 +65,39 @@ function modularInverse(value, modulus) {
   return ((oldCoefficient % modulus) + modulus) % modulus;
 }
 
+/** @param {bigint} a @param {bigint} b */
+function greatestCommonDivisor(a, b) {
+  while (b !== 0n) {
+    [a, b] = [b, a % b];
+  }
+  return a;
+}
+
+/** @param {bigint} a @param {bigint} b */
+function leastCommonMultiple(a, b) {
+  return (a / greatestCommonDivisor(a, b)) * b;
+}
+
+/** @param {bigint} p @param {bigint} q @param {string} kid */
+function privateJwkFromFactors(p, q, kid) {
+  const exponent = 65_537n;
+  const d = modularInverse(exponent, leastCommonMultiple(p - 1n, q - 1n));
+  return JSON.stringify({
+    alg: "RS256",
+    kid,
+    kty: "RSA",
+    use: "sig",
+    n: base64urlUnsigned(p * q),
+    e: base64urlUnsigned(exponent),
+    d: base64urlUnsigned(d),
+    p: base64urlUnsigned(p),
+    q: base64urlUnsigned(q),
+    dp: base64urlUnsigned(d % (p - 1n)),
+    dq: base64urlUnsigned(d % (q - 1n)),
+    qi: base64urlUnsigned(modularInverse(q, p)),
+  });
+}
+
 /** @param {string} kid */
 function smallPrimeFactorJwk(kid) {
   const p = 3n;
@@ -80,22 +113,24 @@ function smallPrimeFactorJwk(kid) {
       "2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CE" +
       "A956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF",
   );
-  const exponent = 65_537n;
-  const d = modularInverse(exponent, q - 1n);
-  return JSON.stringify({
-    alg: "RS256",
-    kid,
-    kty: "RSA",
-    use: "sig",
-    n: base64urlUnsigned(p * q),
-    e: base64urlUnsigned(exponent),
-    d: base64urlUnsigned(d),
-    p: base64urlUnsigned(p),
-    q: base64urlUnsigned(q),
-    dp: base64urlUnsigned(d % (p - 1n)),
-    dq: base64urlUnsigned(d % (q - 1n)),
-    qi: base64urlUnsigned(modularInverse(q, p)),
-  });
+  return privateJwkFromFactors(p, q, kid);
+}
+
+/** @param {string} kid */
+function compositePrimeFactorJwk(kid) {
+  const prime = BigInt(
+    "0x3d200624120d35cbcf199db3d625b2ea5a19e4e4ddee70e889e681c4e8b6eead" +
+      "b896bcea285c93199562734d12aa1e8a420149ffddb8534e5363e346316c540e7" +
+      "d3e436633a76d3b85337df81cab246920ff99ef42694fe64b288e83fec391b134" +
+      "1e486f85f0c865585212f120317fc63cef4e024aa90bf1b03ffce2f2580be7",
+  );
+  const q = BigInt(
+    "0xcf6801d9f075753a236332c68f28e8591d38d32ee2d985f7e77f8aaa923519d8" +
+      "9622c4f2e3806aa24740bd8b49f2a203c7f795a6cdd10fe1192acaac532e8c51" +
+      "8a7f442afd37fa9db43a2bcb11b42db2e558c417e73bb8fcb140368e816f444d" +
+      "8a7529a7ae10a1d30b7b16637398a08a8effb1dfc98af6fa58edde9a12fe5f0d",
+  );
+  return privateJwkFromFactors(3n * prime, q, kid);
 }
 
 const PRIVATE_JWK_MEMBERS = ["d", "p", "q", "dp", "dq", "qi"];
@@ -286,6 +321,9 @@ test("validation rejects weak RSA keys and conflicting metadata", () => {
   const smallFactor = smallPrimeFactorJwk(kid);
   assert.ok((jwkKeyObject(smallFactor).asymmetricKeyDetails?.modulusLength ?? 0) >= 2048);
   expectInvalid(smallFactor, kid);
+  const compositeFactor = compositePrimeFactorJwk(kid);
+  assert.equal(jwkKeyObject(compositeFactor).asymmetricKeyDetails?.modulusLength, 2048);
+  expectInvalid(compositeFactor, kid);
 
   const { jwk } = generateOAuthPrivateJwk();
   const parsed = /** @type {Record<string, unknown>} */ (JSON.parse(jwk));

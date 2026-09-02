@@ -123,8 +123,8 @@ test("an explicit kid is embedded in both stdout values", async () => {
   validateOAuthPrivateJwk(jwk, "staging-2026-09-01-1");
 });
 
-test("invalid, blank, control-bearing, or oversized kids are rejected without output", async () => {
-  for (const kid of ["", "   ", "bad\nkid", "a".repeat(129)]) {
+test("invalid, dotenv-unsafe, or oversized kids are rejected without output", async () => {
+  for (const kid of ["", "   ", "bad\nkid", "staging # one", "a".repeat(129)]) {
     const captured = capture(tempCwd());
     assert.equal(
       await run(["oauth", "generate-key", "--kid", kid, "--stdout"], captured.io),

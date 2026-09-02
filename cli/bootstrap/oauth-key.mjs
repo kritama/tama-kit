@@ -1,6 +1,12 @@
 // @ts-check
 
-import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync } from "node:crypto";
+import {
+  checkPrimeSync,
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  generateKeyPairSync,
+} from "node:crypto";
 
 import { ownershipError } from "../errors.mjs";
 
@@ -81,8 +87,9 @@ export function generateOAuthPrivateJwk(kid = undefined) {
  * JWK must carry the complete private RSA parameters (`d`, `p`, `q`, `dp`,
  * `dq`, `qi`), and those parameters must be arithmetically consistent with the
  * advertised `n` and `e` (`n = p*q`, CRT exponents, and `e*d ≡ 1 (mod λ(n))`);
- * each prime factor must also carry at least half of the modulus bit length,
- * preventing a large modulus from hiding a trivially factorable component.
+ * each factor must also carry at least half of the modulus bit length and pass
+ * primality validation, preventing a large modulus from hiding a trivially
+ * factorable component.
  * Supported Node versions can import a JWK whose public and private members
  * come from different keys, so the KeyObject sign/derive check alone is not
  * sufficient. Every failure is bounded and names the variables without
@@ -177,7 +184,9 @@ export function validateOAuthPrivateJwk(encodedJwk, kid) {
     d % (p - 1n) !== dp ||
     d % (q - 1n) !== dq ||
     (q * qi) % p !== 1n ||
-    (exponent * d) % bigIntLeastCommonMultiple(p - 1n, q - 1n) !== 1n
+    (exponent * d) % bigIntLeastCommonMultiple(p - 1n, q - 1n) !== 1n ||
+    !primeFactor(p) ||
+    !primeFactor(q)
   ) {
     throw invalidJwkError();
   }
@@ -285,6 +294,15 @@ function base64urlUnsigned(value) {
  */
 function bigintBitLength(integer) {
   return integer.toString(2).length;
+}
+
+/** @param {bigint} integer @returns {boolean} */
+function primeFactor(integer) {
+  try {
+    return checkPrimeSync(integer);
+  } catch {
+    return false;
+  }
 }
 
 /**

@@ -126,7 +126,9 @@ TAMA_OAUTH_PRIVATE_JWK_ID=staging-2026-09-01-1
 ```
 
 `--kid` is optional; when omitted, the identifier is derived from the
-public-key thumbprint. Paste each value into the staging environment, or
+public-key thumbprint. Explicit identifiers accept ASCII letters, digits,
+dots, underscores, tildes, and hyphens so the emitted assignments remain
+portable dotenv syntax. Paste each value into the staging environment, or
 create an owner-only file for transfer with `--output`:
 
 ```bash
