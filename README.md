@@ -130,7 +130,10 @@ public-key thumbprint. Paste each value into the staging environment, or
 create an owner-only file for transfer with `--output`:
 
 ```bash
-tama-kit oauth generate-key --kid staging-2026-09-01-1 --output /tmp/tama-oauth-staging.env
+mkdir -p "$HOME/tama-oauth-transfer"
+chmod 700 "$HOME/tama-oauth-transfer"
+tama-kit oauth generate-key --kid staging-2026-09-01-1 \
+  --output "$HOME/tama-oauth-transfer/staging.env"
 ```
 
 `--output` resolves relative paths against the current working directory,

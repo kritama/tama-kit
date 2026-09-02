@@ -81,7 +81,9 @@ export function generateOAuthPrivateJwk(kid = undefined) {
  * JWK must carry the complete private RSA parameters (`d`, `p`, `q`, `dp`,
  * `dq`, `qi`), and those parameters must be arithmetically consistent with the
  * advertised `n` and `e` (`n = p*q`, CRT exponents, and `e*d ≡ 1 (mod λ(n))`);
- * supported Node versions can import a JWK whose public and private members
+ * each prime factor must also carry at least half of the modulus bit length,
+ * preventing a large modulus from hiding a trivially factorable component.
+ * Supported Node versions can import a JWK whose public and private members
  * come from different keys, so the KeyObject sign/derive check alone is not
  * sufficient. Every failure is bounded and names the variables without
  * quoting their values.
@@ -160,6 +162,7 @@ export function validateOAuthPrivateJwk(encodedJwk, kid) {
   const dp = base64urlUnsigned(parsed.dp);
   const dq = base64urlUnsigned(parsed.dq);
   const qi = base64urlUnsigned(parsed.qi);
+  const minimumPrimeBits = Math.floor(bigintBitLength(modulus) / 2);
   if (
     d === null ||
     p === null ||
@@ -167,8 +170,8 @@ export function validateOAuthPrivateJwk(encodedJwk, kid) {
     dp === null ||
     dq === null ||
     qi === null ||
-    p === 1n ||
-    q === 1n ||
+    bigintBitLength(p) < minimumPrimeBits ||
+    bigintBitLength(q) < minimumPrimeBits ||
     p === q ||
     modulus !== p * q ||
     d % (p - 1n) !== dp ||

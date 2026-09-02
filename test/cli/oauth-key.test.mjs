@@ -44,6 +44,60 @@ function rfc7638ThumbprintKid(publicJwk) {
   return `oauth-${createHash("sha256").update(canonical, "utf8").digest("base64url")}`;
 }
 
+/** @param {bigint} value */
+function base64urlUnsigned(value) {
+  let hex = value.toString(16);
+  if (hex.length % 2 !== 0) {
+    hex = `0${hex}`;
+  }
+  return Buffer.from(hex, "hex").toString("base64url");
+}
+
+/** @param {bigint} value @param {bigint} modulus */
+function modularInverse(value, modulus) {
+  let [oldRemainder, remainder] = [value, modulus];
+  let [oldCoefficient, coefficient] = [1n, 0n];
+  while (remainder !== 0n) {
+    const quotient = oldRemainder / remainder;
+    [oldRemainder, remainder] = [remainder, oldRemainder - quotient * remainder];
+    [oldCoefficient, coefficient] = [coefficient, oldCoefficient - quotient * coefficient];
+  }
+  return ((oldCoefficient % modulus) + modulus) % modulus;
+}
+
+/** @param {string} kid */
+function smallPrimeFactorJwk(kid) {
+  const p = 3n;
+  const q = BigInt(
+    "0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E08" +
+      "8A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD" +
+      "3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E" +
+      "7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899F" +
+      "A5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF05" +
+      "98DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C" +
+      "62F356208552BB9ED529077096966D670C354E4ABC9804F1746" +
+      "C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A" +
+      "2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CE" +
+      "A956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF",
+  );
+  const exponent = 65_537n;
+  const d = modularInverse(exponent, q - 1n);
+  return JSON.stringify({
+    alg: "RS256",
+    kid,
+    kty: "RSA",
+    use: "sig",
+    n: base64urlUnsigned(p * q),
+    e: base64urlUnsigned(exponent),
+    d: base64urlUnsigned(d),
+    p: base64urlUnsigned(p),
+    q: base64urlUnsigned(q),
+    dp: base64urlUnsigned(d % (p - 1n)),
+    dq: base64urlUnsigned(d % (q - 1n)),
+    qi: base64urlUnsigned(modularInverse(q, p)),
+  });
+}
+
 const PRIVATE_JWK_MEMBERS = ["d", "p", "q", "dp", "dq", "qi"];
 
 /**
@@ -229,6 +283,9 @@ test("validation rejects weak RSA keys and conflicting metadata", () => {
 
   const weak = rsaPrivateJwk(rsaPrivateKeyObject(1024));
   expectInvalid(JSON.stringify(weak), kid);
+  const smallFactor = smallPrimeFactorJwk(kid);
+  assert.ok((jwkKeyObject(smallFactor).asymmetricKeyDetails?.modulusLength ?? 0) >= 2048);
+  expectInvalid(smallFactor, kid);
 
   const { jwk } = generateOAuthPrivateJwk();
   const parsed = /** @type {Record<string, unknown>} */ (JSON.parse(jwk));
