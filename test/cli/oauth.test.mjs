@@ -410,6 +410,42 @@ test("a destination exchange during the close fails closed and preserves the rep
   assert.ok(statSync(movedFilename).size > 0, "the moved key inode must not be truncated");
 });
 
+test("a group- or world-writable directory in the destination chain is refused", () => {
+  for (const mode of [0o775, 0o777]) {
+    const cwd = tempCwd();
+    const parent = join(cwd, `shared-${mode.toString(8)}`);
+    mkdirSync(parent);
+    chmodSync(parent, mode);
+
+    assert.throws(
+      () =>
+        writeExclusiveSecretFile(
+          cwd,
+          `shared-${mode.toString(8)}/secret.env`,
+          "private-key-material\n",
+        ),
+      (error) =>
+        error instanceof Error &&
+        "exitCode" in error &&
+        error.exitCode === EXIT_CODES.OWNERSHIP &&
+        /writable by other users/.test(error.message),
+    );
+    assert.ok(!existsSync(join(parent, "secret.env")));
+    chmodSync(parent, 0o755);
+  }
+});
+
+test("a sticky world-writable scratch directory is accepted", () => {
+  const cwd = tempCwd();
+  const parent = join(cwd, "scratch");
+  mkdirSync(parent);
+  chmodSync(parent, 0o1777);
+
+  const writtenPath = writeExclusiveSecretFile(cwd, "scratch/secret.env", "private-key-material\n");
+  assert.equal(readFileSync(writtenPath, "utf8"), "private-key-material\n");
+  assert.ok((statSync(writtenPath).mode & 0o777) === 0o600);
+});
+
 test("a directory target and a missing parent are refused", async () => {
   const cwd = tempCwd();
   writeFileSync(join(cwd, "dir.env"), "");

@@ -121,6 +121,11 @@ function assertRealDirectory(directory) {
       `Refusing to create the key file because the parent path is not a directory: ${directory}`,
     );
   }
+  if ((metadata.mode & 0o022) !== 0 && (metadata.mode & 0o1000) === 0) {
+    throw ownershipError(
+      `Refusing to create the key file because the directory is writable by other users: ${directory}`,
+    );
+  }
   return metadata;
 }
 
@@ -138,7 +143,10 @@ function assertWritable(directory) {
 /**
  * Resolves the requested destination and verifies that creating a file there
  * cannot be redirected through a symbolic link, an existing target, or a
- * Git-managed path.
+ * Git-managed path. Every directory on the chain must also be private to
+ * other users (no group or world write bit unless the sticky bit protects
+ * the directory), so an unprivileged process cannot exchange the path at
+ * any point between this verification and the success report.
  *
  * @param {string} cwd
  * @param {string} outputPath
@@ -253,9 +261,11 @@ function assertStableOutputPath(output, openedFile, fileSystem) {
 /**
  * Removes only the path that still identifies the file we opened. Node
  * exposes no directory-anchored unlink, so the identity is re-verified with
- * an lstat immediately before the unlink; an exchange in that final window
- * can at most remove a concurrently installed replacement, never the key
- * inode, which was already zeroed while the descriptor was open.
+ * an lstat immediately before the unlink. The destination chain is private
+ * to other users, so an unprivileged process cannot install a replacement in
+ * that window; against a privileged process the worst case is removing its
+ * replacement, never the key inode, which was already zeroed while the
+ * descriptor was open.
  *
  * @param {string} absolutePath
  * @param {{dev: number | bigint, ino: number | bigint}} openedFile
@@ -274,11 +284,12 @@ function cleanupOpenedFile(absolutePath, openedFile, fileSystem) {
 
 /**
  * Creates the destination exclusively with owner-only permissions. An
- * exclusive write cannot replace an existing path. On failure, the requested
- * path is left without a file; if a concurrent process exchanges the
- * destination after the close, the command fails closed and the key inode
- * remains owner-only (mode 0600) at its new location rather than being
- * reported at the original path.
+ * exclusive write cannot replace an existing path. Because every directory
+ * on the destination chain must be private to other users, an unprivileged
+ * process cannot exchange the path between the final identity check and the
+ * success report; a privileged process can still race the pathname checks,
+ * but the key inode remains owner-only (mode 0600) wherever it ends up. On
+ * failure, the requested path is left without a file.
  *
  * @param {string} cwd
  * @param {string} outputPath
