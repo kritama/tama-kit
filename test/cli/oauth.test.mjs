@@ -11,14 +11,17 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { parseEnv } from "node:util";
 
 import { validateOAuthPrivateJwk } from "../../cli/bootstrap/oauth-key.mjs";
+import { writeExclusiveSecretFile } from "../../cli/commands/oauth.mjs";
 import { EXIT_CODES } from "../../cli/errors.mjs";
 import { run } from "../../cli/index.mjs";
 
@@ -97,7 +100,7 @@ test("--stdout emits exactly two dotenv assignments without decoration", async (
   assert.equal(await run(["oauth", "generate-key", "--stdout"], captured.io), EXIT_CODES.SUCCESS);
   assert.equal(captured.stderr.length, 0);
   assert.equal(captured.stdout.length, 2);
-  assert.match(captured.stdout[0], /^TAMA_OAUTH_PRIVATE_JWK=\{.*\}$/u);
+  assert.match(captured.stdout[0], /^TAMA_OAUTH_PRIVATE_JWK='\{.*\}'$/u);
   assert.match(captured.stdout[1], /^TAMA_OAUTH_PRIVATE_JWK_ID=oauth-[A-Za-z0-9_-]+$/u);
   assert.ok(!captured.stdout.join("\n").includes("\u001b"), "stdout must not contain ANSI escapes");
 });
@@ -105,8 +108,9 @@ test("--stdout emits exactly two dotenv assignments without decoration", async (
 test("the stdout JWK and identifier pass the shared validator and match", async () => {
   const captured = capture(tempCwd());
   assert.equal(await run(["oauth", "generate-key", "--stdout"], captured.io), EXIT_CODES.SUCCESS);
-  const jwk = captured.stdout[0].slice(JWK_PREFIX.length);
-  const kid = captured.stdout[1].slice(ID_PREFIX.length);
+  const environment = parseEnv(captured.stdout.join("\n"));
+  const jwk = environment.TAMA_OAUTH_PRIVATE_JWK;
+  const kid = environment.TAMA_OAUTH_PRIVATE_JWK_ID;
   validateOAuthPrivateJwk(jwk, kid);
   assert.equal(JSON.parse(jwk).kid, kid);
 });
@@ -117,7 +121,7 @@ test("an explicit kid is embedded in both stdout values", async () => {
     await run(["oauth", "generate-key", "--kid", "staging-2026-09-01-1", "--stdout"], captured.io),
     EXIT_CODES.SUCCESS,
   );
-  const jwk = captured.stdout[0].slice(JWK_PREFIX.length);
+  const jwk = parseEnv(captured.stdout.join("\n")).TAMA_OAUTH_PRIVATE_JWK;
   assert.equal(JSON.parse(jwk).kid, "staging-2026-09-01-1");
   assert.equal(captured.stdout[1], `${ID_PREFIX}staging-2026-09-01-1`);
   validateOAuthPrivateJwk(jwk, "staging-2026-09-01-1");
@@ -156,7 +160,21 @@ test("--output creates a mode-0600 dotenv file and prints only its path", async 
   assert.ok(lines[0].startsWith(JWK_PREFIX));
   assert.equal(lines[1], `${ID_PREFIX}staging-2026-09-01-1`);
   assert.equal(lines[2], "");
-  const jwkValue = lines[0].slice(JWK_PREFIX.length);
+  const parsedEnvironment = parseEnv(readFileSync(expectedPath, "utf8"));
+  const jwkValue = parsedEnvironment.TAMA_OAUTH_PRIVATE_JWK;
+  assert.equal(JSON.parse(jwkValue).kid, parsedEnvironment.TAMA_OAUTH_PRIVATE_JWK_ID);
+  const sourcedKid = execFileSync(
+    "bash",
+    [
+      "-c",
+      'set -a\n. "$1"\nset +a\n"$2" -e \'const key = JSON.parse(process.env.TAMA_OAUTH_PRIVATE_JWK); process.stdout.write(key.kid)\'',
+      "bash",
+      expectedPath,
+      process.execPath,
+    ],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+  );
+  assert.equal(sourcedKid, "staging-2026-09-01-1");
   assert.ok(!captured.stdout.join("\n").includes(jwkValue), "stdout must not echo the JWK");
   assert.ok(!captured.stderr.join("\n").includes(jwkValue), "stderr must not echo the JWK");
 });
@@ -236,6 +254,23 @@ test("a failed write leaves no private file behind", async (context) => {
   } finally {
     chmodSync(parent, 0o755);
   }
+});
+
+test("a chmod failure after creation removes the private key file", () => {
+  const filename = join(tempCwd(), "secret.env");
+  assert.throws(
+    () =>
+      writeExclusiveSecretFile(filename, "private-key-material\n", {
+        writeFileSync,
+        chmodSync: () => {
+          throw Object.assign(new Error("permission denied"), { code: "EPERM" });
+        },
+        unlinkSync,
+      }),
+    (error) =>
+      error instanceof Error && "exitCode" in error && error.exitCode === EXIT_CODES.OWNERSHIP,
+  );
+  assert.equal(existsSync(filename), false);
 });
 
 test("a directory target and a missing parent are refused", async () => {
@@ -366,7 +401,7 @@ test("the packaged entry point runs generate-key without a Tama checkout", () =>
   );
   const lines = output.split("\n");
   assert.equal(lines.length, 3);
-  assert.match(lines[0], /^TAMA_OAUTH_PRIVATE_JWK=\{.*\}$/u);
+  assert.match(lines[0], /^TAMA_OAUTH_PRIVATE_JWK='\{.*\}'$/u);
   assert.match(lines[1], /^TAMA_OAUTH_PRIVATE_JWK_ID=oauth-[A-Za-z0-9_-]+$/u);
   assert.equal(lines[2], "");
 });

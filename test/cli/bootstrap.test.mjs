@@ -16,6 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { parseEnv } from "node:util";
 import { formatAgentSetupPrompt } from "../../cli/bootstrap/agent-prompt.mjs";
 import { formatComposeUpCommand } from "../../cli/bootstrap/compose-command.mjs";
 import { inspectProject } from "../../cli/bootstrap/detect-project.mjs";
@@ -956,9 +957,10 @@ test("bootstrap rejects an invalid persisted port instead of silently changing i
 });
 
 function oauthJwkLines(content) {
+  const values = parseEnv(content);
   return {
-    jwk: content.match(/^TAMA_OAUTH_PRIVATE_JWK=(.+)$/mu)?.[1],
-    id: content.match(/^TAMA_OAUTH_PRIVATE_JWK_ID=(.+)$/mu)?.[1],
+    jwk: values.TAMA_OAUTH_PRIVATE_JWK,
+    id: values.TAMA_OAUTH_PRIVATE_JWK_ID,
   };
 }
 
@@ -981,6 +983,17 @@ test("bootstrap generates an asymmetric System OAuth signing key", () => {
   const keyObject = createPrivateKey({ key: parsed, format: "jwk" });
   assert.equal(keyObject.asymmetricKeyType, "rsa");
   assert.equal(keyObject.asymmetricKeyDetails?.modulusLength, 3072);
+
+  execFileSync(
+    "bash",
+    [
+      "-c",
+      "set -a\n. \"$1\"\nset +a\nnode -e 'const key = JSON.parse(process.env.TAMA_OAUTH_PRIVATE_JWK); if (key.kid !== process.env.TAMA_OAUTH_PRIVATE_JWK_ID) process.exit(1)'",
+      "bash",
+      join(root, ".tama.env"),
+    ],
+    { stdio: "ignore" },
+  );
 
   const example = readFileSync(join(root, ".tama.env.example"), "utf8");
   assert.match(example, /^TAMA_OAUTH_PRIVATE_JWK=replace-me$/mu);

@@ -169,6 +169,8 @@ function assertSafeOutputPath(cwd, outputPath) {
   return absolutePath;
 }
 
+const defaultFileSystem = { writeFileSync, chmodSync, unlinkSync };
+
 /**
  * Creates the destination exclusively with owner-only permissions. An
  * exclusive write cannot replace an existing path and never leaves a
@@ -176,13 +178,27 @@ function assertSafeOutputPath(cwd, outputPath) {
  *
  * @param {string} absolutePath
  * @param {string} content
+ * @param {typeof defaultFileSystem} [fileSystem]
  */
-function writeExclusiveSecretFile(absolutePath, content) {
+export function writeExclusiveSecretFile(absolutePath, content, fileSystem = defaultFileSystem) {
+  let created = false;
   try {
-    writeFileSync(absolutePath, content, { encoding: "utf8", flag: "wx", mode: 0o600 });
-    chmodSync(absolutePath, 0o600);
+    fileSystem.writeFileSync(absolutePath, content, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+    created = true;
+    fileSystem.chmodSync(absolutePath, 0o600);
   } catch (error) {
     const code = error instanceof Error && "code" in error ? error.code : undefined;
+    if (created) {
+      try {
+        fileSystem.unlinkSync(absolutePath);
+      } catch {
+        // The partially created file, if any, was requested with mode 0600.
+      }
+    }
     if (code === "EEXIST") {
       throw ownershipError(
         `Refusing to replace the existing key file because that would rotate a signing key: ${absolutePath}`,
@@ -193,18 +209,13 @@ function writeExclusiveSecretFile(absolutePath, content) {
         `Refusing to create the key file because the destination is not writable: ${absolutePath}`,
       );
     }
-    try {
-      unlinkSync(absolutePath);
-    } catch {
-      // The partially created file, if any, already has owner-only permissions.
-    }
     throw ownershipError(`Unable to create the key file: ${absolutePath}`);
   }
 }
 
 /** @param {{jwk: string, kid: string}} key @returns {string[]} */
 function dotenvLines(key) {
-  return [`TAMA_OAUTH_PRIVATE_JWK=${key.jwk}`, `TAMA_OAUTH_PRIVATE_JWK_ID=${key.kid}`];
+  return [`TAMA_OAUTH_PRIVATE_JWK='${key.jwk}'`, `TAMA_OAUTH_PRIVATE_JWK_ID=${key.kid}`];
 }
 
 /** @param {string[]} argv @param {CommandIO} io @returns {Promise<ExitCode>} */

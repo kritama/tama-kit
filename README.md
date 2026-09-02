@@ -121,7 +121,7 @@ one destination. With `--stdout` it prints exactly two dotenv assignments and
 nothing else:
 
 ```dotenv
-TAMA_OAUTH_PRIVATE_JWK={"alg":"RS256","kid":"staging-2026-09-01-1",...}
+TAMA_OAUTH_PRIVATE_JWK='{"alg":"RS256","kid":"staging-2026-09-01-1",...}'
 TAMA_OAUTH_PRIVATE_JWK_ID=staging-2026-09-01-1
 ```
 
@@ -154,7 +154,7 @@ Tama Kit is distributed as a plugin containing the
 from npm through the Upmaru marketplace; installing the npm package by itself
 does not enable the plugin in ChatGPT or Codex.
 
-This installation path requires the Codex CLI with plugin support, Node.js 20
+This installation path requires the Codex CLI with plugin support, Node.js 20.12
 or newer, and an npm CLI available on your system.
 
 Add the marketplace and install the plugin:

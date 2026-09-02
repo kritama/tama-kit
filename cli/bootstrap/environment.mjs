@@ -3,6 +3,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseEnv } from "node:util";
 
 import { ownershipError } from "../errors.mjs";
 import { DEFAULTS } from "./constants.mjs";
@@ -49,7 +50,16 @@ function parseEnvironment(content, filename) {
       if (values.has(match[1])) {
         duplicates.add(match[1]);
       }
-      values.set(match[1], match[2]);
+      let value;
+      try {
+        value = parseEnv(`${line}\n`)[match[1]];
+      } catch {
+        throw ownershipError(`${filename} contains invalid dotenv syntax for ${match[1]}`, {
+          path: filename,
+          variable: match[1],
+        });
+      }
+      values.set(match[1], value ?? "");
     }
   }
   if (duplicates.size > 0) {
@@ -159,7 +169,7 @@ function migrateOAuthKeyPair(content) {
   const lines = content.split(/\r?\n/u).map((line) => {
     if (line.startsWith("TAMA_OAUTH_SIGNING_KEY=")) {
       replaced += 1;
-      return `TAMA_OAUTH_PRIVATE_JWK=${oauth.jwk}`;
+      return `TAMA_OAUTH_PRIVATE_JWK='${oauth.jwk}'`;
     }
     if (line.startsWith("TAMA_OAUTH_SIGNING_KEY_ID=")) {
       replaced += 1;
@@ -281,7 +291,7 @@ function newEnvironment(port) {
     `SECRET_KEY_BASE=${token(48)}`,
     `TAMA_VAULT_KEY=${randomBytes(32).toString("base64")}`,
     `TAMA_JWT_SECRET=${token(32)}`,
-    `TAMA_OAUTH_PRIVATE_JWK=${oauth.jwk}`,
+    `TAMA_OAUTH_PRIVATE_JWK='${oauth.jwk}'`,
     `TAMA_OAUTH_PRIVATE_JWK_ID=${oauth.kid}`,
     `TAMA_SETUP_TOKEN=${token(24)}`,
     "",

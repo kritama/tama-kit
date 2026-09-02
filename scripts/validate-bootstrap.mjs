@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseEnv } from "node:util";
 
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const runtime = process.argv.slice(2).includes("--runtime");
@@ -48,13 +49,7 @@ function execute(command, args, options = {}) {
 
 /** @param {string} content */
 function environmentValues(content) {
-  return Object.fromEntries(
-    content
-      .split(/\r?\n/u)
-      .map((line) => line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/u))
-      .filter(Boolean)
-      .map((match) => [match[1], match[2]]),
-  );
+  return parseEnv(content);
 }
 
 /** @param {unknown} error @param {"stdout" | "stderr"} stream */

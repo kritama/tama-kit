@@ -80,7 +80,7 @@ still serves Tama's separate Joken API-token path.
 
 Tama Kit must not invoke `mix` to generate the key. Bootstrap and the standalone
 generator must work before Tama source, Elixir, or compiled dependencies are
-available. Node 20 is already Tama Kit's runtime and provides the required
+available. Node 20.12 is already Tama Kit's minimum runtime and provides the required
 asymmetric key APIs.
 
 A Mix task is unnecessary for this migration. If one is added later, it should
@@ -114,9 +114,11 @@ tama-kit oauth generate-key --kid staging-2026-09-01-1 --stdout
 
 # Prefer an owner-only file when transporting values through a password or
 # deployment-secret manager.
+mkdir -p "$HOME/tama-oauth-transfer"
+chmod 700 "$HOME/tama-oauth-transfer"
 tama-kit oauth generate-key \
   --kid staging-2026-09-01-1 \
-  --output /tmp/tama-oauth-staging.env
+  --output "$HOME/tama-oauth-transfer/staging.env"
 ```
 
 Standard output in `--stdout` mode contains exactly two newline-terminated
@@ -124,15 +126,15 @@ dotenv assignments and no headings, colors, progress rendering, or explanatory
 text:
 
 ```dotenv
-TAMA_OAUTH_PRIVATE_JWK={"alg":"RS256","kid":"staging-2026-09-01-1",...}
+TAMA_OAUTH_PRIVATE_JWK='{"alg":"RS256","kid":"staging-2026-09-01-1",...}'
 TAMA_OAUTH_PRIVATE_JWK_ID=staging-2026-09-01-1
 ```
 
 The abbreviated example does not contain actual private key material. Warnings
 or diagnostics, if any, use stderr and must not quote the generated values.
-This output is dotenv, not a shell script; users paste each value into the
-staging environment or import the file with tooling that supports dotenv
-syntax.
+The private JSON value is single-quoted so the output can be imported by dotenv
+tooling or sourced by a POSIX-compatible shell without stripping its JSON
+quotes. Users can paste each parsed value into the staging environment.
 
 When `--kid` is omitted, derive the identifier from the public-key thumbprint.
 When supplied, validate it using Tama's non-empty, control-free, maximum
@@ -203,12 +205,13 @@ identifier must remain within Tama's 128-byte `kid` limit.
 The resulting environment entries are:
 
 ```dotenv
-TAMA_OAUTH_PRIVATE_JWK={"alg":"RS256","kid":"oauth-...","kty":"RSA","use":"sig",...}
+TAMA_OAUTH_PRIVATE_JWK='{"alg":"RS256","kid":"oauth-...","kty":"RSA","use":"sig",...}'
 TAMA_OAUTH_PRIVATE_JWK_ID=oauth-...
 ```
 
-The JSON is stored directly as the dotenv value. It is not PEM, not a JWKS
-document containing a `keys` array, and not a Base64 wrapper around JSON.
+The parsed dotenv value is the JSON itself; the surrounding single quotes are
+dotenv and shell syntax. It is not PEM, not a JWKS document containing a
+`keys` array, and not a Base64 wrapper around JSON.
 
 ## Tama Kit implementation
 
@@ -417,6 +420,8 @@ run may generate a different key because no key was committed by dry-run.
   control-bearing, or oversized identifiers are rejected without generation.
 - `--output` creates a mode-`0600` file, prints only its path, and leaves stderr
   free of key material.
+- The generated file can be parsed as dotenv and sourced without corrupting the
+  private JWK JSON.
 - Existing files, final symlinks, and symlinked ancestors fail closed without
   modification.
 - A failed write does not leave a temporary private file behind.
