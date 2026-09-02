@@ -1360,6 +1360,73 @@ test("bootstrap rejects PostgreSQL credentials that disagree with DATABASE_URL",
   );
 });
 
+test("bootstrap quotes parsed PostgreSQL values in the derived Compose environment", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  const password = "pass # word\nnext";
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8")
+      .replace(/^POSTGRES_PASSWORD=.*$/mu, 'POSTGRES_PASSWORD="pass # word\\nnext"')
+      .replace(
+        /^DATABASE_URL=.*$/mu,
+        "DATABASE_URL=ecto://tama:pass%20%23%20word%0Anext@tama-postgres/tama",
+      ),
+  );
+
+  applyOperations(planFor(root).operations);
+  const derived = readFileSync(join(root, ".tama.postgres.env"), "utf8");
+
+  assert.match(derived, /^POSTGRES_PASSWORD="pass # word\\nnext"$/mu);
+  assert.equal(parseEnv(derived).POSTGRES_PASSWORD, password);
+});
+
+test("bootstrap protects PostgreSQL dollar signs from Compose interpolation", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8")
+      .replace(/^POSTGRES_PASSWORD=.*$/mu, "POSTGRES_PASSWORD='dollar $HOME'")
+      .replace(
+        /^DATABASE_URL=.*$/mu,
+        "DATABASE_URL=ecto://tama:dollar%20%24HOME@tama-postgres/tama",
+      ),
+  );
+
+  applyOperations(planFor(root).operations);
+  const derived = readFileSync(join(root, ".tama.postgres.env"), "utf8");
+
+  assert.match(derived, /^POSTGRES_PASSWORD="dollar \$\$HOME"$/mu);
+});
+
+test("bootstrap rejects PostgreSQL values Compose cannot represent faithfully", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  const password = `control${String.fromCharCode(1)}value`;
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8")
+      .replace(/^POSTGRES_PASSWORD=.*$/mu, `POSTGRES_PASSWORD='${password}'`)
+      .replace(
+        /^DATABASE_URL=.*$/mu,
+        "DATABASE_URL=ecto://tama:control%01value@tama-postgres/tama",
+      ),
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      error.details.variable === "POSTGRES_PASSWORD" &&
+      !error.message.includes(password),
+  );
+});
+
 test("bootstrap rejects a non-default PostgreSQL port in DATABASE_URL", () => {
   const root = project();
   applyOperations(planFor(root).operations);
