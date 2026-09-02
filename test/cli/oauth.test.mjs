@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  closeSync,
   existsSync,
   fchmodSync,
   fstatSync,
@@ -385,6 +386,28 @@ test("a destination replacement during the descriptor write is preserved while t
 
   assert.equal(readFileSync(filename, "utf8"), "unrelated\n");
   assert.equal(statSync(movedFilename).size, 0);
+});
+
+test("a destination exchange during the close fails closed and preserves the replacement", () => {
+  const cwd = tempCwd();
+  const filename = join(cwd, "secret.env");
+  const movedFilename = join(cwd, "secret-moved.env");
+
+  assert.throws(
+    () =>
+      writeExclusiveSecretFile(cwd, "secret.env", "private-key-material\n", {
+        closeSync: (descriptor) => {
+          closeSync(descriptor);
+          renameSync(filename, movedFilename);
+          writeFileSync(filename, "unrelated\n");
+        },
+      }),
+    (error) =>
+      error instanceof Error && "exitCode" in error && error.exitCode === EXIT_CODES.OWNERSHIP,
+  );
+
+  assert.equal(readFileSync(filename, "utf8"), "unrelated\n");
+  assert.ok(statSync(movedFilename).size > 0, "the moved key inode must not be truncated");
 });
 
 test("a directory target and a missing parent are refused", async () => {

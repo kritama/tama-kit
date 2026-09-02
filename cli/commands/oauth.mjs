@@ -208,9 +208,11 @@ function sameFile(left, right) {
 
 /**
  * Ensures no checked directory was exchanged and that the path still names
- * the file descriptor we opened. This runs both before and after the
- * descriptor write: the first check prevents redirection, while the second
- * prevents reporting success for a moved or replaced destination.
+ * the file we opened. This runs before the descriptor write, again after it
+ * so a failed write can still zero the opened descriptor, and once more
+ * after the close so the identity check is the final operation before a
+ * success report: a destination exchanged during the close is then refused
+ * instead of reported as the created key path.
  *
  * @param {SafeOutputPath} output
  * @param {{dev: number | bigint, ino: number | bigint}} openedFile
@@ -249,8 +251,11 @@ function assertStableOutputPath(output, openedFile, fileSystem) {
 }
 
 /**
- * Removes only the path that still identifies the file we opened. A failed
- * cleanup must never unlink a replacement installed by another process.
+ * Removes only the path that still identifies the file we opened. Node
+ * exposes no directory-anchored unlink, so the identity is re-verified with
+ * an lstat immediately before the unlink; an exchange in that final window
+ * can at most remove a concurrently installed replacement, never the key
+ * inode, which was already zeroed while the descriptor was open.
  *
  * @param {string} absolutePath
  * @param {{dev: number | bigint, ino: number | bigint}} openedFile
@@ -269,8 +274,11 @@ function cleanupOpenedFile(absolutePath, openedFile, fileSystem) {
 
 /**
  * Creates the destination exclusively with owner-only permissions. An
- * exclusive write cannot replace an existing path and never leaves a
- * temporary file behind when it fails.
+ * exclusive write cannot replace an existing path. On failure, the requested
+ * path is left without a file; if a concurrent process exchanges the
+ * destination after the close, the command fails closed and the key inode
+ * remains owner-only (mode 0600) at its new location rather than being
+ * reported at the original path.
  *
  * @param {string} cwd
  * @param {string} outputPath
@@ -299,6 +307,7 @@ export function writeExclusiveSecretFile(cwd, outputPath, content, fileSystemOve
     assertStableOutputPath(output, openedFile, fileSystem);
     fileSystem.closeSync(descriptor);
     descriptor = undefined;
+    assertStableOutputPath(output, openedFile, fileSystem);
     return output.absolutePath;
   } catch (error) {
     if (descriptor !== undefined && openedFile === undefined) {
