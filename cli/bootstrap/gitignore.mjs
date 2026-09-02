@@ -78,7 +78,9 @@ export function validateSecretFilesUntracked(root, secretFiles = SECRET_FILES) {
  * as-is. Inside a worktree, the path must be absent from the index and must
  * match a Git ignore rule; the command never edits `.gitignore` to satisfy
  * this check, so the operator chooses an already ignored path or a private
- * directory outside the repository.
+ * directory outside the repository. The name is passed to Git with a `./`
+ * prefix so it is checked as the literal path, not as a pathspec whose
+ * `:(...)` magic could redirect the checks to a different file.
  *
  * @param {string} directory
  *   Directory used to locate the Git worktree that would contain `filename`.
@@ -119,9 +121,13 @@ export function validateNewSecretFile(directory, filename) {
   ) {
     return;
   }
+  // The "./" prefix forces Git to treat the name as a literal path, so
+  // ":(...)" pathspec magic inside a legal filename cannot redirect the
+  // index or ignore check to a different path.
+  const literalPath = `./${relativePath}`;
   const tracked = spawnSync(
     "git",
-    ["-C", worktreeRoot, "ls-files", "--cached", "--", relativePath],
+    ["-C", worktreeRoot, "ls-files", "--cached", "--", literalPath],
     {
       encoding: "utf8",
       env: environment,
@@ -139,7 +145,7 @@ export function validateNewSecretFile(directory, filename) {
   }
   const ignored = spawnSync(
     "git",
-    ["-C", worktreeRoot, "check-ignore", "--no-index", "--quiet", "--", relativePath],
+    ["-C", worktreeRoot, "check-ignore", "--no-index", "--quiet", "--", literalPath],
     { encoding: "utf8", env: environment },
   );
   if (ignored.error || (ignored.status !== 0 && ignored.status !== 1)) {

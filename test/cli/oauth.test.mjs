@@ -575,6 +575,41 @@ test("--output inside a Git worktree requires an ignored, untracked destination"
   }
 });
 
+test("--output names containing Git pathspec magic are checked as literal paths", async () => {
+  const cwd = tempCwd();
+  execFileSync("git", ["init"], { cwd, stdio: "ignore" });
+
+  // The literal name is not ignored, but the ":(top)" pathspec magic
+  // resolves to an ignored name.
+  writeFileSync(join(cwd, ".gitignore"), "ignored.env\n");
+  let captured = capture(cwd);
+  assert.equal(
+    await run(["oauth", "generate-key", "--output", ":(top)ignored.env"], captured.io),
+    EXIT_CODES.OWNERSHIP,
+  );
+  assert.equal(captured.stdout.length, 0);
+  assertNoKeyMaterial(captured.stderr);
+  assert.ok(captured.stderr.join(" ").includes("not ignored by Git"));
+  assert.ok(!existsSync(join(cwd, ":(top)ignored.env")));
+
+  // The literal name is in the index, but the magic pathspec resolves to an
+  // untracked name.
+  const trackedName = ":(top)secret.env";
+  writeFileSync(join(cwd, trackedName), "placeholder\n");
+  execFileSync("git", ["add", "--", `./${trackedName}`], { cwd, stdio: "ignore" });
+  rmSync(join(cwd, trackedName));
+  writeFileSync(join(cwd, ".gitignore"), "secret.env\n");
+  captured = capture(cwd);
+  assert.equal(
+    await run(["oauth", "generate-key", "--output", trackedName], captured.io),
+    EXIT_CODES.OWNERSHIP,
+  );
+  assert.equal(captured.stdout.length, 0);
+  assertNoKeyMaterial(captured.stderr);
+  assert.ok(captured.stderr.join(" ").includes("Git index"));
+  assert.ok(!existsSync(join(cwd, trackedName)));
+});
+
 test("errors never contain private key material", async () => {
   const cwd = tempCwd();
   const target = join(cwd, "secret.env");
