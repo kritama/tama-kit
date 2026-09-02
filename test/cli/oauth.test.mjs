@@ -322,6 +322,25 @@ test("--output inside a Git worktree requires an ignored, untracked destination"
     EXIT_CODES.OWNERSHIP,
   );
   assert.ok(!existsSync(join(cwd, "nested", "decoy.env")));
+
+  const originalPath = process.env.PATH;
+  process.env.PATH = "";
+  try {
+    captured = capture(cwd);
+    assert.equal(
+      await run(["oauth", "generate-key", "--output", "git-unavailable.env"], captured.io),
+      EXIT_CODES.PREREQUISITE,
+    );
+    assert.equal(captured.stdout.length, 0);
+    assertNoKeyMaterial(captured.stderr);
+    assert.ok(!existsSync(join(cwd, "git-unavailable.env")));
+  } finally {
+    if (originalPath === undefined) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = originalPath;
+    }
+  }
 });
 
 test("errors never contain private key material", async () => {

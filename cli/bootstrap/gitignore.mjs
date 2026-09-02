@@ -40,7 +40,12 @@ export function validateSecretFilesUntracked(root, secretFiles = SECRET_FILES) {
   const gitMissing = worktree.error && "code" in worktree.error && worktree.error.code === "ENOENT";
   const notRepository =
     typeof worktree.stderr === "string" && worktree.stderr.includes("not a git repository");
-  if (gitMissing || notRepository) {
+  if (gitMissing) {
+    throw prerequisiteError("Git is required to inspect the index before writing secret files", {
+      root,
+    });
+  }
+  if (notRepository) {
     return;
   }
   if (worktree.error || worktree.status !== 0 || worktree.stdout.trim() !== "true") {
@@ -88,7 +93,12 @@ export function validateNewSecretFile(directory, filename) {
   const gitMissing = worktree.error && "code" in worktree.error && worktree.error.code === "ENOENT";
   const notRepository =
     typeof worktree.stderr === "string" && worktree.stderr.includes("not a git repository");
-  if (gitMissing || notRepository) {
+  if (gitMissing) {
+    throw prerequisiteError("Git is required to inspect the worktree before writing the key file", {
+      directory,
+    });
+  }
+  if (notRepository) {
     return;
   }
   if (worktree.error || worktree.status !== 0) {
