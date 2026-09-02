@@ -23,6 +23,7 @@ import { EXIT_CODES, ownershipError, usageError } from "../errors.mjs";
 /** @typedef {import("../types.mjs").ExitCode} ExitCode */
 
 const DOTENV_SAFE_KID = /^[A-Za-z0-9._~-]+$/u;
+const CURRENT_UID = typeof process.geteuid === "function" ? process.geteuid() : -1;
 
 /**
  * @typedef {object} OauthGenerateKeyOptions
@@ -121,10 +122,14 @@ function assertRealDirectory(directory) {
       `Refusing to create the key file because the parent path is not a directory: ${directory}`,
     );
   }
-  if ((metadata.mode & 0o022) !== 0 && (metadata.mode & 0o1000) === 0) {
-    throw ownershipError(
-      `Refusing to create the key file because the directory is writable by other users: ${directory}`,
-    );
+  if ((metadata.mode & 0o022) !== 0) {
+    const protectedFromOtherUsers =
+      (metadata.mode & 0o1000) !== 0 && (metadata.uid === CURRENT_UID || metadata.uid === 0);
+    if (!protectedFromOtherUsers) {
+      throw ownershipError(
+        `Refusing to create the key file because the directory is writable by other users: ${directory}`,
+      );
+    }
   }
   return metadata;
 }
@@ -144,9 +149,11 @@ function assertWritable(directory) {
  * Resolves the requested destination and verifies that creating a file there
  * cannot be redirected through a symbolic link, an existing target, or a
  * Git-managed path. Every directory on the chain must also be private to
- * other users (no group or world write bit unless the sticky bit protects
- * the directory), so an unprivileged process cannot exchange the path at
- * any point between this verification and the success report.
+ * other users: no group or world write bit, except a sticky directory owned
+ * by the invoking user or root, because the directory owner bypasses the
+ * sticky restriction and could still exchange the path. With that rule an
+ * unprivileged process cannot rename or replace any checked path at any
+ * point between this verification and the success report.
  *
  * @param {string} cwd
  * @param {string} outputPath
@@ -285,11 +292,13 @@ function cleanupOpenedFile(absolutePath, openedFile, fileSystem) {
 /**
  * Creates the destination exclusively with owner-only permissions. An
  * exclusive write cannot replace an existing path. Because every directory
- * on the destination chain must be private to other users, an unprivileged
- * process cannot exchange the path between the final identity check and the
- * success report; a privileged process can still race the pathname checks,
- * but the key inode remains owner-only (mode 0600) wherever it ends up. On
- * failure, the requested path is left without a file.
+ * on the destination chain must be private to other users (no group or
+ * world write bit, except a sticky directory owned by the invoking user or
+ * root), an unprivileged process cannot exchange the path between the final
+ * identity check and the success report; a privileged process can still race
+ * the pathname checks, but the key inode remains owner-only (mode 0600)
+ * wherever it ends up. On failure, the requested path is left without a
+ * file.
  *
  * @param {string} cwd
  * @param {string} outputPath

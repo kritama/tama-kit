@@ -150,13 +150,14 @@ tama-kit oauth generate-key --kid staging-2026-09-01-1 \
 `--output` resolves relative paths against the current working directory,
 creates the file exclusively with mode `0600`, and prints only the resulting
 path. It refuses existing files, symbolic links, missing or unwritable parent
-directories, directories that other users can write to (unless protected by
-the sticky bit, as in `/tmp`), and paths inside a Git worktree that are not
-ignored and untracked. Requiring a private parent directory means another user
-cannot exchange the path between validation and the write, so the reported
-path is the file that was created. It never edits `.gitignore` and never
-replaces an existing file, so rotating the signing key always uses an explicit
-new destination.
+directories, and directories that other users can write to (unless protected
+by the sticky bit and owned by you or root, as in `/tmp`, because the
+directory owner can rename entries even in a sticky directory). Paths inside
+a Git worktree must be ignored and untracked. Requiring a private parent
+directory means another user cannot exchange the path between validation and
+the write, so the reported path is the file that was created. It never edits
+`.gitignore` and never replaces an existing file, so rotating the signing key
+always uses an explicit new destination.
 
 ## Installation
 

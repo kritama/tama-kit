@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  chownSync,
   closeSync,
   existsSync,
   fchmodSync,
@@ -435,15 +436,38 @@ test("a group- or world-writable directory in the destination chain is refused",
   }
 });
 
-test("a sticky world-writable scratch directory is accepted", () => {
+test("a sticky world-writable scratch directory owned by the invoking user is accepted", () => {
   const cwd = tempCwd();
   const parent = join(cwd, "scratch");
   mkdirSync(parent);
   chmodSync(parent, 0o1777);
 
+  assert.equal(statSync(parent).uid, process.getuid());
   const writtenPath = writeExclusiveSecretFile(cwd, "scratch/secret.env", "private-key-material\n");
   assert.equal(readFileSync(writtenPath, "utf8"), "private-key-material\n");
   assert.ok((statSync(writtenPath).mode & 0o777) === 0o600);
+});
+
+test("a sticky directory owned by another unprivileged user is refused", (context) => {
+  if (typeof process.getuid !== "function" || process.getuid() !== 0) {
+    context.skip("requires root to change directory ownership");
+    return;
+  }
+  const cwd = tempCwd();
+  const parent = join(cwd, "foreign");
+  mkdirSync(parent);
+  chmodSync(parent, 0o1777);
+  chownSync(parent, 12345, 12345);
+
+  assert.throws(
+    () => writeExclusiveSecretFile(cwd, "foreign/secret.env", "private-key-material\n"),
+    (error) =>
+      error instanceof Error &&
+      "exitCode" in error &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      /writable by other users/.test(error.message),
+  );
+  assert.ok(!existsSync(join(parent, "secret.env")));
 });
 
 test("a directory target and a missing parent are refused", async () => {
