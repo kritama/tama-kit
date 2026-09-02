@@ -2,9 +2,12 @@
 
 import {
   accessSync,
-  chmodSync,
+  closeSync,
+  fchmodSync,
   constants as fsConstants,
+  fstatSync,
   lstatSync,
+  openSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -81,6 +84,19 @@ function parse(argv) {
   };
 }
 
+/**
+ * @typedef {object} DirectoryIdentity
+ * @property {string} path
+ * @property {number | bigint} dev
+ * @property {number | bigint} ino
+ */
+
+/**
+ * @typedef {object} SafeOutputPath
+ * @property {string} absolutePath
+ * @property {DirectoryIdentity[]} directories
+ */
+
 /** @param {string} directory */
 function assertRealDirectory(directory) {
   let metadata;
@@ -104,6 +120,7 @@ function assertRealDirectory(directory) {
       `Refusing to create the key file because the parent path is not a directory: ${directory}`,
     );
   }
+  return metadata;
 }
 
 /** @param {string} directory */
@@ -124,15 +141,18 @@ function assertWritable(directory) {
  *
  * @param {string} cwd
  * @param {string} outputPath
- * @returns {string} The resolved absolute path.
+ * @returns {SafeOutputPath} The resolved path and the identity of every checked directory.
  */
 function assertSafeOutputPath(cwd, outputPath) {
   const absolutePath = resolve(cwd, outputPath);
   const parent = dirname(absolutePath);
+  /** @type {DirectoryIdentity[]} */
+  const directories = [];
 
   let current = parent;
   while (true) {
-    assertRealDirectory(current);
+    const metadata = assertRealDirectory(current);
+    directories.push({ path: current, dev: metadata.dev, ino: metadata.ino });
     const ancestor = dirname(current);
     if (ancestor === current) {
       break;
@@ -166,50 +186,150 @@ function assertSafeOutputPath(cwd, outputPath) {
   }
 
   validateNewSecretFile(parent, absolutePath);
-  return absolutePath;
+  return { absolutePath, directories };
 }
 
-const defaultFileSystem = { writeFileSync, chmodSync, unlinkSync };
+const defaultFileSystem = {
+  closeSync,
+  fchmodSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  unlinkSync,
+  writeFileSync,
+};
+
+/** @param {{dev: number | bigint, ino: number | bigint}} left @param {{dev: number | bigint, ino: number | bigint}} right */
+function sameFile(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+/**
+ * Ensures no checked directory was exchanged between validation and exclusive
+ * creation, and that the path still names the file descriptor we opened.
+ * Once this succeeds, all key bytes are written through that descriptor, so a
+ * later path rename or symlink exchange cannot redirect the write.
+ *
+ * @param {SafeOutputPath} output
+ * @param {{dev: number | bigint, ino: number | bigint}} openedFile
+ * @param {typeof defaultFileSystem} fileSystem
+ */
+function assertStableOutputPath(output, openedFile, fileSystem) {
+  for (const expected of output.directories) {
+    let current;
+    try {
+      current = fileSystem.lstatSync(expected.path);
+    } catch {
+      throw ownershipError(
+        `Refusing to write the key file because an output directory changed during creation: ${expected.path}`,
+      );
+    }
+    if (current.isSymbolicLink() || !current.isDirectory() || !sameFile(current, expected)) {
+      throw ownershipError(
+        `Refusing to write the key file because an output directory changed during creation: ${expected.path}`,
+      );
+    }
+  }
+
+  let destination;
+  try {
+    destination = fileSystem.lstatSync(output.absolutePath);
+  } catch {
+    throw ownershipError(
+      `Refusing to write the key file because its destination changed during creation: ${output.absolutePath}`,
+    );
+  }
+  if (destination.isSymbolicLink() || !destination.isFile() || !sameFile(destination, openedFile)) {
+    throw ownershipError(
+      `Refusing to write the key file because its destination changed during creation: ${output.absolutePath}`,
+    );
+  }
+}
+
+/**
+ * Removes only the path that still identifies the file we opened. A failed
+ * cleanup must never unlink a replacement installed by another process.
+ *
+ * @param {string} absolutePath
+ * @param {{dev: number | bigint, ino: number | bigint}} openedFile
+ * @param {typeof defaultFileSystem} fileSystem
+ */
+function cleanupOpenedFile(absolutePath, openedFile, fileSystem) {
+  try {
+    const current = fileSystem.lstatSync(absolutePath);
+    if (!current.isSymbolicLink() && sameFile(current, openedFile)) {
+      fileSystem.unlinkSync(absolutePath);
+    }
+  } catch {
+    // The file was requested with mode 0600 and may already have been moved or removed.
+  }
+}
 
 /**
  * Creates the destination exclusively with owner-only permissions. An
  * exclusive write cannot replace an existing path and never leaves a
  * temporary file behind when it fails.
  *
- * @param {string} absolutePath
+ * @param {string} cwd
+ * @param {string} outputPath
  * @param {string} content
- * @param {typeof defaultFileSystem} [fileSystem]
+ * @param {Partial<typeof defaultFileSystem>} [fileSystemOverrides]
+ * @returns {string} The resolved absolute path.
  */
-export function writeExclusiveSecretFile(absolutePath, content, fileSystem = defaultFileSystem) {
-  let created = false;
+export function writeExclusiveSecretFile(cwd, outputPath, content, fileSystemOverrides = {}) {
+  const output = assertSafeOutputPath(cwd, outputPath);
+  const fileSystem = { ...defaultFileSystem, ...fileSystemOverrides };
+  /** @type {number | undefined} */
+  let descriptor;
+  /** @type {{dev: number | bigint, ino: number | bigint} | undefined} */
+  let openedFile;
   try {
-    fileSystem.writeFileSync(absolutePath, content, {
-      encoding: "utf8",
-      flag: "wx",
-      mode: 0o600,
-    });
-    created = true;
-    fileSystem.chmodSync(absolutePath, 0o600);
+    const flags =
+      fsConstants.O_WRONLY |
+      fsConstants.O_CREAT |
+      fsConstants.O_EXCL |
+      (fsConstants.O_NOFOLLOW ?? 0);
+    descriptor = fileSystem.openSync(output.absolutePath, flags, 0o600);
+    openedFile = fileSystem.fstatSync(descriptor);
+    assertStableOutputPath(output, openedFile, fileSystem);
+    fileSystem.fchmodSync(descriptor, 0o600);
+    fileSystem.writeFileSync(descriptor, content, { encoding: "utf8" });
+    fileSystem.closeSync(descriptor);
+    descriptor = undefined;
+    return output.absolutePath;
   } catch (error) {
-    const code = error instanceof Error && "code" in error ? error.code : undefined;
-    if (created) {
+    if (descriptor !== undefined && openedFile === undefined) {
       try {
-        fileSystem.unlinkSync(absolutePath);
+        openedFile = fileSystem.fstatSync(descriptor);
       } catch {
-        // The partially created file, if any, was requested with mode 0600.
+        // Without a stable identity, cleanup must not unlink a possible replacement path.
       }
     }
+    if (descriptor !== undefined) {
+      try {
+        fileSystem.closeSync(descriptor);
+      } catch {
+        // Cleanup below is identity-checked and does not depend on a successful close.
+      }
+    }
+    if (openedFile !== undefined) {
+      cleanupOpenedFile(output.absolutePath, openedFile, fileSystem);
+    }
+    if (error instanceof Error && "exitCode" in error) {
+      throw error;
+    }
+    const code = error instanceof Error && "code" in error ? error.code : undefined;
     if (code === "EEXIST") {
       throw ownershipError(
-        `Refusing to replace the existing key file because that would rotate a signing key: ${absolutePath}`,
+        `Refusing to replace the existing key file because that would rotate a signing key: ${output.absolutePath}`,
       );
     }
     if (code === "EACCES" || code === "EPERM") {
       throw ownershipError(
-        `Refusing to create the key file because the destination is not writable: ${absolutePath}`,
+        `Refusing to create the key file because the destination is not writable: ${output.absolutePath}`,
       );
     }
-    throw ownershipError(`Unable to create the key file: ${absolutePath}`);
+    throw ownershipError(`Unable to create the key file: ${output.absolutePath}`);
   }
 }
 
@@ -240,9 +360,12 @@ export async function runOAuth(argv, io) {
   }
 
   if (hasOutput) {
-    const absolutePath = assertSafeOutputPath(io.cwd, /** @type {string} */ (options.output));
     const key = generateOAuthPrivateJwk(options.kid);
-    writeExclusiveSecretFile(absolutePath, `${dotenvLines(key).join("\n")}\n`);
+    const absolutePath = writeExclusiveSecretFile(
+      io.cwd,
+      /** @type {string} */ (options.output),
+      `${dotenvLines(key).join("\n")}\n`,
+    );
     io.stdout(absolutePath);
     return EXIT_CODES.SUCCESS;
   }

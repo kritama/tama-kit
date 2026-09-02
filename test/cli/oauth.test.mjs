@@ -3,15 +3,17 @@ import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -257,20 +259,83 @@ test("a failed write leaves no private file behind", async (context) => {
 });
 
 test("a chmod failure after creation removes the private key file", () => {
-  const filename = join(tempCwd(), "secret.env");
+  const cwd = tempCwd();
+  const filename = join(cwd, "secret.env");
   assert.throws(
     () =>
-      writeExclusiveSecretFile(filename, "private-key-material\n", {
-        writeFileSync,
-        chmodSync: () => {
+      writeExclusiveSecretFile(cwd, "secret.env", "private-key-material\n", {
+        fchmodSync: () => {
           throw Object.assign(new Error("permission denied"), { code: "EPERM" });
         },
-        unlinkSync,
       }),
     (error) =>
       error instanceof Error && "exitCode" in error && error.exitCode === EXIT_CODES.OWNERSHIP,
   );
   assert.equal(existsSync(filename), false);
+});
+
+test("a write failure after exclusive creation removes partial private key material", () => {
+  const cwd = tempCwd();
+  const filename = join(cwd, "secret.env");
+  assert.throws(
+    () =>
+      writeExclusiveSecretFile(cwd, "secret.env", "private-key-material\n", {
+        writeFileSync: (descriptor, content, options) => {
+          writeFileSync(descriptor, String(content).slice(0, 7), options);
+          throw Object.assign(new Error("device failure"), { code: "EIO" });
+        },
+      }),
+    (error) =>
+      error instanceof Error && "exitCode" in error && error.exitCode === EXIT_CODES.OWNERSHIP,
+  );
+  assert.equal(existsSync(filename), false);
+});
+
+test("a transient identity-check failure after creation removes the empty file", () => {
+  const cwd = tempCwd();
+  const filename = join(cwd, "secret.env");
+  let attempts = 0;
+  assert.throws(
+    () =>
+      writeExclusiveSecretFile(cwd, "secret.env", "private-key-material\n", {
+        fstatSync: (descriptor, options) => {
+          attempts += 1;
+          if (attempts === 1) {
+            throw Object.assign(new Error("transient metadata failure"), { code: "EIO" });
+          }
+          return fstatSync(descriptor, options);
+        },
+      }),
+    (error) =>
+      error instanceof Error && "exitCode" in error && error.exitCode === EXIT_CODES.OWNERSHIP,
+  );
+  assert.equal(attempts, 2);
+  assert.equal(existsSync(filename), false);
+});
+
+test("an ancestor exchange between validation and creation writes no key material", () => {
+  const cwd = tempCwd();
+  const parent = join(cwd, "keys");
+  const originalParent = join(cwd, "keys-original");
+  const redirectedParent = mkdtempSync(join(tmpdir(), "tama-kit-oauth-redirected-"));
+  mkdirSync(parent);
+
+  assert.throws(
+    () =>
+      writeExclusiveSecretFile(cwd, "keys/secret.env", "private-key-material\n", {
+        openSync: (path, flags, mode) => {
+          renameSync(parent, originalParent);
+          symlinkSync(redirectedParent, parent, "dir");
+          return openSync(path, flags, mode);
+        },
+      }),
+    (error) =>
+      error instanceof Error && "exitCode" in error && error.exitCode === EXIT_CODES.OWNERSHIP,
+  );
+
+  assert.ok(lstatSync(parent).isSymbolicLink());
+  assert.deepEqual(readdirSync(originalParent), []);
+  assert.deepEqual(readdirSync(redirectedParent), []);
 });
 
 test("a directory target and a missing parent are refused", async () => {
