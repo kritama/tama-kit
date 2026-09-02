@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { runBootstrap } from "./commands/bootstrap.mjs";
 import { runDev } from "./commands/dev.mjs";
+import { runOAuth } from "./commands/oauth.mjs";
 import { CLIError, EXIT_CODES } from "./errors.mjs";
 
 /** @typedef {import("./types.mjs").CommandIO} CommandIO */
@@ -25,6 +26,7 @@ function usage() {
     "  bootstrap [path]  Prepare a local Tama runtime and Terraform root",
     "  init [path]       Alias for bootstrap",
     "  dev setup [path]  Prepare a Tama source checkout for development",
+    "  oauth generate-key  Generate a System OAuth private JWK outside bootstrap",
     "",
     "Global options:",
     "  -h, --help        Show help",
@@ -78,6 +80,9 @@ export async function run(argv, providedIO = {}) {
     }
     if (command === "dev") {
       return await runDev(args, io);
+    }
+    if (command === "oauth") {
+      return await runOAuth(args, io);
     }
     throw new CLIError(`unknown command: ${command}\n\n${usage()}`, {
       category: "usage",

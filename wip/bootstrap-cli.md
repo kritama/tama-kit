@@ -296,8 +296,8 @@ TAMA_PORT=4000
 SECRET_KEY_BASE=<generated>
 TAMA_VAULT_KEY=<generated>
 TAMA_JWT_SECRET=<generated>
-TAMA_OAUTH_SIGNING_KEY=<generated>
-TAMA_OAUTH_SIGNING_KEY_ID=<generated>
+TAMA_OAUTH_PRIVATE_JWK=<generated>
+TAMA_OAUTH_PRIVATE_JWK_ID=<generated>
 TAMA_SETUP_TOKEN=<generated>
 
 TAMA_DISABLE_CLUSTERING=true
@@ -578,7 +578,7 @@ provisioner credentials.
 - `--start` prints setup guidance and does not open a browser.
 - Whether a future `tama-kit terraform <args>` command should load
   `.tama.env`, or documentation should keep Terraform invocation explicit.
-- The first validated set is Tama `0.13.0-server`, pgvector
+- The first validated set is Tama `latest`, pgvector
   `0.8.6-pg15-bookworm`, Tama provider `~> 0.6.3`, and global module `0.5.6`.
   The upgrade policy remains open.
 - The supported Tama runtime interface for headless provisioner creation.

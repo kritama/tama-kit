@@ -2,10 +2,12 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createPrivateKey, createPublicKey } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseEnv } from "node:util";
 
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const runtime = process.argv.slice(2).includes("--runtime");
@@ -25,7 +27,7 @@ const SENSITIVE_ENVIRONMENT_VARIABLES = [
   "SECRET_KEY_BASE",
   "TAMA_CLIENT_SECRET",
   "TAMA_JWT_SECRET",
-  "TAMA_OAUTH_SIGNING_KEY",
+  "TAMA_OAUTH_PRIVATE_JWK",
   "TAMA_SETUP_TOKEN",
   "TAMA_VAULT_KEY",
 ];
@@ -47,13 +49,7 @@ function execute(command, args, options = {}) {
 
 /** @param {string} content */
 function environmentValues(content) {
-  return Object.fromEntries(
-    content
-      .split(/\r?\n/u)
-      .map((line) => line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/u))
-      .filter(Boolean)
-      .map((match) => [match[1], match[2]]),
-  );
+  return parseEnv(content);
 }
 
 /** @param {unknown} error @param {"stdout" | "stderr"} stream */
@@ -75,6 +71,37 @@ function redactRuntimeSecrets(content) {
     .filter(Boolean)
     .sort((left, right) => right.length - left.length)
     .reduce((redacted, value) => redacted.replaceAll(value, "[REDACTED]"), content);
+}
+
+/**
+ * Prove the running image implements the private-JWK contract: it publishes
+ * exactly the generated key's public half at /.well-known/jwks.json with
+ * RS256/sig metadata and no private parameters.
+ * @param {string} baseUrl
+ * @param {Record<string, string>} environment
+ */
+async function assertJwksContract(baseUrl, environment) {
+  const jwksResponse = await fetch(`${baseUrl}/.well-known/jwks.json`);
+  assert.equal(jwksResponse.status, 200, "JWKS endpoint did not respond");
+  const document = /** @type {{ keys: Array<Record<string, unknown>> }} */ (
+    await jwksResponse.json()
+  );
+  assert.ok(Array.isArray(document.keys), "JWKS document is missing keys");
+  const entry = document.keys.find((key) => key.kid === environment.TAMA_OAUTH_PRIVATE_JWK_ID);
+  assert.ok(entry, "JWKS document is missing the configured key");
+  assert.equal(entry.kty, "RSA");
+  assert.equal(entry.alg, "RS256");
+  assert.equal(entry.use, "sig");
+  for (const member of ["d", "p", "q", "dp", "dq", "qi"]) {
+    assert.equal(member in entry, false, `JWKS entry exposes private member ${member}`);
+  }
+  const publicJwk = /** @type {Record<string, string>} */ (
+    createPublicKey(
+      createPrivateKey({ key: JSON.parse(environment.TAMA_OAUTH_PRIVATE_JWK), format: "jwk" }),
+    ).export({ format: "jwk" })
+  );
+  assert.equal(entry.n, publicJwk.n);
+  assert.equal(entry.e, publicJwk.e);
 }
 
 /** @param {unknown} error */
@@ -157,6 +184,10 @@ try {
     const setupUrl = `http://localhost:${generatedEnvironment.TAMA_PORT}/setup/root?token=${generatedEnvironment.TAMA_SETUP_TOKEN}`;
     const setupResponse = await fetch(setupUrl, { redirect: "follow" });
     assert.equal(setupResponse.ok, true);
+    await assertJwksContract(
+      `http://localhost:${generatedEnvironment.TAMA_PORT}`,
+      generatedEnvironment,
+    );
   }
 
   const packed = JSON.parse(
