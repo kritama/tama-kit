@@ -42,3 +42,4 @@ terraform plan
 The Terraform root owns one `upmaru/base/tama` global foundation. Review the
 plan before applying it. Tama Kit never runs `terraform apply` during
 bootstrap.
+{{MCP_APP_GUIDANCE}}

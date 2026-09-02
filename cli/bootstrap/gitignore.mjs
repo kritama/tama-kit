@@ -9,11 +9,16 @@ import { operationForContent } from "./files.mjs";
 
 /** @typedef {import("../types.mjs").FileOperation} FileOperation */
 
-const ROOT_MANAGED_BLOCK = ["# Tama Kit local runtime", ".tama.env", ".tama.postgres.env"].join(
+const ROOT_MANAGED_BLOCK = ["# Tama Kit local runtime", "/.tama.env", "/.tama.postgres.env"].join(
   "\n",
 );
+const LEGACY_UNANCHORED_ROOT_MANAGED_BLOCK = [
+  "# Tama Kit local runtime",
+  ".tama.env",
+  ".tama.postgres.env",
+].join("\n");
 const LEGACY_ROOT_MANAGED_BLOCK = [
-  ROOT_MANAGED_BLOCK,
+  LEGACY_UNANCHORED_ROOT_MANAGED_BLOCK,
   "tama/.terraform/",
   "tama/*.tfstate",
   "tama/*.tfstate.*",
@@ -30,6 +35,9 @@ const DEV_ROOT_MANAGED_BLOCK = [
   "/.tama.dev.postgres.env",
 ].join("\n");
 const SECRET_FILES = [".tama.env", ".tama.postgres.env"];
+const MCP_APP_IGNORE_HEADER = "# Tama Kit MCP App integration";
+const MCP_APP_IGNORE_HEADER_PATTERN = new RegExp(`^${MCP_APP_IGNORE_HEADER}$u`);
+const MCP_APP_IGNORE_FILE_PATTERN = /^\/?\.([a-z0-9]+(?:-[a-z0-9]+)*)\.integration\.env$/u;
 
 /** @param {string} root @param {string[]} [secretFiles] */
 export function validateSecretFilesUntracked(root, secretFiles = SECRET_FILES) {
@@ -185,18 +193,55 @@ function withoutManagedBlocks(content, managedBlocks) {
   return kept.join("\n");
 }
 
-/** @param {string} filename @param {string} managedBlock @param {string[]} [legacyBlocks] */
-function planIgnoreFile(filename, managedBlock, legacyBlocks = []) {
+/**
+ * @param {string} filename
+ * @param {string} managedBlock
+ * @param {string[]} [legacyBlocks]
+ * @param {RegExp[]} [removalPatterns]
+ *   Extra managed lines removed from the unmanaged content (for example an
+ *   MCP App fragment from a previously configured provider).
+ */
+function planIgnoreFile(filename, managedBlock, legacyBlocks = [], removalPatterns = []) {
   const original = existsSync(filename) ? readFileSync(filename, "utf8") : "";
   const unmanaged = withoutManagedBlocks(original, [...legacyBlocks, managedBlock]);
-  const content = `${unmanaged}${unmanaged.length === 0 ? "" : "\n\n"}${managedBlock}\n`;
+  const lines = [];
+  let removedByPattern = false;
+  for (const line of unmanaged.split("\n")) {
+    if (removalPatterns.some((pattern) => pattern.test(line))) {
+      removedByPattern = true;
+      continue;
+    }
+    if (removedByPattern && line === "" && lines.at(-1) === "") {
+      continue;
+    }
+    lines.push(line);
+    removedByPattern = false;
+  }
+  const cleaned = lines.join("\n");
+  const content = `${cleaned}${cleaned.length === 0 ? "" : "\n\n"}${managedBlock}\n`;
   return operationForContent(filename, content, { owner: "user", allowUnmanagedUpdate: true });
 }
 
-/** @param {string} root @returns {FileOperation[]} */
-export function planGitignore(root) {
+/**
+ * @param {string} root
+ * @param {string | null} [providerEnvironmentFile]
+ * @returns {FileOperation[]}
+ */
+export function planGitignore(root, providerEnvironmentFile) {
+  const rootLines = ROOT_MANAGED_BLOCK.split("\n");
+  /** @type {RegExp[]} */
+  const removalPatterns = [];
+  if (providerEnvironmentFile) {
+    rootLines.push("", MCP_APP_IGNORE_HEADER, `/${providerEnvironmentFile}`);
+    removalPatterns.push(MCP_APP_IGNORE_HEADER_PATTERN, MCP_APP_IGNORE_FILE_PATTERN);
+  }
   return [
-    planIgnoreFile(join(root, ".gitignore"), ROOT_MANAGED_BLOCK, [LEGACY_ROOT_MANAGED_BLOCK]),
+    planIgnoreFile(
+      join(root, ".gitignore"),
+      rootLines.join("\n"),
+      [LEGACY_ROOT_MANAGED_BLOCK, LEGACY_UNANCHORED_ROOT_MANAGED_BLOCK],
+      removalPatterns,
+    ),
     planIgnoreFile(join(root, "tama", ".gitignore"), TERRAFORM_MANAGED_BLOCK),
   ];
 }

@@ -69,6 +69,10 @@ export function applyOperations(operations) {
       }
       continue;
     }
+    if (operation.action === "delete") {
+      unlinkSync(operation.path);
+      continue;
+    }
     atomicWrite(operation);
   }
 }
@@ -121,7 +125,7 @@ function rollbackOperations(snapshot) {
     }
 
     atomicWrite({
-      action: "update",
+      action: existsSync(file.path) ? "update" : "create",
       path: file.path,
       content: file.content ?? "",
       owner: "user",

@@ -1,0 +1,808 @@
+// @ts-check
+
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { usageError } from "../errors.mjs";
+
+/** @typedef {import("../types.mjs").ProviderBindings} ProviderBindings */
+
+export const MCP_APP_COMPATIBILITY_IDENTIFIER = "tama-mcp-app-bootstrap-v1";
+export const MCP_APP_PROVIDER_CONTRACT_FILENAME = "tama-mcp-app-bootstrap-v1.json";
+export const MCP_APP_TAMA_CONTRACT_FILENAME = "mcp-app-bootstrap-v1.json";
+export const MCP_APP_LIFECYCLE_MODES = Object.freeze(["disabled", "prepared", "enabled"]);
+
+/**
+ * The semantic roles every MCP App bootstrap must bind to a provider-owned
+ * environment variable. Tama Kit never infers meaning from a variable name;
+ * a contract supplies the mapping, or the conventional table is used as a
+ * fallback for providers without a committed contract.
+ */
+export const MCP_APP_ROLES = Object.freeze([
+  "mode",
+  "issuer",
+  "resource",
+  "access_token_signing_algorithm",
+  "access_token_signing_key_id",
+  "access_token_private_signing_key",
+  "access_token_public_overlap_keys",
+  "introspection_client_id",
+  "introspection_jwks_uri",
+]);
+
+/** @type {Record<(typeof MCP_APP_ROLES)[number], string>} */
+const CONVENTIONAL_ROLE_SUFFIX = Object.freeze({
+  mode: "TAMA_MCP_APP_MODE",
+  issuer: "OAUTH_ISSUER",
+  resource: "TAMA_MCP_APP_RESOURCE",
+  access_token_signing_algorithm: "OAUTH_SIGNING_ALGORITHM",
+  access_token_signing_key_id: "OAUTH_SIGNING_KEY_ID",
+  access_token_private_signing_key: "OAUTH_PRIVATE_SIGNING_KEY",
+  access_token_public_overlap_keys: "OAUTH_PUBLIC_SIGNING_KEYS",
+  introspection_client_id: "TAMA_INTROSPECTION_CLIENT_ID",
+  introspection_jwks_uri: "TAMA_INTROSPECTION_JWKS_URI",
+});
+
+const MAX_CONTRACT_BYTES = 256 * 1024;
+const ENVIRONMENT_NAME_PATTERN = /^[A-Z][A-Z0-9_]*$/u;
+const PROVIDER_NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+const SAFE_PATH_SEGMENT_PATTERN = /^[A-Za-z0-9._-]+$/u;
+const ENDPOINT_PATH_PATTERN = /^\/[A-Za-z0-9._~-]+(?:\/[A-Za-z0-9._~-]+)*$/u;
+const LOCAL_KEY_PATTERN = /^[a-z][a-z0-9_.-]*$/u;
+const VARIABLE_FORMATS = Object.freeze([
+  "absolute-uri",
+  "absolute-origin",
+  "comma-separated-absolute-origins",
+  "comma-separated-list",
+  "bounded-identifier",
+  "private-json-jwk",
+  "public-json-jwk-array",
+]);
+const TOP_LEVEL_KEYS = Object.freeze([
+  "schema_version",
+  "compatibility_identifier",
+  "lifecycle",
+  "provider",
+  "bindings",
+  "environment_loading",
+  "variables",
+  "public_endpoints",
+  "cache_policy",
+  "availability",
+  "mode_gate_responses",
+  "local_development",
+  "local_loopback",
+]);
+const VARIABLE_KEYS = Object.freeze([
+  "required",
+  "required_in",
+  "format",
+  "exact_path",
+  "same_origin_as",
+  "max_bytes",
+  "max_items",
+  "initial_value",
+  "allowed_values",
+  "values",
+  "default",
+  "x-sensitive",
+]);
+
+/** @param {unknown} value @returns {value is Record<string, unknown>} */
+function isPlainObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** @param {string} path @param {number} [maxBytes] @returns {string | null} */
+function safeRead(path, maxBytes = MAX_CONTRACT_BYTES) {
+  try {
+    if (!existsSync(path)) {
+      return null;
+    }
+    const metadata = lstatSync(path);
+    if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.size > maxBytes) {
+      return null;
+    }
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+/** @param {string} value @returns {boolean} */
+function safeString(value) {
+  return (
+    value.length > 0 &&
+    !Array.from(value).some((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      return code < 0x20 || code === 0x7f;
+    })
+  );
+}
+
+/** @param {unknown} value @param {string} label @returns {string} */
+function requiredSafeString(value, label) {
+  if (typeof value !== "string" || !safeString(value)) {
+    throw usageError(`MCP App contract ${label} must be a non-empty control-free string`);
+  }
+  return value;
+}
+
+/** @param {unknown} value @param {string} label @returns {string[]} */
+function uniqueStringArray(value, label) {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.some((entry) => typeof entry !== "string" || !safeString(entry))
+  ) {
+    throw usageError(`MCP App contract ${label} must be a non-empty string array`);
+  }
+  const strings = /** @type {string[]} */ (value);
+  if (new Set(strings).size !== strings.length) {
+    throw usageError(`MCP App contract ${label} must not contain duplicates`);
+  }
+  return strings;
+}
+
+/** @param {Record<string, unknown>} value @param {readonly string[]} allowed @param {string} label */
+function rejectUnknownKeys(value, allowed, label) {
+  const unknown = Object.keys(value).filter(
+    (key) => !allowed.includes(key) && !(label === "variable" && key.startsWith("x-")),
+  );
+  if (unknown.length > 0) {
+    throw usageError(`MCP App contract ${label} contains unsupported keys: ${unknown.join(", ")}`);
+  }
+}
+
+/** @param {unknown} value @param {string} label @returns {string} */
+function safeRelativePath(value, label) {
+  const path = requiredSafeString(value, label);
+  if (isAbsolute(path) || path.includes("\\") || Buffer.byteLength(path, "utf8") > 256) {
+    throw usageError(`MCP App contract ${label} must be a safe project-relative path`);
+  }
+  const segments = path.split("/");
+  if (
+    segments.length > 3 ||
+    segments.some(
+      (segment) =>
+        segment === "" ||
+        segment === "." ||
+        segment === ".." ||
+        !SAFE_PATH_SEGMENT_PATTERN.test(segment),
+    )
+  ) {
+    throw usageError(`MCP App contract ${label} must be a safe project-relative path`);
+  }
+  return path;
+}
+
+/** @param {unknown} value @param {string} label @returns {string} */
+function absoluteHttpOrigin(value, label) {
+  const origin = requiredSafeString(value, label);
+  let url;
+  try {
+    url = new URL(origin);
+  } catch {
+    throw usageError(`MCP App contract ${label} must be an absolute http(s) origin`);
+  }
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
+    url.pathname !== "/" ||
+    url.search !== "" ||
+    url.hash !== "" ||
+    `${url.protocol}//${url.host}` !== origin
+  ) {
+    throw usageError(`MCP App contract ${label} must be an absolute http(s) origin`);
+  }
+  return origin;
+}
+
+/** @param {unknown} value @param {string} label */
+function validateStringOrArray(value, label) {
+  if (typeof value === "string") {
+    requiredSafeString(value, label);
+    return;
+  }
+  uniqueStringArray(value, label);
+}
+
+/** @param {Record<string, unknown>} lifecycle @returns {string[]} */
+function validateLifecycle(lifecycle) {
+  const modes = lifecycle.modes;
+  if (
+    !Array.isArray(modes) ||
+    !MCP_APP_LIFECYCLE_MODES.every((mode) => /** @type {unknown[]} */ (modes).includes(mode))
+  ) {
+    throw usageError(
+      "MCP App contract lifecycle.modes must include disabled, prepared, and enabled",
+    );
+  }
+  rejectUnknownKeys(
+    lifecycle,
+    ["modes", "default_production_mode", "configured_modes", "enabled_modes"],
+    "lifecycle",
+  );
+  const normalized = uniqueStringArray(modes, "lifecycle.modes");
+  if (normalized.some((mode) => !MCP_APP_LIFECYCLE_MODES.includes(mode))) {
+    throw usageError("MCP App contract lifecycle.modes contains an unsupported mode");
+  }
+  const defaultMode = requiredSafeString(
+    lifecycle.default_production_mode,
+    "lifecycle.default_production_mode",
+  );
+  if (!normalized.includes(defaultMode)) {
+    throw usageError("MCP App contract lifecycle.default_production_mode must be a declared mode");
+  }
+  for (const field of ["configured_modes", "enabled_modes"]) {
+    const values = uniqueStringArray(lifecycle[field], `lifecycle.${field}`);
+    if (values.some((mode) => !normalized.includes(mode))) {
+      throw usageError(`MCP App contract lifecycle.${field} must contain declared modes`);
+    }
+  }
+  return normalized;
+}
+
+/** @param {unknown} value @param {string[]} modes */
+function validateVariables(value, modes) {
+  if (!isPlainObject(value) || Object.keys(value).length === 0) {
+    throw usageError("MCP App contract variables must be a non-empty object");
+  }
+  for (const [name, rawSpec] of Object.entries(value)) {
+    if (!ENVIRONMENT_NAME_PATTERN.test(name) || !isPlainObject(rawSpec)) {
+      throw usageError(`MCP App contract variables has an invalid ${name} definition`);
+    }
+    rejectUnknownKeys(rawSpec, VARIABLE_KEYS, "variable");
+    const hasRequired = Object.hasOwn(rawSpec, "required");
+    const hasRequiredIn = Object.hasOwn(rawSpec, "required_in");
+    if (hasRequired === hasRequiredIn) {
+      throw usageError(
+        `MCP App contract variable ${name} must declare exactly one of required or required_in`,
+      );
+    }
+    if (hasRequired && typeof rawSpec.required !== "boolean") {
+      throw usageError(`MCP App contract variable ${name}.required must be a boolean`);
+    }
+    if (hasRequiredIn) {
+      const requiredIn = uniqueStringArray(rawSpec.required_in, `variable ${name}.required_in`);
+      if (requiredIn.some((mode) => !modes.includes(mode))) {
+        throw usageError(`MCP App contract variable ${name}.required_in contains an unknown mode`);
+      }
+    }
+    if (rawSpec.format !== undefined && !VARIABLE_FORMATS.includes(String(rawSpec.format))) {
+      throw usageError(`MCP App contract variable ${name}.format is unsupported`);
+    }
+    if (
+      rawSpec.exact_path !== undefined &&
+      (typeof rawSpec.exact_path !== "string" || !ENDPOINT_PATH_PATTERN.test(rawSpec.exact_path))
+    ) {
+      throw usageError(`MCP App contract variable ${name}.exact_path is invalid`);
+    }
+    if (
+      rawSpec.same_origin_as !== undefined &&
+      (typeof rawSpec.same_origin_as !== "string" || !Object.hasOwn(value, rawSpec.same_origin_as))
+    ) {
+      throw usageError(`MCP App contract variable ${name}.same_origin_as is not declared`);
+    }
+    for (const field of ["max_bytes", "max_items"]) {
+      if (
+        rawSpec[field] !== undefined &&
+        (!Number.isInteger(rawSpec[field]) || Number(rawSpec[field]) <= 0)
+      ) {
+        throw usageError(`MCP App contract variable ${name}.${field} must be a positive integer`);
+      }
+    }
+    for (const field of ["initial_value", "allowed_values", "values", "default"]) {
+      if (rawSpec[field] !== undefined) {
+        validateStringOrArray(rawSpec[field], `variable ${name}.${field}`);
+      }
+    }
+    if (rawSpec["x-sensitive"] !== undefined && typeof rawSpec["x-sensitive"] !== "boolean") {
+      throw usageError(`MCP App contract variable ${name}.x-sensitive must be a boolean`);
+    }
+  }
+}
+
+/** @param {unknown} value */
+function validatePublicEndpoints(value) {
+  if (!isPlainObject(value) || Object.keys(value).length === 0) {
+    throw usageError("MCP App contract public_endpoints must be a non-empty object");
+  }
+  for (const [name, path] of Object.entries(value)) {
+    if (
+      !LOCAL_KEY_PATTERN.test(name) ||
+      typeof path !== "string" ||
+      !ENDPOINT_PATH_PATTERN.test(path)
+    ) {
+      throw usageError(`MCP App contract public_endpoints.${name} is invalid`);
+    }
+  }
+}
+
+/** @param {unknown} value @param {string[]} modes */
+function validateAvailability(value, modes) {
+  if (!isPlainObject(value)) {
+    throw usageError("MCP App contract availability must be an object");
+  }
+  for (const mode of modes) {
+    const probes = value[mode];
+    if (
+      !isPlainObject(probes) ||
+      Object.values(probes).some((probe) => typeof probe !== "boolean")
+    ) {
+      throw usageError(`MCP App contract availability.${mode} must be a boolean probe map`);
+    }
+  }
+  if (Object.keys(value).some((mode) => !modes.includes(mode))) {
+    throw usageError("MCP App contract availability contains an unknown mode");
+  }
+}
+
+/** @param {unknown} value */
+function validateLocalDevelopment(value) {
+  if (!isPlainObject(value) || Object.keys(value).length === 0) {
+    throw usageError("MCP App contract local_development must be a non-empty object");
+  }
+  for (const [name, raw] of Object.entries(value)) {
+    if (!LOCAL_KEY_PATTERN.test(name)) {
+      throw usageError(`MCP App contract local_development has an invalid key: ${name}`);
+    }
+    if (name.endsWith("_origin")) {
+      absoluteHttpOrigin(raw, `local_development.${name}`);
+    } else {
+      requiredSafeString(raw, `local_development.${name}`);
+    }
+  }
+}
+
+/** @param {unknown} value */
+function validateLocalLoopback(value) {
+  if (!isPlainObject(value) || Object.keys(value).length === 0) {
+    throw usageError("MCP App contract local_loopback must be a non-empty object");
+  }
+  for (const [name, raw] of Object.entries(value)) {
+    if (!LOCAL_KEY_PATTERN.test(name)) {
+      throw usageError(`MCP App contract local_loopback has an invalid key: ${name}`);
+    }
+    validateStringOrArray(raw, `local_loopback.${name}`);
+  }
+}
+
+/** @param {unknown} value @returns {Record<string, unknown> | null} */
+function validateProvider(value) {
+  if (value === undefined) {
+    return null;
+  }
+  if (!isPlainObject(value)) {
+    throw usageError("MCP App contract provider must be an object");
+  }
+  rejectUnknownKeys(value, ["name", "environment_prefix", "environment_file"], "provider");
+  const name = requiredSafeString(value.name, "provider.name");
+  if (!PROVIDER_NAME_PATTERN.test(name)) {
+    throw usageError("MCP App contract provider.name must be a lowercase kebab-case name");
+  }
+  const prefix = requiredSafeString(value.environment_prefix, "provider.environment_prefix");
+  if (!ENVIRONMENT_NAME_PATTERN.test(prefix)) {
+    throw usageError("MCP App contract provider.environment_prefix is invalid");
+  }
+  safeRelativePath(value.environment_file, "provider.environment_file");
+  return value;
+}
+
+/** @param {unknown} value @param {Record<string, unknown> | null} provider */
+function validateEnvironmentLoading(value, provider) {
+  if (value === undefined) {
+    return;
+  }
+  if (!isPlainObject(value)) {
+    throw usageError("MCP App contract environment_loading must be an object");
+  }
+  rejectUnknownKeys(value, ["mechanism", "loader", "loads"], "environment_loading");
+  requiredSafeString(value.mechanism, "environment_loading.mechanism");
+  safeRelativePath(value.loader, "environment_loading.loader");
+  const loads = safeRelativePath(value.loads, "environment_loading.loads");
+  if (provider && loads !== provider.environment_file) {
+    throw usageError(
+      "MCP App contract environment_loading.loads must match provider.environment_file",
+    );
+  }
+}
+
+/** @param {unknown} value @param {string[]} modes */
+function validateModeGateResponses(value, modes) {
+  if (value === undefined) {
+    return;
+  }
+  if (!isPlainObject(value)) {
+    throw usageError("MCP App contract mode_gate_responses must be an object");
+  }
+  for (const [mode, rawProbes] of Object.entries(value)) {
+    if (!modes.includes(mode) || !isPlainObject(rawProbes)) {
+      throw usageError(`MCP App contract mode_gate_responses.${mode} is invalid`);
+    }
+    for (const [probe, rawResponse] of Object.entries(rawProbes)) {
+      if (!LOCAL_KEY_PATTERN.test(probe) || !isPlainObject(rawResponse)) {
+        throw usageError(`MCP App contract mode_gate_responses.${mode}.${probe} is invalid`);
+      }
+      const availableOnly =
+        Object.keys(rawResponse).length === 1 && typeof rawResponse.available === "boolean";
+      const statusError =
+        Object.keys(rawResponse).every((key) => key === "status" || key === "error") &&
+        Number.isInteger(rawResponse.status) &&
+        Number(rawResponse.status) >= 100 &&
+        Number(rawResponse.status) <= 599 &&
+        (rawResponse.error === undefined ||
+          (typeof rawResponse.error === "string" && safeString(rawResponse.error)));
+      if (!availableOnly && !statusError) {
+        throw usageError(`MCP App contract mode_gate_responses.${mode}.${probe} is invalid`);
+      }
+    }
+  }
+}
+
+/** @param {unknown} value @param {string} label */
+function validateStringMap(value, label) {
+  if (value === undefined) {
+    return;
+  }
+  if (!isPlainObject(value) || Object.keys(value).length === 0) {
+    throw usageError(`MCP App contract ${label} must be a non-empty object`);
+  }
+  for (const [name, raw] of Object.entries(value)) {
+    if (!LOCAL_KEY_PATTERN.test(name)) {
+      throw usageError(`MCP App contract ${label} has an invalid key: ${name}`);
+    }
+    requiredSafeString(raw, `${label}.${name}`);
+  }
+}
+
+/** @returns {string} */
+export function bundledTamaContractPath() {
+  return fileURLToPath(new URL("./contracts/mcp-app-bootstrap-v1.json", import.meta.url));
+}
+
+/**
+ * Loads the Tama-side runtime contract bundled with Tama Kit. The contract
+ * describes the Tama environment variables, lifecycle modes, public
+ * endpoints, and local development topology that Tama Kit provisions.
+ *
+ * @returns {Record<string, unknown>}
+ */
+export function loadTamaContract() {
+  const path = bundledTamaContractPath();
+  let document;
+  try {
+    document = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw usageError(`cannot read the bundled Tama MCP App contract ${path}: ${message}`);
+  }
+  return validateMcpAppContract(document);
+}
+
+/**
+ * Checks a Tama image tag against the contract's `supported_tama_versions`
+ * range. The check is best-effort by design: non-semver tags such as
+ * `latest` cannot be resolved offline, so they pass with no warning.
+ *
+ * @param {string} image
+ * @param {unknown} supportedRange
+ * @returns {string | null} a reason when the tag is provably outside the
+ *   range, otherwise null
+ */
+export function unsupportedTamaImage(image, supportedRange) {
+  if (typeof supportedRange !== "string" || supportedRange.length === 0) {
+    return null;
+  }
+  const tag = image.slice(image.lastIndexOf(":") + 1);
+  const version = parseSemver(tag);
+  if (!version) {
+    return null;
+  }
+  const constraints = supportedRange.matchAll(
+    /(>=|<=|>|<|=)\s*v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)/gu,
+  );
+  for (const match of constraints) {
+    const bound = parseSemver(match[2]);
+    if (!bound) {
+      continue;
+    }
+    const comparison = compareSemver(version, bound);
+    const ok =
+      match[1] === ">="
+        ? comparison >= 0
+        : match[1] === "<="
+          ? comparison <= 0
+          : match[1] === ">"
+            ? comparison > 0
+            : match[1] === "<"
+              ? comparison < 0
+              : comparison === 0;
+    if (!ok) {
+      return `Tama image tag ${tag} is outside the supported Tama range ${supportedRange}`;
+    }
+  }
+  return null;
+}
+
+/** @param {string} value @returns {[number, number, number] | null} */
+function parseSemver(value) {
+  const match = value.match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?$/u);
+  if (!match) {
+    return null;
+  }
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+/** @param {[number, number, number]} left @param {[number, number, number]} right */
+function compareSemver(left, right) {
+  for (let index = 0; index < 3; index += 1) {
+    if (left[index] !== right[index]) {
+      return left[index] < right[index] ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Structurally validates a contract document against the versioned MCP App
+ * bootstrap schema: the schema version, compatibility identifier, and
+ * lifecycle modes must be present and supported.
+ *
+ * @param {unknown} document
+ * @returns {Record<string, unknown>}
+ */
+export function validateMcpAppContract(document) {
+  if (!isPlainObject(document)) {
+    throw usageError("MCP App contract must be a JSON object");
+  }
+  if (document.schema_version !== "1") {
+    throw usageError(
+      `unsupported MCP App contract schema_version: ${String(document.schema_version)}`,
+    );
+  }
+  if (document.compatibility_identifier !== MCP_APP_COMPATIBILITY_IDENTIFIER) {
+    throw usageError(
+      `unsupported MCP App contract compatibility_identifier: ${String(
+        document.compatibility_identifier,
+      )}`,
+    );
+  }
+  const lifecycle = isPlainObject(document.lifecycle) ? document.lifecycle : null;
+  if (!lifecycle) {
+    throw usageError(
+      "MCP App contract lifecycle.modes must include disabled, prepared, and enabled",
+    );
+  }
+  const modes = validateLifecycle(lifecycle);
+  const unknownTopLevel = Object.keys(document).filter(
+    (key) => !TOP_LEVEL_KEYS.includes(key) && !key.startsWith("supported_"),
+  );
+  if (unknownTopLevel.length > 0) {
+    throw usageError(
+      `MCP App contract contains unsupported top-level keys: ${unknownTopLevel.join(", ")}`,
+    );
+  }
+  for (const [key, value] of Object.entries(document)) {
+    if (key.startsWith("supported_")) {
+      requiredSafeString(value, key);
+    }
+  }
+  validateVariables(document.variables, modes);
+  validatePublicEndpoints(document.public_endpoints);
+  validateAvailability(document.availability, modes);
+  validateLocalDevelopment(document.local_development);
+  validateLocalLoopback(document.local_loopback);
+  const provider = validateProvider(document.provider);
+  validateEnvironmentLoading(document.environment_loading, provider);
+  validateStringMap(document.cache_policy, "cache_policy");
+  validateModeGateResponses(document.mode_gate_responses, modes);
+  if (document.bindings !== undefined) {
+    resolveBindings(
+      document,
+      typeof provider?.environment_prefix === "string" ? provider.environment_prefix : "PROVIDER",
+    );
+  }
+  return document;
+}
+
+/** @param {string} path @returns {Record<string, unknown>} */
+function parseContract(path) {
+  let metadata;
+  try {
+    metadata = lstatSync(path);
+  } catch {
+    throw usageError(`provider MCP App contract does not exist: ${path}`);
+  }
+  if (metadata.isSymbolicLink() || !metadata.isFile()) {
+    throw usageError(`provider MCP App contract does not exist: ${path}`);
+  }
+  if (metadata.size > MAX_CONTRACT_BYTES) {
+    throw usageError(`provider MCP App contract is too large: ${path}`);
+  }
+  const content = safeRead(path);
+  if (content === null) {
+    throw usageError(`provider MCP App contract does not exist: ${path}`);
+  }
+  let document;
+  try {
+    document = JSON.parse(content);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw usageError(`cannot parse provider MCP App contract ${path}: ${message}`);
+  }
+  return validateMcpAppContract(document);
+}
+
+/**
+ * Locates and loads the provider contract. An explicit path wins; otherwise
+ * the `priv/contracts/` directory is scanned for JSON documents whose
+ * `compatibility_identifier` matches the supported allow-list. Exactly one
+ * match is used; zero matches fall back to conventional binding derivation;
+ * multiple matches fail with a message requesting the explicit flag.
+ *
+ * @param {string} root
+ * @param {string | undefined} explicitPath
+ * @returns {{path: string | null, document: Record<string, unknown> | null}}
+ */
+export function discoverProviderContract(root, explicitPath) {
+  if (explicitPath) {
+    const path = isAbsolute(explicitPath) ? explicitPath : resolve(root, explicitPath);
+    return { path, document: parseContract(path) };
+  }
+  const directory = join(root, "priv", "contracts");
+  if (!existsSync(directory) || lstatSync(directory).isSymbolicLink()) {
+    return { path: null, document: null };
+  }
+  let entries;
+  try {
+    entries = readdirSync(directory);
+  } catch {
+    return { path: null, document: null };
+  }
+  const matches = [];
+  for (const entry of entries.sort()) {
+    if (!entry.toLowerCase().endsWith(".json")) {
+      continue;
+    }
+    const path = join(directory, entry);
+    let metadata;
+    try {
+      metadata = lstatSync(path);
+    } catch {
+      continue;
+    }
+    if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.size > MAX_CONTRACT_BYTES) {
+      continue;
+    }
+    const content = safeRead(path);
+    if (content === null) {
+      continue;
+    }
+    let document;
+    try {
+      document = JSON.parse(content);
+    } catch {
+      continue;
+    }
+    if (
+      isPlainObject(document) &&
+      document.compatibility_identifier === MCP_APP_COMPATIBILITY_IDENTIFIER
+    ) {
+      matches.push({ path, document });
+    }
+  }
+  if (matches.length === 0) {
+    return { path: null, document: null };
+  }
+  if (matches.length > 1) {
+    throw usageError(
+      `multiple MCP App contracts were found in ${directory}: ${matches
+        .map((entry) => entry.path)
+        .join(", ")}. Pass --mcp-app-contract to select one`,
+    );
+  }
+  const [selected] = matches;
+  return { path: selected.path, document: validateMcpAppContract(selected.document) };
+}
+
+/**
+ * Resolves the semantic role bindings. A contract with an explicit
+ * `bindings` map supplies the variable names; otherwise the conventional
+ * `<PREFIX>_<SUFFIX>` table derives them from the environment prefix.
+ *
+ * @param {Record<string, unknown> | null} contractDocument
+ * @param {string} environmentPrefix
+ * @returns {ProviderBindings}
+ */
+export function resolveBindings(contractDocument, environmentPrefix) {
+  const bindings = isPlainObject(contractDocument?.bindings)
+    ? /** @type {Record<string, unknown>} */ (contractDocument.bindings)
+    : null;
+  if (bindings) {
+    const unexpected = Object.keys(bindings).filter((role) => !MCP_APP_ROLES.includes(role));
+    if (unexpected.length > 0) {
+      throw usageError(
+        `provider MCP App contract bindings contains unsupported roles: ${unexpected.join(", ")}`,
+      );
+    }
+    const roles = /** @type {Record<string, string>} */ ({});
+    const used = new Map();
+    for (const role of MCP_APP_ROLES) {
+      const value = bindings[role];
+      if (typeof value !== "string" || !ENVIRONMENT_NAME_PATTERN.test(value)) {
+        throw usageError(`provider MCP App contract bindings is missing the "${role}" role`);
+      }
+      const previousRole = used.get(value);
+      if (previousRole) {
+        throw usageError(
+          `provider MCP App contract bindings maps both "${previousRole}" and "${role}" to ${value}`,
+        );
+      }
+      used.set(value, role);
+      roles[role] = value;
+    }
+    return { source: "contract", roles };
+  }
+  const roles = /** @type {Record<string, string>} */ ({});
+  for (const [role, suffix] of Object.entries(CONVENTIONAL_ROLE_SUFFIX)) {
+    roles[role] = `${environmentPrefix}_${suffix}`;
+  }
+  return { source: "conventional", roles };
+}
+
+/**
+ * Determines whether the provider fragment is loaded by an application-owned
+ * mechanism that Tama Kit can safely confirm. A contract that declares
+ * `environment_loading` is authoritative; otherwise a direnv fragment or a
+ * Compose `env_file` entry that references the fragment verifies it. When no
+ * loader can be confirmed the integration is reported unverified rather than
+ * failing, because the application owns its loader.
+ *
+ * @param {string} root
+ * @param {string} environmentFile
+ * @param {Record<string, unknown> | null} contractDocument
+ * @returns {"verified" | "unverified"}
+ */
+export function verifyEnvironmentLoading(root, environmentFile, contractDocument) {
+  if (contractDocument && isPlainObject(contractDocument.environment_loading)) {
+    if (typeof contractDocument.environment_loading.loads === "string") {
+      return contractDocument.environment_loading.loads === environmentFile
+        ? "verified"
+        : "unverified";
+    }
+  }
+  const envrc = safeRead(join(root, ".envrc"));
+  if (envrc?.includes(environmentFile)) {
+    return "verified";
+  }
+  for (const composeName of [
+    "compose.yaml",
+    "compose.yml",
+    "docker-compose.yaml",
+    "docker-compose.yml",
+  ]) {
+    const compose = safeRead(join(root, composeName));
+    if (compose?.includes(environmentFile)) {
+      return "verified";
+    }
+  }
+  return "unverified";
+}
+
+/**
+ * Reads an optional local development origin declared by the provider
+ * contract, keyed by `<provider>_origin`. This keeps provider-specific
+ * defaults inside the provider contract instead of Tama Kit.
+ *
+ * @param {Record<string, unknown> | null} contractDocument
+ * @param {string} providerName
+ * @returns {string | null}
+ */
+export function contractLocalOrigin(contractDocument, providerName) {
+  const local = isPlainObject(contractDocument?.local_development)
+    ? /** @type {Record<string, unknown>} */ (contractDocument.local_development)
+    : null;
+  const value = local?.[`${providerName}_origin`];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}

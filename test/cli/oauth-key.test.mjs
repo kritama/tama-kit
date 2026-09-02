@@ -12,7 +12,9 @@ import {
   generateOAuthPrivateJwk,
   OAUTH_JWK_MAX_ENCODED_BYTES,
   OAUTH_JWK_MODULUS_BITS,
+  OAUTH_JWK_PUBLIC_SET_MAX_ITEMS,
   validateOAuthPrivateJwk,
+  validatePublicJwkSet,
 } from "../../cli/bootstrap/oauth-key.mjs";
 import { CLIError, EXIT_CODES } from "../../cli/errors.mjs";
 
@@ -372,4 +374,41 @@ test("validation rejects a foreign public pair combined with valid private param
     kid: configuredKid,
   };
   expectInvalid(JSON.stringify(mixed), configuredKid);
+});
+
+test("validatePublicJwkSet accepts public-only RSA members with compatible metadata", () => {
+  validatePublicJwkSet("[]", "TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS");
+
+  const keyA = { ...rsaPublicJwk(rsaPrivateKeyObject()), alg: "RS256", kid: "key-a", use: "sig" };
+  const keyB = { ...rsaPublicJwk(rsaPrivateKeyObject()), kid: "key-b" };
+  const keyC = { ...rsaPublicJwk(rsaPrivateKeyObject()), alg: null, use: null, kid: "key-c" };
+  validatePublicJwkSet(JSON.stringify([keyA, keyB, keyC]), "MEMOVEE_OAUTH_PUBLIC_SIGNING_KEYS");
+});
+
+test("validatePublicJwkSet rejects private, non-RSA, duplicate, and oversized members", () => {
+  const key = { ...rsaPublicJwk(rsaPrivateKeyObject()), alg: "RS256", kid: "key-a", use: "sig" };
+  const expectInvalidSet = (encoded) =>
+    assert.throws(
+      () => validatePublicJwkSet(encoded, "MEMOVEE_OAUTH_PUBLIC_SIGNING_KEYS"),
+      (error) =>
+        error instanceof CLIError &&
+        error.exitCode === EXIT_CODES.OWNERSHIP &&
+        /MEMOVEE_OAUTH_PUBLIC_SIGNING_KEYS/u.test(error.message) &&
+        error.message.includes(key.n) === false,
+    );
+
+  expectInvalidSet("not-json");
+  expectInvalidSet(JSON.stringify(key));
+  expectInvalidSet(JSON.stringify([{ ...key, d: "AQ" }]));
+  expectInvalidSet(JSON.stringify([{ ...key, kty: "EC" }]));
+  expectInvalidSet(JSON.stringify([{ ...key, alg: "HS256" }]));
+  expectInvalidSet(JSON.stringify([{ ...key, use: "enc" }]));
+  expectInvalidSet(JSON.stringify([{ ...key, kid: null }]));
+  expectInvalidSet(JSON.stringify([{ ...key, kid: `key-${"x".repeat(128)}` }]));
+  expectInvalidSet(JSON.stringify([{ ...key, n: "!!" }]));
+  expectInvalidSet(JSON.stringify([{ ...key }, { ...key }]));
+  expectInvalidSet(JSON.stringify([{ ...key, padding: "x".repeat(OAUTH_JWK_MAX_ENCODED_BYTES) }]));
+  expectInvalidSet(
+    JSON.stringify(Array.from({ length: OAUTH_JWK_PUBLIC_SET_MAX_ITEMS + 1 }, () => key)),
+  );
 });

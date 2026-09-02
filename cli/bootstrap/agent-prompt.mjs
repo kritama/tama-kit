@@ -12,6 +12,14 @@ export function formatAgentSetupPrompt(plan, { setupUrl } = {}) {
   const composeFile = relative(plan.root, plan.composeFile);
   const composeUp = formatComposeUpCommand(composeFile);
   const composePs = formatComposePsCommand(composeFile);
+  const mcpAppGuidance = plan.mcpApp
+    ? [
+        "",
+        `This repository also has an MCP App provider integration for ${plan.mcpApp.provider.name}. Treat ${plan.mcpApp.provider.environmentFile} and .tama.env as private; never print their values.`,
+        `Use the exact provider issuer ${plan.mcpApp.providerOrigin} and Tama resource ${plan.mcpApp.resource}; do not substitute localhost, 127.0.0.1, or ::1 for one another.`,
+        "Do not activate or restart the host-native provider on my behalf. If activation is requested, verify the prepared checkpoint first, enable and restart Tama through bootstrap, then give me the provider-owned mode change and restart step.",
+      ]
+    : [];
 
   return [
     "Finish setting up the local Tama runtime and Terraform root in this repository.",
@@ -27,6 +35,7 @@ export function formatAgentSetupPrompt(plan, { setupUrl } = {}) {
     "Do not ask me to paste credentials into chat. Have me store TAMA_CLIENT_ID and TAMA_CLIENT_SECRET directly in .tama.env, then wait for me to confirm that step is complete.",
     "4. After I confirm, load .tama.env without echoing its values, then run `terraform -chdir=tama init`, `terraform -chdir=tama fmt -check -recursive`, `terraform -chdir=tama validate`, and `terraform -chdir=tama plan`.",
     "5. Summarize the Terraform plan, including any create, update, replace, or destroy actions and any unresolved errors.",
+    ...mcpAppGuidance,
     "",
     "Do not run terraform apply until I explicitly approve it after seeing the plan. If I approve, apply it, verify the result, and report the local Tama URL plus any remaining setup steps. Stop and ask for my input only when the interactive browser setup or apply approval is required.",
   ].join("\n");

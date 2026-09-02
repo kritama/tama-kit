@@ -1,13 +1,16 @@
 // @ts-check
 
 import { join, relative } from "node:path";
+import { usageError } from "../errors.mjs";
 import { planRootCompose } from "./compose.mjs";
 import { formatComposePsCommand, formatComposeUpCommand } from "./compose-command.mjs";
 import { BOOTSTRAP_SCHEMA_VERSION, DEFAULTS } from "./constants.mjs";
 import { inspectProject } from "./detect-project.mjs";
-import { planEnvironment } from "./environment.mjs";
+import { planEnvironment, resolveEnvironmentPort } from "./environment.mjs";
 import { planGitignore, validateSecretFilesUntracked } from "./gitignore.mjs";
 import { createManagedFilePlanner } from "./manifest.mjs";
+import { planMcpApp, resolveMcpAppState } from "./mcp-app.mjs";
+import { MCP_APP_COMPATIBILITY_IDENTIFIER } from "./mcp-app-contract.mjs";
 import { planAgentSkills } from "./skills.mjs";
 import { renderTemplate } from "./templates.mjs";
 import { planTerraform } from "./terraform.mjs";
@@ -15,7 +18,48 @@ import { planTerraform } from "./terraform.mjs";
 /** @typedef {import("../types.mjs").BootstrapPlan} BootstrapPlan */
 /** @typedef {import("../types.mjs").BootstrapPlanOptions} BootstrapPlanOptions */
 /** @typedef {import("../types.mjs").FileOperation} FileOperation */
+/** @typedef {import("../types.mjs").McpAppPlan} McpAppPlan */
+/** @typedef {import("../types.mjs").PersistedMcpAppProvider} PersistedMcpAppProvider */
 /** @typedef {import("../types.mjs").PublicBootstrapPlan} PublicBootstrapPlan */
+
+const TAMA_EXTRA_HOSTS_BLOCK = "    extra_hosts:\n      - host.docker.internal:host-gateway\n";
+
+/** @param {McpAppPlan | null} mcpApp */
+function mcpAppExample(mcpApp) {
+  if (!mcpApp) {
+    return "";
+  }
+  return [
+    "",
+    "# MCP App public configuration. Private JWK material is intentionally omitted.",
+    `TAMA_MCP_APP_MODE=${mcpApp.lifecycle}`,
+    `TAMA_MCP_APP_RESOURCE=${mcpApp.resource}`,
+    `TAMA_MCP_APP_AUTHORIZATION_SERVER=${mcpApp.providerOrigin}`,
+    `TAMA_MCP_APP_JWKS_URI=${mcpApp.providerOrigin}/.well-known/jwks.json`,
+    `TAMA_MCP_APP_INTROSPECTION_ENDPOINT=${mcpApp.providerOrigin}/auth/introspections`,
+    "TAMA_MCP_APP_INTROSPECTION_SIGNING_ALGORITHM=RS256",
+    "TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS=[]",
+    `TAMA_MCP_APP_INTROSPECTION_CLIENT_ID=${mcpApp.introspectionClientId}`,
+    `TAMA_MCP_APP_ALLOWED_ORIGINS=${mcpApp.allowedOrigins.join(",")}`,
+  ].join("\n");
+}
+
+/** @param {McpAppPlan | null} mcpApp */
+function mcpAppReadmeGuidance(mcpApp) {
+  if (!mcpApp) {
+    return "";
+  }
+  return [
+    "",
+    "## MCP App provider integration",
+    "",
+    `The provider fragment \`${mcpApp.provider.environmentFile}\` and \`.tama.env\` contain private signing material. Keep both files untracked and never paste their values into chat or logs.`,
+    "",
+    `The exact provider issuer is \`${mcpApp.providerOrigin}\`; the exact Tama resource is \`${mcpApp.resource}\`. Browser/MCP clients are limited to: ${mcpApp.allowedOrigins.map((origin) => `\`${origin}\``).join(", ")}.`,
+    "",
+    "Activation is staged. Run bootstrap with `--start --activate` to verify prepared state and enable Tama. Tama Kit does not restart the host-native provider: set the provider mode variable to `enabled`, restart the provider, then rerun the same command. An enabled checkpoint is reported only after both live services pass verification.",
+  ].join("\n");
+}
 
 /**
  * @param {(filename: string, content: string) => FileOperation} planManagedFile
@@ -32,28 +76,89 @@ function managedTemplate(planManagedFile, filename, templateName, replacements) 
 export function createBootstrapPlan(options) {
   const inspection = inspectProject(options);
   const skillMode = options.skillMode ?? "manual";
-  validateSecretFilesUntracked(inspection.root);
+  const mcpAppPrepared = options.mcpApp?.requested ? (options.mcpAppPrepared ?? null) : null;
+  if (options.mcpApp?.requested && mcpAppPrepared === null) {
+    throw usageError(
+      "internal error: the MCP App provider identity must be prepared before planning",
+    );
+  }
+  validateSecretFilesUntracked(inspection.root, [
+    ".tama.env",
+    ".tama.postgres.env",
+    ...(mcpAppPrepared ? [mcpAppPrepared.identity.environmentFile] : []),
+    ...(mcpAppPrepared?.persisted &&
+    mcpAppPrepared.persisted.identity.environmentFile !== mcpAppPrepared.identity.environmentFile
+      ? [mcpAppPrepared.persisted.identity.environmentFile]
+      : []),
+  ]);
+  const mcpAppState = mcpAppPrepared
+    ? resolveMcpAppState({
+        root: inspection.root,
+        identity: mcpAppPrepared.identity,
+        contractPath: mcpAppPrepared.contractPath,
+        contractDocument: mcpAppPrepared.contractDocument,
+      })
+    : null;
+  const port = resolveEnvironmentPort(inspection.root, options.port);
   const managedFiles = createManagedFilePlanner(
     inspection.root,
     inspection.tamaDirectory,
     skillMode,
+    mcpAppState,
   );
-  const environment = planEnvironment(inspection.root, options.port);
+  /** @type {McpAppPlan | null} */
+  let mcpApp = null;
+  /** @type {import("../types.mjs").McpAppEnvironmentInput | null} */
+  let mcpAppEnvironment = null;
+  if (mcpAppPrepared && mcpAppState && options.mcpApp) {
+    const result = planMcpApp({
+      root: inspection.root,
+      options: options.mcpApp,
+      identity: mcpAppPrepared.identity,
+      state: mcpAppState,
+      persisted: mcpAppPrepared.persisted,
+      contractDocument: mcpAppPrepared.contractDocument,
+      port,
+      tamaImage: options.image ?? DEFAULTS.tamaImage,
+      manageFile: managedFiles.plan,
+      removeManagedFile: managedFiles.remove,
+      materializeKeys: options.materializeSecrets ?? true,
+    });
+    mcpApp = result.plan;
+    mcpAppEnvironment = result.environmentInput;
+  }
+  const environment = planEnvironment(
+    inspection.root,
+    options.port,
+    mcpAppEnvironment ?? undefined,
+    options.materializeSecrets ?? true,
+  );
+  const providerUsesHostGateway = (() => {
+    if (!mcpApp) {
+      return false;
+    }
+    return new URL(mcpApp.providerOrigin).hostname === "host.docker.internal";
+  })();
   const replacements = {
     PORT: environment.port,
     CONTAINER_PORT: DEFAULTS.containerPort,
     TAMA_IMAGE: options.image ?? DEFAULTS.tamaImage,
     POSTGRES_IMAGE: DEFAULTS.postgresImage,
+    TAMA_EXTRA_HOSTS: providerUsesHostGateway ? TAMA_EXTRA_HOSTS_BLOCK : "",
   };
 
   /** @type {FileOperation[]} */
-  const operations = [environment.operation, environment.postgresOperation];
+  const operations = [
+    ...planGitignore(inspection.root, mcpApp?.provider.environmentFile ?? null),
+    environment.operation,
+    environment.postgresOperation,
+  ];
   operations.push(
     managedTemplate(
       managedFiles.plan,
       join(inspection.root, ".tama.env.example"),
       "tama-env.example",
-      { PORT: environment.port },
+      { PORT: environment.port, MCP_APP_EXAMPLE: mcpAppExample(mcpApp) },
     ),
   );
   operations.push(
@@ -71,7 +176,9 @@ export function createBootstrapPlan(options) {
       renderTemplate("root-compose.yaml"),
     ),
   );
-  operations.push(...planGitignore(inspection.root));
+  if (mcpApp) {
+    operations.push(...mcpApp.operations);
+  }
 
   /** @type {Array<[string, string, Record<string, string | number>]>} */
   const knownTerraformTemplates = [
@@ -112,6 +219,7 @@ export function createBootstrapPlan(options) {
       PORT: environment.port,
       COMPOSE_UP_COMMAND: formatComposeUpCommand(projectComposePath),
       COMPOSE_PS_COMMAND: formatComposePsCommand(projectComposePath),
+      MCP_APP_GUIDANCE: mcpAppReadmeGuidance(mcpApp),
     }),
   );
   operations.push(
@@ -143,6 +251,8 @@ export function createBootstrapPlan(options) {
       globalModuleVersion: terraform.globalModuleVersion,
     },
     operations,
+    mcpApp,
+    mcpAppVerification: null,
   };
 }
 
@@ -170,5 +280,41 @@ export function publicPlan(plan) {
         reason,
       }),
     ),
+    provider: plan.mcpApp
+      ? {
+          name: plan.mcpApp.provider.name,
+          environmentPrefix: plan.mcpApp.provider.environmentPrefix,
+          environmentFile: plan.mcpApp.provider.environmentFile,
+          identitySource: plan.mcpApp.provider.source,
+          contractPath: plan.mcpApp.contractPath,
+          mode: plan.mcpApp.providerLifecycle,
+          modeVariable: plan.mcpApp.bindings.roles.mode,
+          environmentLoading: plan.mcpApp.environmentLoading,
+        }
+      : null,
+    mcpApp: plan.mcpApp
+      ? {
+          compatibilityIdentifier: MCP_APP_COMPATIBILITY_IDENTIFIER,
+          mode: plan.mcpApp.lifecycle,
+          providerOrigin: plan.mcpApp.providerOrigin,
+          tamaOrigin: plan.mcpApp.tamaOrigin,
+          resource: plan.mcpApp.resource,
+          allowedOrigins: plan.mcpApp.allowedOrigins,
+          jwksUri: `${plan.mcpApp.providerOrigin}/.well-known/jwks.json`,
+          introspectionEndpoint: `${plan.mcpApp.providerOrigin}/auth/introspections`,
+          introspectionClientId: plan.mcpApp.introspectionClientId,
+          providerSigningKeyId: plan.mcpApp.providerSigningKeyId,
+          introspectionSigningKeyId: plan.mcpApp.introspectionSigningKeyId,
+          environmentLoading: plan.mcpApp.environmentLoading,
+          activated:
+            plan.mcpApp.lifecycle === "enabled" && plan.mcpApp.providerLifecycle === "enabled",
+          providerActivationRequired:
+            plan.mcpApp.lifecycle === "enabled" && plan.mcpApp.providerLifecycle !== "enabled",
+          providerReachable: plan.mcpAppVerification?.providerReachable ?? false,
+          tamaReachable: plan.mcpAppVerification?.tamaReachable ?? false,
+          verified: plan.mcpAppVerification?.verified ?? false,
+          probes: plan.mcpAppVerification?.probes ?? [],
+        }
+      : null,
   };
 }

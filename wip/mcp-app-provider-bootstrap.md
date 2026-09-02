@@ -411,6 +411,9 @@ The current Tama contract binds the provider JWKS and introspection endpoints
 to the authorization-server origin. Before implementing host-native provider
 support, choose and test one of these runtime contracts:
 
+Resolved (review-01, 2026-09-02): option 2, the single shared origin. See the
+Resolutions (review-01, 2026-09-02) section below.
+
 1. Introduce an explicit local transport-origin override. Tama fetches JWKS and
    introspection over the transport origin while validating tokens and metadata
    against the public issuer.
@@ -630,6 +633,160 @@ does not delegate production deployment to Tama Kit.
 - Update or retire Memovee CLI source-development WIP commands.
 - Document how a new provider publishes a compatible contract.
 
+## Implementation plan
+
+This section expands the phases above with file-level work items. All
+implementation stays on the existing inspect-plan-write path
+(`cli/bootstrap/*`, `cli/commands/bootstrap.mjs`); no new generator is
+introduced and `tama-kit dev setup` remains out of scope.
+
+### Phase 1 detail: contract and ownership revision
+
+- `cli/bootstrap/mcp-app-contract.mjs` (new): `loadMcpAppContract(root,
+  flagPath)`.
+  - Explicit `--mcp-app-contract <path>` wins over discovery.
+  - Discovery scans `<root>/priv/contracts/` for JSON documents whose
+    `compatibility_identifier` is in a constant allow-list
+    (`tama-mcp-app-bootstrap-v1`). Zero matches use the conventional
+    fallback below; multiple matches fail with a message requesting the
+    flag.
+  - Structural validation: `schema_version`, lifecycle mode sets,
+    `variables` formats, `exact_path` values, optional `provider` identity
+    block, `bindings`, `endpoints`, and `environment_loading`.
+- `cli/bootstrap/contracts/mcp-app-bootstrap-v1.json` (new, bundled with
+  Tama Kit): the Tama-side runtime contract, copied from the Tama source
+  repository. `supported_tama_versions` is checked at plan time so the CLI
+  stays offline and testable.
+- Contract resolution lives in `resolveBindings(source)` in
+  `mcp-app-contract.mjs`:
+  - Source is a contract: use declared `bindings`; roles the contract omits
+    derive conventionally from `provider.environment_prefix`.
+  - Source is conventional (no contract): derive all nine roles from the
+    resolved prefix:
+
+    ```text
+    <PREFIX>_TAMA_MCP_APP_MODE
+    <PREFIX>_OAUTH_ISSUER
+    <PREFIX>_TAMA_MCP_APP_RESOURCE
+    <PREFIX>_OAUTH_SIGNING_ALGORITHM
+    <PREFIX>_OAUTH_SIGNING_KEY_ID
+    <PREFIX>_OAUTH_PRIVATE_SIGNING_KEY
+    <PREFIX>_OAUTH_PUBLIC_SIGNING_KEYS
+    <PREFIX>_TAMA_INTROSPECTION_CLIENT_ID
+    <PREFIX>_TAMA_INTROSPECTION_JWKS_URI
+    ```
+
+    The fragment path derives as `.<providerName>.integration.env` and the
+    loader as the conventional shell fragment.
+  - The exact resolved bindings are persisted in the managed manifest on
+    first write and reported in the plan and result. A contract committed
+    later must match the persisted bindings or planning fails; manifest
+    precedence prevents silent renaming under an existing fragment.
+- Loader verification: a contract's `environment_loading` declaration is
+  authoritative. In conventional mode Tama Kit statically checks that the
+  fragment filename is referenced (for example `.envrc`, shell rc, or a
+  Compose `env_file` entry). When it cannot confirm loading, the plan sets
+  `environmentLoading: "unverified"`, prints a warning, and continues; this
+  is never a hard failure.
+- Enrich Memovee's committed contract in place with the `provider` identity
+  block, `environment_loading`, and explicit `bindings`, without weakening
+  its runtime parser. This is a tracked cross-repository change.
+- Public versus transport origin: no new environment variable is invented.
+  Only when `--provider-transport-origin` differs from the public origin
+  does the Tama service environment rewrite `TAMA_MCP_APP_AUTHORIZATION_SERVER`,
+  `TAMA_MCP_APP_JWKS_URI`, and `TAMA_MCP_APP_INTROSPECTION_ENDPOINT` to the
+  transport origin, preserving the same-origin and exact-path invariants.
+  Issuer validation always uses the public origin.
+
+### Phase 2 detail: provider identity
+
+- `cli/bootstrap/provider-identity.mjs` (new):
+  `detectProviderIdentity({ manifest, contract, flags, root })` with
+  precedence: persisted manifest, contract `provider` block, explicit flags,
+  static framework metadata, Git remote, directory name.
+- Static readers perform bounded file reads only, never executing provider
+  code: Phoenix `:app` from `mix.exs` (regex), Rails module from
+  `config/application.rb`, Node `package.json#name`, Git remote repository
+  name, directory basename.
+- `normalizeProviderName` (lowercase ASCII slug) and
+  `normalizeEnvironmentPrefix` (`A-Z0-9_`, letter start, at most 24
+  characters), plus reserved-prefix and collision checks against existing
+  environment files.
+- `cli/bootstrap/manifest.mjs`: persist and read an optional
+  `mcpAppProvider` key (`name`, `environmentPrefix`, `environmentFile`,
+  `bindings`, `environmentLoading`) beside `agentSkills`. `schemaVersion`
+  stays `1`: the planner rejects unknown schema versions, so an optional key
+  is safe for old readers (ignored) and new readers (tolerates absence).
+- `cli/commands/bootstrap.mjs`: add `--mcp-app`, `--mcp-app-contract`,
+  `--provider-name`, `--provider-prefix`, `--provider-origin`,
+  `--provider-transport-origin`, repeatable `--allowed-origin`, and
+  `--activate`. Interactive confirmation covers origins the user did not
+  state explicitly; non-interactive runs fail on ambiguity.
+- `cli/types.mjs`: `ProviderIdentity`, `McpAppProviderContract`,
+  `McpAppPlan`, and the result-envelope `provider` / `mcpApp` blocks.
+- Identity migration path: re-resolution never happens automatically; a
+  persisted identity changes only through an explicit, confirmed
+  re-bootstrap that rewrites the fragment under the new name.
+
+### Phase 3 detail: generic environment planning
+
+- `cli/bootstrap/mcp-app.mjs` (new): `planMcpApp({ plan, flags, identity,
+  providerBindings, tamaContract })` producing:
+  - the provider fragment content from the resolved bindings, with values
+    derived from identity and origins; the provider access-token private
+    JWK appears only in the fragment;
+  - the Tama environment from the bundled contract's `required_in`
+    (mode-driven), including the stable introspection keypair: private JWK
+    only in `.tama.env`, public key array in the example file;
+  - the keypair plan (two independent RS256 pairs via the existing
+    `generateOAuthPrivateJwk` / `validateOAuthPrivateJwk`; thumbprint
+    derived kids keep the spaces distinct); create on first write,
+    preserve byte-for-byte on rerun, never rotate;
+  - the lifecycle mode: `prepared` by default, `enabled` only with
+    `--activate`.
+- `cli/bootstrap/environment.mjs`: mode-conditional required-variable
+  validation driven by the Tama contract for the app path; the existing flat
+  required list stays for the non-app path.
+- `.tama.env.example` gains public `TAMA_MCP_APP_*` values only; no live
+  secret is ever written to an example or committed file.
+
+### Phase 4 detail: container topology
+
+- `cli/bootstrap/compose.mjs`: add the managed `tama` service to the root
+  Compose file with the Phase 3 environment; extend `OWNED_SERVICES` with
+  `tama` so foreign ownership conflicts are rejected.
+- `extra_hosts: ["host.docker.internal:host-gateway"]` is rendered only
+  when the transport origin differs from the public origin.
+- Preserve the existing internal Tama port `4000`; the external host port,
+  normally `4001`, stays selectable. Provider binding and reachability
+  failures produce actionable diagnostics naming the concrete origin.
+
+### Phase 5 detail: lifecycle and verification
+
+- `cli/bootstrap/start.mjs` and the plan gate verification behind running
+  services; `--activate` performs: contract compatibility for both runtime
+  parsers, provider metadata and JWKS fetch, Tama JWKS contains the expected
+  introspection key, and authenticated inactive-token introspection from
+  Tama to the provider.
+- Any verification failure returns both sides to `prepared` before trust
+  material is touched. Dry-run performs no network verification.
+
+### Phase 6 detail: documentation and CLI boundary cleanup
+
+- `cli/bootstrap/plan.mjs` `publicPlan`: add `provider` (`name`,
+  `environmentPrefix`, `mode`, `contractPath`, `environmentLoading`) and
+  `mcpApp` (`resource`, `issuer`, `jwksUri`, `introspectionEndpoint`, key
+  ids, `transportOrigin`, `activated`). Key ids only; JWK bodies, tokens,
+  and passwords never appear in JSON or human output.
+- Update bootstrap help, README, generated README, and agent prompt.
+- Update Memovee local-development documentation to use Tama Kit only and
+  retire or defer Memovee CLI source-development orchestration.
+
+### Follow-up: contract scaffolding
+
+Out of the initial release scope; tracked in
+`wip/mcp-app-contract-scaffolding.md` and implemented after Phases 1-6.
+
 ## Test matrix
 
 ### Identity
@@ -728,6 +885,52 @@ does not delegate production deployment to Tama Kit.
    installations.
 5. The minimum provider environment-loading declarations supported in the
    first release.
+
+### Resolutions (working, 2026-09-02)
+
+1. Confirmed: discovery is `--mcp-app-contract` first, then
+   `priv/contracts/` by compatibility identifier; the existing application
+   contract is extended in place with identity, loader, and binding blocks.
+   A missing contract falls back to conventional derivation from the
+   persisted prefix; scaffolding the missing contract is tracked in
+   `wip/mcp-app-contract-scaffolding.md`.
+2. Proposed: no new variable name. The Tama service environment rewrites
+   the existing `TAMA_MCP_APP_AUTHORIZATION_SERVER`, `TAMA_MCP_APP_JWKS_URI`,
+   and `TAMA_MCP_APP_INTROSPECTION_ENDPOINT` values to the transport origin
+   when it differs; Tama's existing same-origin and exact-path validation
+   applies unchanged.
+3. Proposed: explicit activation stays `bootstrap --activate` for the first
+   release; a focused `tama-kit integration activate` can follow without
+   rework.
+4. Proposed: no schema version bump. The managed manifest keeps
+   `schemaVersion: 1` and gains an optional `mcpAppProvider` key, safe for
+   old and new readers alike.
+5. Confirmed: the contract declares `environment_loading`; conventional
+   mode performs a static reference check and reports
+   `environmentLoading: "unverified"` instead of failing.
+
+### Resolutions (review-01, 2026-09-02)
+
+1. Supersedes working resolution 2: the single shared origin is required. The
+   provider public origin must be reachable from both the host (browser/OAuth
+   clients) and the Tama container (JWKS and introspection fetches). There is no
+   transport-origin override, no separate transport variable, and no rewriting
+   of `TAMA_MCP_APP_AUTHORIZATION_SERVER`, `TAMA_MCP_APP_JWKS_URI`, or
+   `TAMA_MCP_APP_INTROSPECTION_ENDPOINT`; Tama's existing same-origin and
+   exact-path validation applies unchanged. `--provider-transport-origin` is
+   removed from the command surface. Compose emits
+   `extra_hosts: ["host.docker.internal:host-gateway"]` only when the accepted
+   provider origin's host is `host.docker.internal`. A provider that cannot be
+   reached through the shared origin stops preparation with an actionable
+   diagnostic; changing the provider's bind interface remains application-owned.
+2. Confirms working resolution 3 with the provider-owned boundary:
+   `bootstrap --activate` keeps both sides prepared during write and prepared
+   verification, then enables and restarts Tama, verifies Tama metadata and the
+   `/mcp/app` route, and reports the provider enable plus restart as an
+   explicit provider-owned step. Tama Kit never executes provider lifecycle
+   commands. The enabled checkpoint is recorded only after both sides are
+   verified. Activation failure restores both sides to the live prepared state
+   before any trust material changes.
 
 These decisions may change CLI spelling and schema layout, but they must not
 change the ownership, lifecycle, portability, or secret-safety boundaries in

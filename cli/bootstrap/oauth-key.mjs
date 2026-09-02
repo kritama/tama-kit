@@ -15,6 +15,7 @@ export const OAUTH_JWK_MODULUS_BITS = 3_072;
 export const OAUTH_JWK_MIN_MODULUS_BITS = 2_048;
 export const OAUTH_JWK_MAX_ENCODED_BYTES = 65_536;
 export const OAUTH_JWK_MAX_KID_BYTES = 128;
+export const OAUTH_JWK_PUBLIC_SET_MAX_ITEMS = 30;
 
 /**
  * Reports whether a value is an identifier that Tama accepts for a System
@@ -32,6 +33,14 @@ export function isValidOAuthKid(value) {
  * @typedef {object} OAuthPrivateJwk
  * @property {string} jwk
  * @property {string} kid
+ */
+
+/**
+ * @typedef {object} OAuthKeyPair
+ * @property {string} privateJwk
+ * @property {string} publicJwk
+ * @property {string} kid
+ * @property {string} algorithm
  */
 
 /**
@@ -78,6 +87,87 @@ export function generateOAuthPrivateJwk(kid = undefined) {
 }
 
 /**
+ * Generates an independent RS256 keypair and returns both the private JWK and
+ * the matching public JWK. The `kid` is derived from the RFC 7638 thumbprint
+ * of the public key, prefixed to keep the provider access-token key and the
+ * Tama introspection key unambiguous even when both are RS256.
+ *
+ * @param {string} kidPrefix
+ * @returns {OAuthKeyPair}
+ */
+export function generateOAuthKeyPair(kidPrefix) {
+  const { privateKey, publicKey } = generateKeyPairSync("rsa", {
+    modulusLength: OAUTH_JWK_MODULUS_BITS,
+    publicExponent: 0x10001,
+  });
+  const privateJwk = /** @type {Record<string, string>} */ (privateKey.export({ format: "jwk" }));
+  const publicJwk = /** @type {Record<string, string>} */ (publicKey.export({ format: "jwk" }));
+  const canonical = JSON.stringify({ e: publicJwk.e, kty: "RSA", n: publicJwk.n });
+  const thumbprint = createHash("sha256").update(canonical, "utf8").digest("base64url");
+  const kid = `${kidPrefix}-${thumbprint}`;
+  return {
+    privateJwk: JSON.stringify({
+      alg: OAUTH_JWK_ALGORITHM,
+      kid,
+      kty: "RSA",
+      use: "sig",
+      n: privateJwk.n,
+      e: privateJwk.e,
+      d: privateJwk.d,
+      p: privateJwk.p,
+      q: privateJwk.q,
+      dp: privateJwk.dp,
+      dq: privateJwk.dq,
+      qi: privateJwk.qi,
+    }),
+    publicJwk: JSON.stringify({
+      alg: OAUTH_JWK_ALGORITHM,
+      kid,
+      kty: "RSA",
+      use: "sig",
+      n: publicJwk.n,
+      e: publicJwk.e,
+    }),
+    kid,
+    algorithm: OAUTH_JWK_ALGORITHM,
+  };
+}
+
+/**
+ * Validates a persisted public JWK overlap set: a JSON array of public-only
+ * RSA JWK members, each with a bounded, unique identifier, compatible signing
+ * metadata, complete public parameters, and no private members. The set holds
+ * keys in addition to the current key, which the runtime publishes on its own,
+ * so a fresh integration starts empty and rotation state is preserved across
+ * runs instead of being rewritten.
+ *
+ * @param {string} encoded
+ * @param {string} variable Environment variable name used in diagnostics.
+ */
+export function validatePublicJwkSet(encoded, variable) {
+  if (typeof encoded !== "string" || Buffer.byteLength(encoded, "utf8") === 0) {
+    throw invalidPublicJwkSetError(variable);
+  }
+  /** @type {unknown} */
+  let parsed;
+  try {
+    parsed = JSON.parse(encoded);
+  } catch {
+    throw invalidPublicJwkSetError(variable);
+  }
+  if (!Array.isArray(parsed) || parsed.length > OAUTH_JWK_PUBLIC_SET_MAX_ITEMS) {
+    throw invalidPublicJwkSetError(variable);
+  }
+  /** @type {Set<string>} */
+  const kids = new Set();
+  for (const member of parsed) {
+    if (!isPublicJwkMember(member, kids)) {
+      throw invalidPublicJwkSetError(variable);
+    }
+  }
+}
+
+/**
  * Validates a persisted System OAuth private JWK against the identifier that
  * Tama will configure for it.
  *
@@ -97,17 +187,25 @@ export function generateOAuthPrivateJwk(kid = undefined) {
  *
  * @param {string} encodedJwk
  * @param {string} kid
+ * @param {string} [variable] Environment variable label for diagnostics.
+ * @param {string} [keyIdVariable] Key identifier variable label for
+ *   diagnostics.
  */
-export function validateOAuthPrivateJwk(encodedJwk, kid) {
+export function validateOAuthPrivateJwk(
+  encodedJwk,
+  kid,
+  variable = "TAMA_OAUTH_PRIVATE_JWK",
+  keyIdVariable = "TAMA_OAUTH_PRIVATE_JWK_ID",
+) {
   if (
     typeof encodedJwk !== "string" ||
     Buffer.byteLength(encodedJwk, "utf8") < 1 ||
     Buffer.byteLength(encodedJwk, "utf8") > OAUTH_JWK_MAX_ENCODED_BYTES
   ) {
-    throw invalidJwkError();
+    throw invalidJwkError(variable, keyIdVariable);
   }
   if (!isBoundedKid(kid)) {
-    throw invalidKidError();
+    throw invalidKidError(keyIdVariable, variable);
   }
 
   /** @type {unknown} */
@@ -115,48 +213,48 @@ export function validateOAuthPrivateJwk(encodedJwk, kid) {
   try {
     parsed = JSON.parse(encodedJwk);
   } catch {
-    throw invalidJwkError();
+    throw invalidJwkError(variable, keyIdVariable);
   }
   if (!isPlainObject(parsed) || Array.isArray(parsed.keys)) {
-    throw invalidJwkError();
+    throw invalidJwkError(variable, keyIdVariable);
   }
 
   if (parsed.kty !== "RSA") {
-    throw invalidJwkError();
+    throw invalidJwkError(variable, keyIdVariable);
   }
   if (typeof parsed.d !== "string" || parsed.d === "") {
-    throw invalidJwkError();
+    throw invalidJwkError(variable, keyIdVariable);
   }
   if (!isCompatibleMetadata(parsed.alg, OAUTH_JWK_ALGORITHM)) {
-    throw invalidJwkError();
+    throw invalidJwkError(variable, keyIdVariable);
   }
   if (!isCompatibleMetadata(parsed.use, "sig")) {
-    throw invalidJwkError();
+    throw invalidJwkError(variable, keyIdVariable);
   }
   if (parsed.kid !== undefined && parsed.kid !== null && parsed.kid !== kid) {
-    throw mismatchedKidError();
+    throw mismatchedKidError(keyIdVariable, variable);
   }
   if (!isSigningKeyOps(parsed.key_ops)) {
-    throw invalidJwkError();
+    throw invalidJwkError(variable, keyIdVariable);
   }
 
   let keyObject;
   try {
     keyObject = createPrivateKey({ key: parsed, format: "jwk" });
   } catch {
-    throw invalidJwkError();
+    throw invalidJwkError(variable, keyIdVariable);
   }
   if (keyObject.asymmetricKeyType !== "rsa") {
-    throw invalidJwkError();
+    throw invalidJwkError(variable, keyIdVariable);
   }
 
   const modulus = base64urlUnsigned(parsed.n);
   const exponent = base64urlUnsigned(parsed.e);
   if (modulus === null || bigintBitLength(modulus) < OAUTH_JWK_MIN_MODULUS_BITS) {
-    throw invalidJwkError();
+    throw invalidJwkError(variable, keyIdVariable);
   }
   if (exponent === null || exponent < 3n || exponent % 2n === 0n || exponent >= modulus) {
-    throw invalidJwkError();
+    throw invalidJwkError(variable, keyIdVariable);
   }
 
   // The KeyObject import on supported Node versions can preserve supplied
@@ -188,7 +286,7 @@ export function validateOAuthPrivateJwk(encodedJwk, kid) {
     !primeFactor(p) ||
     !primeFactor(q)
   ) {
-    throw invalidJwkError();
+    throw invalidJwkError(variable, keyIdVariable);
   }
 
   /** @type {Record<string, unknown> | null} */
@@ -201,7 +299,7 @@ export function validateOAuthPrivateJwk(encodedJwk, kid) {
     publicJwk = null;
   }
   if (publicJwk === null || publicJwk.n !== parsed.n || publicJwk.e !== parsed.e) {
-    throw invalidJwkError();
+    throw invalidJwkError(variable, keyIdVariable);
   }
 }
 
@@ -266,6 +364,47 @@ function isSigningKeyOps(value) {
   );
 }
 
+/** @type {readonly string[]} */
+const PUBLIC_JWK_PRIVATE_MEMBERS = Object.freeze(["d", "p", "q", "dp", "dq", "qi", "oth", "k"]);
+
+/**
+ * A public overlap member must be a plain object without private members,
+ * carrying complete RSA public parameters, compatible optional metadata, and
+ * a bounded identifier that is unique within the set.
+ *
+ * @param {unknown} member
+ * @param {Set<string>} kids Identifiers already present in the set.
+ * @returns {boolean}
+ */
+function isPublicJwkMember(member, kids) {
+  const modulus = isPlainObject(member) && typeof member.n === "string" ? member.n : null;
+  const exponent = isPlainObject(member) && typeof member.e === "string" ? member.e : null;
+  if (
+    !isPlainObject(member) ||
+    Buffer.byteLength(JSON.stringify(member), "utf8") > OAUTH_JWK_MAX_ENCODED_BYTES ||
+    PUBLIC_JWK_PRIVATE_MEMBERS.some((name) => member[name] !== undefined) ||
+    member.kty !== "RSA" ||
+    modulus === null ||
+    base64urlUnsigned(modulus) === null ||
+    exponent === null ||
+    base64urlUnsigned(exponent) === null ||
+    !isCompatibleMetadata(member.alg, OAUTH_JWK_ALGORITHM) ||
+    !isCompatibleMetadata(member.use, "sig") ||
+    typeof member.kid !== "string" ||
+    !isBoundedKid(member.kid) ||
+    kids.has(member.kid)
+  ) {
+    return false;
+  }
+  kids.add(member.kid);
+  try {
+    createPublicKey({ key: { kty: "RSA", n: modulus, e: exponent }, format: "jwk" });
+  } catch {
+    return false;
+  }
+  return true;
+}
+
 /**
  * Decodes a strict Base64url unsigned integer the way the signing-key
  * contract validates RSA members.
@@ -328,24 +467,51 @@ function bigIntLeastCommonMultiple(a, b) {
   return (a / bigIntGreatestCommonDivisor(a, b)) * b;
 }
 
-/** @returns {import("../errors.mjs").CLIError} */
-function invalidJwkError() {
-  return ownershipError("TAMA_OAUTH_PRIVATE_JWK is not a valid RSA private JWK for RS256 signing", {
-    variables: ["TAMA_OAUTH_PRIVATE_JWK", "TAMA_OAUTH_PRIVATE_JWK_ID"],
+/**
+ * @param {string} [variable]
+ * @param {string} [keyIdVariable]
+ * @returns {import("../errors.mjs").CLIError}
+ */
+function invalidJwkError(
+  variable = "TAMA_OAUTH_PRIVATE_JWK",
+  keyIdVariable = "TAMA_OAUTH_PRIVATE_JWK_ID",
+) {
+  return ownershipError(`${variable} is not a valid RSA private JWK for RS256 signing`, {
+    variables: [variable, keyIdVariable],
   });
 }
 
-/** @returns {import("../errors.mjs").CLIError} */
-function invalidKidError() {
-  return ownershipError("TAMA_OAUTH_PRIVATE_JWK_ID is not a valid key identifier", {
-    variables: ["TAMA_OAUTH_PRIVATE_JWK_ID"],
+/**
+ * @param {string} [keyIdVariable]
+ * @param {string} [variable]
+ * @returns {import("../errors.mjs").CLIError}
+ */
+function invalidKidError(
+  keyIdVariable = "TAMA_OAUTH_PRIVATE_JWK_ID",
+  variable = "TAMA_OAUTH_PRIVATE_JWK",
+) {
+  return ownershipError(`${keyIdVariable} is not a valid key identifier`, {
+    variables: [keyIdVariable, variable],
   });
 }
 
-/** @returns {import("../errors.mjs").CLIError} */
-function mismatchedKidError() {
-  return ownershipError(
-    "TAMA_OAUTH_PRIVATE_JWK_ID does not match the key identifier in TAMA_OAUTH_PRIVATE_JWK",
-    { variables: ["TAMA_OAUTH_PRIVATE_JWK", "TAMA_OAUTH_PRIVATE_JWK_ID"] },
-  );
+/** @param {string} variable @returns {import("../errors.mjs").CLIError} */
+function invalidPublicJwkSetError(variable) {
+  return ownershipError(`${variable} is not a valid public JWK array for RS256 signing`, {
+    variables: [variable],
+  });
+}
+
+/**
+ * @param {string} [keyIdVariable]
+ * @param {string} [variable]
+ * @returns {import("../errors.mjs").CLIError}
+ */
+function mismatchedKidError(
+  keyIdVariable = "TAMA_OAUTH_PRIVATE_JWK_ID",
+  variable = "TAMA_OAUTH_PRIVATE_JWK",
+) {
+  return ownershipError(`${keyIdVariable} does not match the key identifier in ${variable}`, {
+    variables: [variable, keyIdVariable],
+  });
 }
