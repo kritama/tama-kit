@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tama Kit CLI"
+  short_description: "Bootstrap apps and MCP integrations with Tama"
+  default_prompt: "Use $tama-kit-cli to help me bootstrap my application to work with Tama."

@@ -170,6 +170,8 @@ try {
   assert.equal(existsSync(join(project, "tama", "AGENTS.md")), true);
   assert.equal(existsSync(join(project, ".agents", "skills", "graph-builder", "SKILL.md")), true);
   assert.equal(existsSync(join(project, ".agents", "skills", "graph-audit", "SKILL.md")), true);
+  assert.equal(existsSync(join(project, ".agents", "skills", "app-integration", "SKILL.md")), true);
+  assert.equal(existsSync(join(project, ".agents", "skills", "tama-kit-cli", "SKILL.md")), true);
 
   execute("docker", ["compose", "-f", composeFile, "config", "--quiet"], { cwd: project });
   execute("terraform", ["-chdir=tama", "fmt", "-check"], { cwd: project });
@@ -219,7 +221,19 @@ try {
   assert.equal(packagedResult.skillMode, "local");
   assert.equal(
     packagedResult.changes.some((change) =>
+      change.path.endsWith(".agents/skills/app-integration/SKILL.md"),
+    ),
+    true,
+  );
+  assert.equal(
+    packagedResult.changes.some((change) =>
       change.path.endsWith(".agents/skills/graph-builder/SKILL.md"),
+    ),
+    true,
+  );
+  assert.equal(
+    packagedResult.changes.some((change) =>
+      change.path.endsWith(".agents/skills/tama-kit-cli/SKILL.md"),
     ),
     true,
   );

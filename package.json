@@ -1,10 +1,12 @@
 {
   "name": "@kritama/tama-kit",
   "version": "0.3.6",
-  "description": "Bootstrap local Tama runtimes and build, manage, and audit Tama Terraform graph networks.",
+  "description": "Bootstrap Tama runtimes and MCP App OAuth integrations, and build, manage, and audit Tama Terraform graphs.",
   "keywords": [
     "codex-plugin",
     "mcp",
+    "mcp-app",
+    "oauth",
     "tama",
     "terraform",
     "docker-compose",

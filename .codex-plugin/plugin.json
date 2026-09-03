@@ -1,7 +1,7 @@
 {
   "name": "tama-kit",
   "version": "0.3.6",
-  "description": "Build, manage, and audit complete Tama Terraform graph networks.",
+  "description": "Bootstrap apps, provision MCP App OAuth, and build, manage, and audit Tama Terraform graphs.",
   "author": {
     "name": "Upmaru",
     "url": "https://upmaru.com"
@@ -13,11 +13,13 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Tama Kit",
-    "shortDescription": "Build and audit Tama graphs",
-    "longDescription": "Bootstrap, design, extend, migrate, remove, and audit complete Tama Terraform graphs for global foundations, conversations, direct actions, ingestion, indexing, and reprocessing.",
+    "shortDescription": "Bootstrap and build with Tama",
+    "longDescription": "Bootstrap standard applications, assess, implement, and provision MCP App OAuth providers with a local Tama runtime, then design, extend, migrate, remove, and audit complete Tama Terraform graphs for global foundations, conversations, direct actions, ingestion, indexing, and reprocessing.",
     "developerName": "Upmaru",
     "category": "Developer Tools",
     "capabilities": [
+      "Bootstrap standard apps and MCP App provider integrations",
+      "Assess and implement OAuth providers for Tama MCP App",
       "Build and modify Tama Terraform graphs",
       "Audit Tama graph wiring and lifecycle safety"
     ],
@@ -27,7 +29,7 @@
     "composerIcon": "./assets/icon.svg",
     "logo": "./assets/icon.svg",
     "defaultPrompt": [
-      "Bootstrap and build a Tama graph from my product requirements.",
+      "Integrate my app with Tama and provision MCP App OAuth when required.",
       "Safely extend or migrate this Tama graph.",
       "Audit this Tama graph for incomplete or unsafe wiring."
     ]

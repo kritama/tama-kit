@@ -80,11 +80,29 @@ test("bootstrap installs complete repository-local agent skills when selected", 
     ),
   );
   assert.ok(existsSync(join(root, ".agents", "skills", "graph-audit", "SKILL.md")));
+  assert.ok(existsSync(join(root, ".agents", "skills", "app-integration", "SKILL.md")));
+  assert.ok(
+    existsSync(
+      join(root, ".agents", "skills", "app-integration", "references", "mcp-app-oauth.md"),
+    ),
+  );
+  assert.ok(existsSync(join(root, ".agents", "skills", "tama-kit-cli", "SKILL.md")));
+  assert.ok(
+    existsSync(join(root, ".agents", "skills", "tama-kit-cli", "references", "cli-reference.md")),
+  );
 
   const manifest = JSON.parse(readFileSync(join(root, "tama", ".tama-kit.json"), "utf8"));
   assert.equal(manifest.agentSkills, "local");
   assert.match(
     manifest.managedFiles[".agents/skills/graph-builder/SKILL.md"],
+    /^sha256:[0-9a-f]{64}$/u,
+  );
+  assert.match(
+    manifest.managedFiles[".agents/skills/app-integration/SKILL.md"],
+    /^sha256:[0-9a-f]{64}$/u,
+  );
+  assert.match(
+    manifest.managedFiles[".agents/skills/tama-kit-cli/SKILL.md"],
     /^sha256:[0-9a-f]{64}$/u,
   );
 
@@ -207,6 +225,14 @@ test("JSON bootstrap accepts an explicit local skill mode without prompting", as
   assert.equal(payload.skillMode, "local");
   assert.ok(
     payload.changes.some((change) => change.path.endsWith(".agents/skills/graph-builder/SKILL.md")),
+  );
+  assert.ok(
+    payload.changes.some((change) =>
+      change.path.endsWith(".agents/skills/app-integration/SKILL.md"),
+    ),
+  );
+  assert.ok(
+    payload.changes.some((change) => change.path.endsWith(".agents/skills/tama-kit-cli/SKILL.md")),
   );
 });
 

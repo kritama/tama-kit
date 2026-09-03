@@ -262,8 +262,12 @@ function validateSkillLayout(root) {
     .filter((entry) => entry.isDirectory() && existsSync(join(skillsRoot, entry.name, "SKILL.md")))
     .map((entry) => entry.name);
   requireCondition(
-    names.length === 2 && names.includes("graph-builder") && names.includes("graph-audit"),
-    "packaged skills must be exactly graph-builder and graph-audit",
+    names.length === 4 &&
+      names.includes("app-integration") &&
+      names.includes("graph-builder") &&
+      names.includes("graph-audit") &&
+      names.includes("tama-kit-cli"),
+    "packaged skills must be exactly app-integration, graph-builder, graph-audit, and tama-kit-cli",
   );
   for (const name of names) {
     const skillText = readFileSync(join(skillsRoot, name, "SKILL.md"), "utf8");
