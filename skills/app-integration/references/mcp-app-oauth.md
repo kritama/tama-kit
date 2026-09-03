@@ -131,12 +131,14 @@ Bind the complete flow to one exact resource and scope:
 - `resource`: the configured absolute Tama URI ending in `/mcp/app`
 - `scope`: exactly `mcp.message`
 
-Require authorization code with PKCE S256 for public clients. Validate redirect
-URIs exactly and bind the request, consent, code, grant, access token, and any
-refresh family to the same actor, client, redirect URI, resource, and scope.
-Consume codes once under a lock or equivalent atomic operation.
+Require authorization code with PKCE S256 for every client, including
+confidential clients; client authentication does not replace the code challenge
+and verifier. Validate redirect URIs exactly and bind the request, consent,
+code, grant, access token, and any refresh family to the same actor, client,
+redirect URI, resource, and scope. Consume codes once under a lock or equivalent
+atomic operation.
 
-Issue short-lived asymmetric JWT access tokens with at least:
+Issue short-lived RS256-signed JWT access tokens with at least:
 
 - `iss`: exact provider issuer
 - `aud`: exact Tama `/mcp/app` resource URI
