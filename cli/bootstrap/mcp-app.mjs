@@ -18,6 +18,7 @@ import {
   resolveBindings,
   unpinnedTamaImageTag,
   unsupportedTamaImage,
+  validateEmittedMcpAppValues,
   verifyEnvironmentLoading,
 } from "./mcp-app-contract.mjs";
 import {
@@ -741,9 +742,11 @@ export function planMcpApp(input) {
   const sourceFragmentOverlapVariable = sourceRoles.access_token_public_overlap_keys;
   const existingFragmentOverlap = fragmentValues.get(sourceFragmentOverlapVariable);
   let fragmentOverlapLine;
+  let fragmentOverlapValue = "[]";
   if (existingFragmentOverlap === undefined) {
     fragmentOverlapLine = `${fragmentOverlapVariable}='[]'`;
   } else {
+    fragmentOverlapValue = existingFragmentOverlap;
     validatePublicJwkSet(existingFragmentOverlap, sourceFragmentOverlapVariable);
     const rawOverlapLine = readRawEnvironmentLine(
       root,
@@ -761,6 +764,21 @@ export function planMcpApp(input) {
         ? rawOverlapLine
         : `${fragmentOverlapVariable}='${existingFragmentOverlap}'`;
   }
+
+  // The accepted contract is the provider's word for what the fragment may
+  // contain: hold every planned value to its declared value-specific
+  // constraints before any file is written.
+  validateEmittedMcpAppValues(input.contractDocument, roles, {
+    [roles.mode]: providerMode,
+    [roles.issuer]: providerOrigin,
+    [roles.resource]: resource,
+    [roles.access_token_signing_algorithm]: "RS256",
+    [roles.access_token_signing_key_id]: providerSigningKeyId,
+    [roles.access_token_private_signing_key]: providerPrivateJwk,
+    [fragmentOverlapVariable]: fragmentOverlapValue,
+    [roles.introspection_client_id]: introspectionClientId,
+    [roles.introspection_jwks_uri]: `${tamaOrigin}${TAMA_MCP_APP_JWKS_PATH}`,
+  });
 
   const sourceContent = existsSync(sourceFragmentPath)
     ? readFileSync(sourceFragmentPath, "utf8")

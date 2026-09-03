@@ -38,6 +38,7 @@ import { createProgressBar, paint, renderBox } from "../terminal.mjs";
  * @property {string} [mcpAppContract]
  * @property {string} [providerName]
  * @property {string} [providerPrefix]
+ * @property {string} [providerEnvironmentFile]
  * @property {string} [providerOrigin]
  * @property {string} [tamaOrigin]
  * @property {string[]} [allowedOrigins]
@@ -64,6 +65,7 @@ function usage() {
     "  --mcp-app-contract <path> Provider bootstrap contract (default: discover)",
     "  --provider-name <name> Provider identity name",
     "  --provider-prefix <prefix> Environment prefix override",
+    "  --provider-env-file <path> Provider fragment file override",
     "  --provider-origin <origin> Provider issuer origin, reachable from the Tama container",
     "  --tama-origin <origin> Exact public Tama origin",
     "  --allowed-origin <origin> Explicit allowed origin (repeatable)",
@@ -129,6 +131,7 @@ function parse(argv) {
         "mcp-app-contract": { type: "string" },
         "provider-name": { type: "string" },
         "provider-prefix": { type: "string" },
+        "provider-env-file": { type: "string" },
         "provider-origin": { type: "string" },
         "tama-origin": { type: "string" },
         "allowed-origin": { type: "string", multiple: true },
@@ -152,6 +155,7 @@ function parse(argv) {
     parsed.values["mcp-app-contract"] === undefined ? null : "--mcp-app-contract",
     parsed.values["provider-name"] === undefined ? null : "--provider-name",
     parsed.values["provider-prefix"] === undefined ? null : "--provider-prefix",
+    parsed.values["provider-env-file"] === undefined ? null : "--provider-env-file",
     parsed.values["provider-origin"] === undefined ? null : "--provider-origin",
     parsed.values["tama-origin"] === undefined ? null : "--tama-origin",
     Array.isArray(parsed.values["allowed-origin"]) && parsed.values["allowed-origin"].length > 0
@@ -191,6 +195,7 @@ function parse(argv) {
     mcpAppContract: parsed.values["mcp-app-contract"],
     providerName: parsed.values["provider-name"],
     providerPrefix: parsed.values["provider-prefix"],
+    providerEnvironmentFile: parsed.values["provider-env-file"],
     providerOrigin: parsed.values["provider-origin"],
     tamaOrigin: parsed.values["tama-origin"],
     allowedOrigins: parsed.values["allowed-origin"],
@@ -328,6 +333,7 @@ function mcpAppOptions(options) {
     contractPath: options.mcpAppContract,
     providerName: options.providerName,
     providerPrefix: options.providerPrefix,
+    providerEnvironmentFile: options.providerEnvironmentFile,
     providerOrigin: options.providerOrigin,
     tamaOrigin: options.tamaOrigin,
     allowedOrigins: options.allowedOrigins,

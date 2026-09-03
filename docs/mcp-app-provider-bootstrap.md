@@ -24,7 +24,12 @@ planner writes — the lifecycle mode variable must accept both `prepared` and
 `enabled`, and the signing-algorithm variable must accept the hard-coded
 `RS256`. This runs before secrets are generated, so a binding to an undeclared
 variable or an unsatisfiable constraint fails the contract instead of silently
-writing over the provider's configuration.
+writing over the provider's configuration. The planned values themselves are
+held to the remaining declared constraints before any file is written —
+`format`, `exact_path`, `same_origin_as`, `max_bytes`, and `max_items` — so a
+resource variable declared with `exact_path: "/different"` or an issuer with
+`max_bytes: 1` is rejected rather than violated once the planner's origins and
+paths are known.
 
 Providers without a contract use conventional variables derived from
 `--provider-name` and must supply `--provider-origin`. Environment prefixes are
@@ -50,11 +55,12 @@ host-side TLS probes could not validate the certificate for that name; use
 `http://host.docker.internal:<port>` for the container-gateway topology. If its
 hostname is `host.docker.internal`, Tama Kit adds the Compose host-gateway
 mapping and keeps it on ordinary reruns. On Linux hosts the verification also
-inspects the host's listening sockets for the provider port: a provider bound
-to loopback only passes every host-side probe yet is unreachable from the Tama
-container through the gateway, so verification fails with a
-`provider_container_reachability` probe until the provider binds `0.0.0.0` or
-the Docker bridge interface.
+inspects the host's listening sockets for the effective provider port (80 or
+443 when the origin names none): a provider bound to loopback only — including
+IPv4-mapped binds such as `::ffff:127.0.0.1` — passes every host-side probe
+yet is unreachable from the Tama container through the gateway, so
+verification fails with a `provider_container_reachability` probe until the
+provider binds `0.0.0.0` or the Docker bridge interface.
 
 `--tama-origin` is the exact public Tama origin. It defaults from an accepted
 contract or to loopback at the selected Tama port. A fresh run without
@@ -112,7 +118,9 @@ A normal rerun refuses provider identity or binding drift. To migrate an
 identity, keep the provider in prepared mode, update its loader and committed
 contract (when present) to the new derived fragment filename, then pass
 `--migrate-provider-identity --provider-name <new-name>`. An optional
-`--provider-prefix` selects a different bounded prefix.
+`--provider-prefix` selects a different bounded prefix, and
+`--provider-env-file` selects a different fragment path (both require
+`--provider-name` and `--mcp-app`).
 
 Migration preserves the private access-token signing JWK, key identifier,
 valid overlap keys, and unrelated provider-owned fragment entries. It renames

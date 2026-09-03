@@ -83,13 +83,14 @@ function isHostGatewayOrigin(origin) {
  * Classifies one /proc/net/tcp{,6} local address as a wildcard bind (reachable
  * from the Docker bridge), a loopback bind (never reachable from the
  * container), or a specific interface bind (ambiguous without knowing the
- * bridge IP).
+ * bridge IP). IPv4-mapped IPv6 listeners (`::ffff:a.b.c.d`) appear only in
+ * tcp6 and carry the same reachability semantics as the mapped IPv4 address.
  *
  * @param {string} addressHex
  * @param {"v4" | "v6"} family
  * @returns {"wide" | "loopback" | "specific"}
  */
-function classifyListenerAddress(addressHex, family) {
+export function classifyListenerAddress(addressHex, family) {
   if (family === "v4") {
     // Little-endian byte order: 127.0.0.1 is 0100007F, 0.0.0.0 is 00000000.
     if (addressHex === "00000000") {
@@ -100,6 +101,17 @@ function classifyListenerAddress(addressHex, family) {
   // Four little-endian 32-bit groups: :: is all zeros, ::1 ends in 01000000.
   if (/^0{32}$/u.test(addressHex)) {
     return "wide";
+  }
+  // IPv4-mapped ::ffff:a.b.c.d: the kernel prints each 32-bit group as a
+  // little-endian u32, so the marker group 0000ffff appears as FFFF0000 and
+  // the IPv4 address group 7f000001 (127.0.0.1) appears as 0100007F, whose
+  // final byte pair is the first IPv4 octet.
+  if (addressHex.slice(16, 24) === "FFFF0000") {
+    const firstOctet = Number.parseInt(addressHex.slice(30, 32), 16);
+    if (firstOctet === 0) {
+      return "wide";
+    }
+    return firstOctet === 127 ? "loopback" : "specific";
   }
   return addressHex.slice(24, 32) === "01000000" ? "loopback" : "specific";
 }

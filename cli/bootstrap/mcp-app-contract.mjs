@@ -5,6 +5,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseDocument } from "yaml";
 import { usageError } from "../errors.mjs";
+import { PENDING_SECRET_VALUE } from "./environment.mjs";
 
 /** @typedef {import("../types.mjs").ProviderBindings} ProviderBindings */
 
@@ -706,6 +707,148 @@ function validateBindingsAgainstVariables(document, provider) {
 /** @param {unknown} value @returns {string[] | null} */
 function stringList(value) {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : null;
+}
+
+/**
+ * Validates the concrete values the planner will write into the provider
+ * fragment against the constraints the accepted contract declares for the
+ * variables those values are bound to. The declaration-time cross-check
+ * already guarantees the variables exist and their enumeration constraints are
+ * satisfiable; this checks the value-specific constraints — `format`,
+ * `exact_path`, `same_origin_as`, `max_bytes`, and `max_items` — that only
+ * become checkable once the planned origins, paths, and identifiers are known.
+ * A contract that declared, say, `exact_path: "/different"` for the resource
+ * or `max_bytes: 1` for the issuer would otherwise be violated by the
+ * planner's `/mcp/app` resource and real origins only after secrets exist.
+ * Dry-run placeholder values are exempt: the real material is validated when
+ * it is generated or preserved.
+ *
+ * @param {Record<string, unknown> | null} contractDocument Provider contract, or null for conventional bindings.
+ * @param {Record<string, string>} roles Role to bound variable name.
+ * @param {Record<string, string>} emitted Variable name to planned value.
+ */
+export function validateEmittedMcpAppValues(contractDocument, roles, emitted) {
+  if (contractDocument === null) {
+    return;
+  }
+  const variables = isPlainObject(contractDocument.variables) ? contractDocument.variables : null;
+  for (const [role, name] of Object.entries(roles)) {
+    const spec = variables === null || !isPlainObject(variables[name]) ? null : variables[name];
+    if (spec === null) {
+      throw usageError(`MCP App contract binding "${role}" references undeclared variable ${name}`);
+    }
+    const value = emitted[name];
+    if (typeof value !== "string") {
+      throw usageError(`MCP App contract variable ${name} has no planned value`);
+    }
+    if (value === PENDING_SECRET_VALUE) {
+      continue;
+    }
+    /** @param {string} reason */
+    const reject = (reason) =>
+      usageError(`MCP App contract variable ${name} rejects the planned value: ${reason}`);
+    if (spec.max_bytes !== undefined && Buffer.byteLength(value, "utf8") > Number(spec.max_bytes)) {
+      throw reject(
+        `it is ${Buffer.byteLength(value, "utf8")} bytes, exceeding max_bytes ${spec.max_bytes}`,
+      );
+    }
+    const format = typeof spec.format === "string" ? spec.format : null;
+    /** @type {URL | null} */
+    let url = null;
+    /** @type {string[] | null} */
+    let listItems = null;
+    if (format === "absolute-uri" || format === "absolute-origin") {
+      url =
+        parseUrl(value) ??
+        (() => {
+          throw reject(`it is not a ${format}`);
+        })();
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw reject(`${format} must use http or https, not ${url.protocol}`);
+      }
+      if (
+        format === "absolute-origin" &&
+        (url.pathname !== "/" || url.search !== "" || url.hash !== "")
+      ) {
+        throw reject("an absolute origin must not include a path, query, or fragment");
+      }
+    } else if (format === "comma-separated-absolute-origins") {
+      listItems = value.split(",");
+      for (const item of listItems) {
+        const itemUrl = parseUrl(item);
+        if (
+          itemUrl === null ||
+          (itemUrl.protocol !== "http:" && itemUrl.protocol !== "https:") ||
+          itemUrl.pathname !== "/" ||
+          itemUrl.search !== "" ||
+          itemUrl.hash !== ""
+        ) {
+          throw reject("each comma-separated entry must be an absolute http(s) origin");
+        }
+      }
+    } else if (format === "comma-separated-list") {
+      listItems = value.split(",");
+      if (listItems.some((item) => item.trim() === "")) {
+        throw reject("comma-separated entries must be non-empty");
+      }
+    } else if (format === "bounded-identifier") {
+      if (value.trim() === "" || /\s/u.test(value)) {
+        throw reject("a bounded identifier must be non-empty and contain no whitespace");
+      }
+    } else if (format === "private-json-jwk") {
+      const parsed = parseJson(value, reject);
+      if (!isPlainObject(parsed) || parsed.kty !== "RSA" || typeof parsed.d !== "string") {
+        throw reject("a private JSON JWK must be an RSA member with a private exponent");
+      }
+    } else if (format === "public-json-jwk-array") {
+      const parsed = parseJson(value, reject);
+      if (!Array.isArray(parsed)) {
+        throw reject("a public JSON JWK set must be a JSON array");
+      }
+      listItems = parsed.map((entry) => String(entry));
+    }
+    if (
+      spec.max_items !== undefined &&
+      listItems !== null &&
+      listItems.length > Number(spec.max_items)
+    ) {
+      throw reject(`it has ${listItems.length} items, exceeding max_items ${spec.max_items}`);
+    }
+    if (url !== null) {
+      if (spec.exact_path !== undefined && url.pathname !== String(spec.exact_path)) {
+        throw reject(`its path is ${url.pathname}, which must be ${spec.exact_path}`);
+      }
+      if (spec.same_origin_as !== undefined) {
+        const other = emitted[String(spec.same_origin_as)];
+        const otherUrl = typeof other === "string" ? parseUrl(other) : null;
+        if (otherUrl === null || otherUrl.origin !== url.origin) {
+          throw reject(`it must share the origin of ${spec.same_origin_as}`);
+        }
+      }
+    }
+  }
+}
+
+/** @param {string} value @returns {URL | null} */
+function parseUrl(value) {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {string} value
+ * @param {(reason: string) => Error} reject
+ * @returns {unknown}
+ */
+function parseJson(value, reject) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw reject("it is not valid JSON");
+  }
 }
 
 /** @param {string} path @returns {Record<string, unknown>} */

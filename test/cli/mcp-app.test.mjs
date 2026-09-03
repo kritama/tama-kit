@@ -16,10 +16,12 @@ import {
   loadTamaContract,
   resolveBindings,
   unsupportedTamaImage,
+  validateEmittedMcpAppValues,
   validateMcpAppContract,
   verifyEnvironmentLoading,
 } from "../../cli/bootstrap/mcp-app-contract.mjs";
 import {
+  classifyListenerAddress,
   defaultProviderListenerInspector,
   verifyMcpApp,
 } from "../../cli/bootstrap/mcp-app-verify.mjs";
@@ -381,6 +383,109 @@ test("validateMcpAppContract cross-checks bindings against the declared variable
   assert.throws(
     () => validateMcpAppContract(missing),
     /binding "issuer" references undeclared variable MEMOVEE_OAUTH_ISSUER/u,
+  );
+});
+
+test("bootstrap rejects a contract whose declared constraints the planned values violate", () => {
+  const base = validContract();
+  const cases = [
+    [
+      "MEMOVEE_TAMA_MCP_APP_RESOURCE",
+      (variable) => {
+        variable.exact_path = "/different";
+      },
+      /its path is \/mcp\/app, which must be \/different/u,
+    ],
+    [
+      "MEMOVEE_OAUTH_ISSUER",
+      (variable) => {
+        variable.max_bytes = 1;
+      },
+      /exceeding max_bytes 1/u,
+    ],
+  ];
+  for (const [variableName, mutate, pattern] of cases) {
+    const root = project();
+    const document = /** @type {Record<string, unknown>} */ (structuredClone(base));
+    const variables = /** @type {Record<string, Record<string, unknown>>} */ (document.variables);
+    mutate(variables[/** @type {string} */ (variableName)]);
+    const contractDocument = validateMcpAppContract(document);
+    const contractPath = writeContract(root, contractDocument);
+    assert.throws(
+      () => planWithMcp(root, preparedFor(root, { contractPath, contractDocument })),
+      (error) =>
+        error instanceof CLIError &&
+        error.exitCode === EXIT_CODES.USAGE &&
+        pattern.test(error.message),
+    );
+  }
+});
+
+test("validateEmittedMcpAppValues enforces the value-specific contract constraints", () => {
+  const contract = validContract();
+  const roles = resolveBindings(contract, "MEMOVEE").roles;
+  const compliant = {
+    [roles.mode]: "prepared",
+    [roles.issuer]: "http://host.docker.internal:4000",
+    [roles.resource]: "http://127.0.0.1:4001/mcp/app",
+    [roles.access_token_signing_algorithm]: "RS256",
+    [roles.access_token_signing_key_id]: "mcp-app-provider-abc123",
+    [roles.access_token_private_signing_key]: JSON.stringify({
+      kty: "RSA",
+      d: "base64url",
+      n: "base64url",
+      e: "AQAB",
+    }),
+    [roles.access_token_public_overlap_keys]: "[]",
+    [roles.introspection_client_id]: "http://127.0.0.1:4001/mcp/app/introspection",
+    [roles.introspection_jwks_uri]: "http://127.0.0.1:4001/.well-known/jwks.json",
+  };
+  assert.doesNotThrow(() => validateEmittedMcpAppValues(contract, roles, compliant));
+  // Conventional planning declares no variables, so there is nothing to check.
+  assert.doesNotThrow(() => validateEmittedMcpAppValues(null, roles, compliant));
+  // Dry-run placeholder material is validated when it is materialized.
+  assert.doesNotThrow(() =>
+    validateEmittedMcpAppValues(contract, roles, {
+      ...compliant,
+      [roles.access_token_private_signing_key]: "__tama-kit-pending-secret-material__",
+    }),
+  );
+
+  const rejects = (value, variable, pattern) =>
+    assert.throws(
+      () => validateEmittedMcpAppValues(contract, roles, { ...compliant, [variable]: value }),
+      pattern,
+    );
+  rejects(
+    "http://host.docker.internal:4000/oauth",
+    roles.issuer,
+    /must not include a path, query, or fragment/u,
+  );
+  rejects("mcp app key", roles.access_token_signing_key_id, /whitespace/u);
+  rejects("not json", roles.access_token_private_signing_key, /not valid JSON/u);
+  rejects('"[]"', roles.access_token_public_overlap_keys, /must be a JSON array/u);
+  rejects("http://127.0.0.1:4001/mcp/other", roles.resource, /which must be \/mcp\/app/u);
+  rejects(
+    "http://127.0.0.1:9999/.well-known/jwks.json",
+    roles.introspection_jwks_uri,
+    /share the origin of MEMOVEE_TAMA_MCP_APP_RESOURCE/u,
+  );
+
+  const mutated = /** @type {Record<string, unknown>} */ (structuredClone(contract));
+  const mutatedVariables = /** @type {Record<string, Record<string, unknown>>} */ (
+    mutated.variables
+  );
+  mutatedVariables[roles.access_token_public_overlap_keys].max_items = 1;
+  assert.throws(
+    () =>
+      validateEmittedMcpAppValues(mutated, roles, {
+        ...compliant,
+        [roles.access_token_public_overlap_keys]: JSON.stringify([
+          { kty: "RSA", n: "a", e: "AQAB", kid: "a" },
+          { kty: "RSA", n: "b", e: "AQAB", kid: "b" },
+        ]),
+      }),
+    /exceeding max_items 1/u,
   );
 });
 
@@ -1994,6 +2099,14 @@ test("defaultProviderListenerInspector classifies host listening sockets", async
   try {
     assert.equal(await defaultProviderListenerInspector(portOf(loopbackServer)), "loopback-only");
 
+    // A mapped loopback bind is still unreachable from the Docker bridge.
+    const mappedServer = await listen("::ffff:127.0.0.1");
+    try {
+      assert.equal(await defaultProviderListenerInspector(portOf(mappedServer)), "loopback-only");
+    } finally {
+      await close(mappedServer);
+    }
+
     const wideServer = await listen("0.0.0.0");
     const widePort = portOf(wideServer);
     try {
@@ -2005,6 +2118,22 @@ test("defaultProviderListenerInspector classifies host listening sockets", async
   } finally {
     await close(loopbackServer);
   }
+});
+
+test("classifyListenerAddress classifies IPv4-mapped IPv6 listeners", () => {
+  // Native v6 forms.
+  assert.equal(classifyListenerAddress("00000000000000000000000000000000", "v6"), "wide");
+  assert.equal(classifyListenerAddress("00000000000000000000000001000000", "v6"), "loopback");
+  assert.equal(classifyListenerAddress("00000000000000000000000002000000", "v6"), "specific");
+  // IPv4-mapped forms, as the kernel prints them: the marker group
+  // 0000ffff appears as FFFF0000 and the IPv4 group little-endian.
+  assert.equal(classifyListenerAddress("0000000000000000FFFF00000100007F", "v6"), "loopback");
+  assert.equal(classifyListenerAddress("0000000000000000FFFF000000000000", "v6"), "wide");
+  assert.equal(classifyListenerAddress("0000000000000000FFFF000008080808", "v6"), "specific");
+  // Plain v4 forms.
+  assert.equal(classifyListenerAddress("00000000", "v4"), "wide");
+  assert.equal(classifyListenerAddress("0100007F", "v4"), "loopback");
+  assert.equal(classifyListenerAddress("020012AC", "v4"), "specific");
 });
 
 test("verifyMcpApp requires the protected route to reject anonymous requests", async () => {
@@ -2382,6 +2511,52 @@ test("the bootstrap command plans the provider integration from explicit flags",
     result.changes.some((change) => change.path.endsWith(".acme.integration.env")),
     "the provider fragment should be part of the planned changes",
   );
+});
+
+test("the bootstrap command accepts --provider-env-file for the provider fragment", async () => {
+  const root = project();
+  const { exitCode, stdout } = await command(root, [
+    "bootstrap",
+    root,
+    "--json",
+    "--dry-run",
+    "--skills",
+    "manual",
+    "--mcp-app",
+    "--port",
+    "4001",
+    "--image",
+    "ghcr.io/upmaru/tama:0.13.1",
+    "--provider-name",
+    "acme",
+    "--provider-env-file",
+    ".acme.custom.env",
+    "--provider-origin",
+    "http://host.docker.internal:5000",
+    "--allowed-origin",
+    "http://127.0.0.1:3000",
+  ]);
+  assert.equal(exitCode, EXIT_CODES.SUCCESS);
+  const result = JSON.parse(stdout);
+  assert.equal(result.ok, true);
+  assert.equal(result.provider.environmentFile, ".acme.custom.env");
+  assert.ok(
+    result.changes.some((change) => change.path.endsWith(".acme.custom.env")),
+    "the custom fragment should be part of the planned changes",
+  );
+
+  // The flag is MCP App-only, like the rest of the provider identity flags.
+  const rejected = await command(root, [
+    "bootstrap",
+    root,
+    "--dry-run",
+    "--skills",
+    "manual",
+    "--provider-env-file",
+    ".acme.custom.env",
+  ]);
+  assert.equal(rejected.exitCode, EXIT_CODES.USAGE);
+  assert.match(rejected.stderr, /require --mcp-app/u);
 });
 
 test("MCP App JSON dry-runs are byte-for-byte deterministic and write no secrets", async () => {
