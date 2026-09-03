@@ -563,11 +563,32 @@ async function executeBootstrap(argv, io) {
           throw error;
         }
         if (plan.mcpApp && mcpAppPrepared) {
-          const providerTransportHost =
-            process.platform === "linux" &&
-            new URL(plan.mcpApp.providerOrigin).hostname === "host.docker.internal"
-              ? resolveComposeHostGatewayAddress(plan)
-              : undefined;
+          let providerTransportHost;
+          try {
+            providerTransportHost =
+              process.platform === "linux" &&
+              new URL(plan.mcpApp.providerOrigin).hostname === "host.docker.internal"
+                ? resolveComposeHostGatewayAddress(plan)
+                : undefined;
+          } catch (error) {
+            const wasEnabled = plan.mcpApp.lifecycle === "enabled";
+            if (wasEnabled) {
+              progress.update(6, "Restoring prepared configuration");
+              await restorePreparedRuntime({
+                options,
+                io,
+                skillMode,
+                mcpAppPrepared,
+                quiet: options.json,
+              });
+            }
+            const message = error instanceof Error ? error.message : String(error);
+            throw startupError(
+              `${wasEnabled ? "MCP App activation" : "MCP App prepared-state"} verification could not resolve the provider transport. ` +
+                `${wasEnabled ? "Tama was restarted in prepared mode and the provider fragment was restored to prepared; restart the provider so its live state also returns to prepared. " : "The integration remains prepared. "}` +
+                `Transport failure: ${message}`,
+            );
+          }
           progress.update(5, "Verifying MCP App integration");
           const verification = await verifyMcpApp({
             root: plan.root,

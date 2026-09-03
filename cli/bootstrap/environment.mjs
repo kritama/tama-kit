@@ -8,7 +8,11 @@ import { parseEnv } from "node:util";
 import { ownershipError } from "../errors.mjs";
 import { DEFAULTS } from "./constants.mjs";
 import { hasManagedMarker, operationForContent } from "./files.mjs";
-import { generateOAuthPrivateJwk, validateOAuthPrivateJwk } from "./oauth-key.mjs";
+import {
+  generateOAuthPrivateJwk,
+  validateOAuthPrivateJwk,
+  validatePublicJwkSet,
+} from "./oauth-key.mjs";
 
 const RETIRED_OAUTH_VARIABLES = ["TAMA_OAUTH_SIGNING_KEY", "TAMA_OAUTH_SIGNING_KEY_ID"];
 export const PENDING_SECRET_VALUE = "__tama-kit-pending-secret-material__";
@@ -429,27 +433,7 @@ function validateMcpAppVariables(values, filename, validation) {
     });
   }
 
-  /** @param {string | undefined} raw @returns {string | null} */
-  const originOf = (raw) => {
-    try {
-      const url = new URL(raw ?? "");
-      return `${url.protocol}//${url.host}`;
-    } catch {
-      return null;
-    }
-  };
-
-  let resource;
-  try {
-    resource = new URL(values.get("TAMA_MCP_APP_RESOURCE") ?? "");
-  } catch {
-    resource = null;
-  }
-  if (
-    resource?.pathname !== "/mcp/app" ||
-    originOf(`${resource.protocol}//${resource.host}${resource.pathname}`) !==
-      originOf(validation.resource)
-  ) {
+  if (values.get("TAMA_MCP_APP_RESOURCE") !== validation.resource) {
     throw ownershipError(
       `${filename} TAMA_MCP_APP_RESOURCE must be exactly ${validation.resource}`,
       { path: filename, variable: "TAMA_MCP_APP_RESOURCE" },
@@ -457,8 +441,7 @@ function validateMcpAppVariables(values, filename, validation) {
   }
 
   const authServer = values.get("TAMA_MCP_APP_AUTHORIZATION_SERVER");
-  const authOrigin = originOf(authServer);
-  if (authOrigin === null || authOrigin !== validation.authorizationServerOrigin) {
+  if (authServer !== validation.authorizationServerOrigin) {
     throw ownershipError(
       `${filename} TAMA_MCP_APP_AUTHORIZATION_SERVER must be the provider origin ${validation.authorizationServerOrigin}`,
       { path: filename, variable: "TAMA_MCP_APP_AUTHORIZATION_SERVER" },
@@ -468,50 +451,24 @@ function validateMcpAppVariables(values, filename, validation) {
   // The JWKS and introspection endpoints follow the transport origin when a
   // container runtime rewrite is configured; issuer validation always uses
   // the public authorization server origin above.
-  const serviceOrigin = originOf(validation.serviceOrigin);
-  if (serviceOrigin === null) {
-    throw ownershipError(`${filename} MCP App planning produced an invalid service origin`, {
+  const expectedJwks = `${validation.serviceOrigin}/.well-known/jwks.json`;
+  if (values.get("TAMA_MCP_APP_JWKS_URI") !== expectedJwks) {
+    throw ownershipError(`${filename} TAMA_MCP_APP_JWKS_URI must be exactly ${expectedJwks}`, {
       path: filename,
+      variable: "TAMA_MCP_APP_JWKS_URI",
     });
   }
 
-  let jwks;
-  try {
-    jwks = new URL(values.get("TAMA_MCP_APP_JWKS_URI") ?? "");
-  } catch {
-    jwks = null;
-  }
-  if (
-    jwks?.pathname !== "/.well-known/jwks.json" ||
-    originOf(`${jwks.protocol}//${jwks.host}`) !== serviceOrigin
-  ) {
+  const expectedIntrospection = `${validation.serviceOrigin}/auth/introspections`;
+  if (values.get("TAMA_MCP_APP_INTROSPECTION_ENDPOINT") !== expectedIntrospection) {
     throw ownershipError(
-      `${filename} TAMA_MCP_APP_JWKS_URI must be ${serviceOrigin}/.well-known/jwks.json`,
-      { path: filename, variable: "TAMA_MCP_APP_JWKS_URI" },
-    );
-  }
-
-  let introspection;
-  try {
-    introspection = new URL(values.get("TAMA_MCP_APP_INTROSPECTION_ENDPOINT") ?? "");
-  } catch {
-    introspection = null;
-  }
-  if (
-    introspection?.pathname !== "/auth/introspections" ||
-    originOf(`${introspection.protocol}//${introspection.host}`) !== serviceOrigin
-  ) {
-    throw ownershipError(
-      `${filename} TAMA_MCP_APP_INTROSPECTION_ENDPOINT must be ${serviceOrigin}/auth/introspections`,
+      `${filename} TAMA_MCP_APP_INTROSPECTION_ENDPOINT must be exactly ${expectedIntrospection}`,
       { path: filename, variable: "TAMA_MCP_APP_INTROSPECTION_ENDPOINT" },
     );
   }
 
-  const algorithms = (values.get("TAMA_MCP_APP_SIGNING_ALGORITHMS") ?? "")
-    .split(",")
-    .map((item) => item.trim());
-  if (!algorithms.includes("RS256")) {
-    throw ownershipError(`${filename} TAMA_MCP_APP_SIGNING_ALGORITHMS must include RS256`, {
+  if (values.get("TAMA_MCP_APP_SIGNING_ALGORITHMS") !== "RS256") {
+    throw ownershipError(`${filename} TAMA_MCP_APP_SIGNING_ALGORITHMS must be exactly RS256`, {
       path: filename,
       variable: "TAMA_MCP_APP_SIGNING_ALGORITHMS",
     });
@@ -521,21 +478,14 @@ function validateMcpAppVariables(values, filename, validation) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
-  for (const expected of validation.allowedOrigins) {
-    if (!allowed.includes(expected)) {
-      throw ownershipError(`${filename} TAMA_MCP_APP_ALLOWED_ORIGINS must include ${expected}`, {
-        path: filename,
-        variable: "TAMA_MCP_APP_ALLOWED_ORIGINS",
-      });
-    }
-  }
-  for (const entry of allowed) {
-    if (originOf(entry) === null) {
-      throw ownershipError(`${filename} TAMA_MCP_APP_ALLOWED_ORIGINS contains a non-origin entry`, {
-        path: filename,
-        variable: "TAMA_MCP_APP_ALLOWED_ORIGINS",
-      });
-    }
+  if (
+    allowed.length !== validation.allowedOrigins.length ||
+    allowed.some((entry, index) => entry !== validation.allowedOrigins[index])
+  ) {
+    throw ownershipError(
+      `${filename} TAMA_MCP_APP_ALLOWED_ORIGINS must exactly match the persisted integration`,
+      { path: filename, variable: "TAMA_MCP_APP_ALLOWED_ORIGINS" },
+    );
   }
 
   if (values.get("TAMA_MCP_APP_INTROSPECTION_CLIENT_ID") !== validation.introspectionClientId) {
@@ -544,6 +494,22 @@ function validateMcpAppVariables(values, filename, validation) {
       { path: filename, variable: "TAMA_MCP_APP_INTROSPECTION_CLIENT_ID" },
     );
   }
+
+  if (values.get("TAMA_MCP_APP_INTROSPECTION_SIGNING_ALGORITHM") !== "RS256") {
+    throw ownershipError(
+      `${filename} TAMA_MCP_APP_INTROSPECTION_SIGNING_ALGORITHM must be exactly RS256`,
+      { path: filename, variable: "TAMA_MCP_APP_INTROSPECTION_SIGNING_ALGORITHM" },
+    );
+  }
+
+  const publicKeys = values.get("TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS");
+  if (publicKeys === undefined) {
+    throw ownershipError(
+      `${filename} must define TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS for overlap rotation state`,
+      { path: filename, variable: "TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS" },
+    );
+  }
+  validatePublicJwkSet(publicKeys, "TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS");
 
   const privateJwk = values.get("TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY");
   const kid = values.get("TAMA_MCP_APP_INTROSPECTION_SIGNING_KEY_ID");

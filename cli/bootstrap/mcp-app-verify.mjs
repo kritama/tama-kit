@@ -40,6 +40,7 @@ async function fetchJson(fetch, url) {
   try {
     const response = await fetch(new URL(url), {
       headers: { accept: "application/json" },
+      redirect: "manual",
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
     if (!response.ok) {
@@ -486,6 +487,7 @@ async function routeProbe(fetch, url) {
   try {
     const response = await fetch(new URL(url), {
       headers: { accept: "application/json" },
+      redirect: "manual",
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
     const rejectsAnonymous = response.status === 401 || response.status === 403;

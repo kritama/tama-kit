@@ -242,10 +242,25 @@ export function createBootstrapPlan(options) {
   // public documentation renders from the persisted state when this run does
   // not plan a new MCP App topology.
   const mcpAppDoc = mcpApp ?? persistedMcpDocView(persistedMcpApp, inspection.root);
+  const environmentMcpApp =
+    mcpAppEnvironment ??
+    (mcpAppDoc
+      ? {
+          variables: {},
+          validation: {
+            mode: mcpAppDoc.lifecycle,
+            resource: mcpAppDoc.resource,
+            authorizationServerOrigin: mcpAppDoc.providerOrigin,
+            serviceOrigin: mcpAppDoc.providerOrigin,
+            allowedOrigins: mcpAppDoc.allowedOrigins,
+            introspectionClientId: mcpAppDoc.introspectionClientId,
+          },
+        }
+      : undefined);
   const environment = planEnvironment(
     inspection.root,
     options.port,
-    mcpAppEnvironment ?? undefined,
+    environmentMcpApp,
     options.materializeSecrets ?? true,
     mcpAppFreshPort,
   );

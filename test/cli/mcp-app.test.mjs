@@ -1147,6 +1147,21 @@ test("bootstrap rejects Tama image tags outside the supported contract range", (
   );
 });
 
+test("bootstrap enforces a narrower provider Tama version range", () => {
+  const root = project();
+  const contract = validContract();
+  contract.supported_tama_versions = ">= 0.13.2 and < 0.14.0";
+  const contractPath = writeContract(root, contract);
+  assert.throws(
+    () => planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.USAGE &&
+      /outside the supported Tama range >= 0\.13\.2 and < 0\.14\.0/u.test(error.message) &&
+      /accepted provider contract/u.test(error.message),
+  );
+});
+
 test("bootstrap rejects an unpinned Tama image for the MCP App integration", () => {
   const root = project();
   const contractPath = writeContract(root);
@@ -2330,6 +2345,53 @@ test("verifyMcpApp requires the protected route to reject anonymous requests", a
   }
 });
 
+test("verifyMcpApp does not follow redirects from the protected route", async () => {
+  const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
+  const enabledPlan = { ...plan, lifecycle: "enabled", providerLifecycle: "prepared" };
+  let redirectMode;
+  const result = await verifyMcpApp({
+    root,
+    plan: enabledPlan,
+    fetch: enforcingIntrospection(
+      async (input, init) => {
+        const url = input.href;
+        if (url.endsWith("/.well-known/oauth-authorization-server")) {
+          return Response.json(providerMetadata(plan));
+        }
+        if (url.endsWith("/.well-known/oauth-protected-resource/mcp/app")) {
+          return Response.json({
+            resource: plan.resource,
+            authorization_servers: [plan.providerOrigin],
+          });
+        }
+        if (url.endsWith("/.well-known/jwks.json")) {
+          return Response.json(
+            url.startsWith(plan.tamaOrigin)
+              ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+              : jwksDocument(plan.providerSigningKeyId, providerJwk),
+          );
+        }
+        if (url === plan.resource) {
+          redirectMode = init?.redirect;
+          return new Response(null, {
+            status: 302,
+            headers: { location: `${plan.tamaOrigin}/login` },
+          });
+        }
+        return Response.json({ active: false });
+      },
+      root,
+      plan,
+    ),
+    inspectProviderListener: noContainerInspection,
+  });
+  assert.equal(redirectMode, "manual");
+  assert.equal(result.verified, false);
+  const routeProbe = result.probes.find(({ name }) => name === "tama_resource_route");
+  assert.equal(routeProbe?.ok, false);
+  assert.match(routeProbe?.reason ?? "", /HTTP 302/u);
+});
+
 test("verifyMcpApp requires an RSA signing member for the expected identifier", async () => {
   const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
   const providerKey = JSON.parse(providerJwk);
@@ -2566,6 +2628,48 @@ test("ordinary reruns keep the MCP App documentation rendered from the persisted
   assert.equal(envExample?.action, "unchanged");
   const readme = rerun.operations.find((operation) => operation.path.endsWith("README.md"));
   assert.equal(readme?.action, "unchanged");
+});
+
+test("ordinary reruns reject drift in persisted MCP App environment variables", () => {
+  const root = project();
+  const contractPath = writeContract(root);
+  const contract = validContract();
+  const first = planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract }), {
+    providerOrigin: "http://host.docker.internal:4000",
+  });
+  applyOperations(first.operations);
+  const filename = join(root, ".tama.env");
+  const original = readFileSync(filename, "utf8");
+  const drifts = [
+    ["TAMA_MCP_APP_RESOURCE", "http://127.0.0.1:4001/mcp/app?drifted=true"],
+    ["TAMA_MCP_APP_AUTHORIZATION_SERVER", "http://host.docker.internal:4000/wrong"],
+    ["TAMA_MCP_APP_JWKS_URI", "http://host.docker.internal:4000/wrong"],
+    ["TAMA_MCP_APP_INTROSPECTION_ENDPOINT", "http://host.docker.internal:4000/wrong"],
+    ["TAMA_MCP_APP_SIGNING_ALGORITHMS", "RS256,HS256"],
+    ["TAMA_MCP_APP_ALLOWED_ORIGINS", "http://127.0.0.1:3000,http://example.test"],
+    ["TAMA_MCP_APP_INTROSPECTION_CLIENT_ID", "drifted-client"],
+    ["TAMA_MCP_APP_INTROSPECTION_SIGNING_ALGORITHM", "HS256"],
+    ["TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS", "not-json"],
+    ["TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY", "not-json"],
+  ];
+
+  for (const [name, value] of drifts) {
+    const drifted = original.replace(new RegExp(`^${name}=.*$`, "mu"), `${name}=${value}`);
+    assert.notEqual(drifted, original, `${name} must exist in the generated environment`);
+    writeFileSync(filename, drifted);
+    assert.throws(
+      () => createBootstrapPlan({ cwd: root, targetPath: root, image: PINNED_TAMA_IMAGE }),
+      (error) =>
+        error instanceof CLIError &&
+        error.exitCode === EXIT_CODES.OWNERSHIP &&
+        error.message.includes(name),
+      `${name} drift must fail closed`,
+    );
+  }
+  writeFileSync(filename, original);
+  assert.doesNotThrow(() =>
+    createBootstrapPlan({ cwd: root, targetPath: root, image: PINNED_TAMA_IMAGE }),
+  );
 });
 
 test("an ordinary rerun keeps the pinned image for a persisted MCP App integration", () => {

@@ -476,6 +476,13 @@ export function planMcpApp(input) {
   if (unsupported) {
     throw usageError(`${unsupported}; the MCP App integration requires a supported Tama image`);
   }
+  const providerSupportedTamaVersions = input.contractDocument?.supported_tama_versions;
+  const providerUnsupported = unsupportedTamaImage(tamaImage, providerSupportedTamaVersions);
+  if (providerUnsupported) {
+    throw usageError(
+      `${providerUnsupported}; the accepted provider contract requires a supported Tama image`,
+    );
+  }
   // A floating tag such as :latest can move outside the supported range at
   // any time, and the integration writes secrets before the runtime starts,
   // so the Tama image must be pinned to a checkable version.
