@@ -51,18 +51,22 @@ The implementation now includes:
 - explicit `--migrate-provider-identity`, which requires prepared mode and a
   verified new loader, preserves trust material and unrelated entries, writes
   the new fragment, transactionally removes the old managed fragment, and
-  updates the manifest without combining migration with activation.
+  updates the manifest without combining migration with activation;
+- persisted provider identity drift is rejected before manifest reuse,
+  contract lifecycle sets are checked against the prepared/enabled workflow,
+  and effective Git ignore rules are verified transactionally so nested
+  negations cannot leave generated secrets exposed.
 
-Verification completed on the final local tree:
+Verification completed on the final local tree with Node 24:
 
-- `node test/cli/mcp-app.test.mjs`: 41 passed;
-- `npm test` outside the filesystem sandbox: 184 passed, 1 skipped, 0 failed;
+- focused identity, lifecycle, and nested-ignore regressions: 4 passed;
+- `npm test` outside the filesystem sandbox: 226 passed, 1 skipped, 0 failed;
 - `npm run typecheck`: passed;
 - `npm run check`: passed;
 - `git diff --check`: passed;
-- `npm run validate:bootstrap`: bootstrap generation and Docker Compose config
-  passed; Terraform/OpenTofu validation could not run because no Terraform
-  executable or configured OpenTofu version is installed on this host.
+- `npm pack --dry-run`: passed;
+- GitHub Actions `Test, lint, and type-check`: passed;
+- GitHub Actions `Bootstrap integration and runtime`: passed.
 
 Real Memovee/Tama parser and live JWKS/lifecycle acceptance remains a separate
 cross-repository verification item. No result in this document claims that
