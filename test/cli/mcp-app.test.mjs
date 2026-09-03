@@ -436,6 +436,36 @@ test("verifyEnvironmentLoading confirms application-owned loaders", () => {
     verifyEnvironmentLoading(composeCommentRoot, ".acme.integration.env", null),
     "unverified",
   );
+
+  // A textual mention that is not an env_file entry (command, label, volume)
+  // does not load the fragment.
+  const decoyRoot = project();
+  writeFileSync(
+    join(decoyRoot, "compose.yaml"),
+    [
+      "services:",
+      "  app:",
+      "    command:",
+      "      - cat",
+      "      - .acme.integration.env",
+      "    labels:",
+      "      fragment: .acme.integration.env",
+      "    volumes:",
+      "      - .acme.integration.env:/frag.env:ro",
+      "",
+    ].join("\n"),
+  );
+  assert.equal(verifyEnvironmentLoading(decoyRoot, ".acme.integration.env", null), "unverified");
+
+  const inlineEnvFileRoot = project();
+  writeFileSync(
+    join(inlineEnvFileRoot, "compose.yaml"),
+    "services:\n  app:\n    env_file: .acme.integration.env\n",
+  );
+  assert.equal(
+    verifyEnvironmentLoading(inlineEnvFileRoot, ".acme.integration.env", null),
+    "verified",
+  );
 });
 
 test("contractLocalOrigin reads the provider-keyed local development origin", () => {
@@ -1346,6 +1376,30 @@ function providerMetadata(plan) {
   };
 }
 
+const JWT_PATTERN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
+
+/**
+ * Wraps a fake fetch so the provider's introspection endpoint enforces client
+ * authentication the way a real provider must: a client assertion that is not
+ * a signed JWT is rejected with HTTP 400.
+ *
+ * @param {(input: URL, init?: RequestInit) => Promise<Response>} fetch
+ */
+function enforcingIntrospection(fetch) {
+  return async (input, init) => {
+    if (/** @type {URL} */ (input).href.endsWith("/auth/introspections")) {
+      const assertion = new URLSearchParams(String(init?.body ?? "")).get("client_assertion") ?? "";
+      if (!JWT_PATTERN.test(assertion)) {
+        return new Response(JSON.stringify({ error: "invalid_client" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      }
+    }
+    return fetch(input, init);
+  };
+}
+
 /** @returns {Promise<{root: string, plan: NonNullable<ReturnType<typeof planWithMcp>["mcpApp"]>, providerJwk: string, tamaJwk: string}>} */
 async function buildVerifiedRoot() {
   const root = project();
@@ -1375,6 +1429,15 @@ test("verifyMcpApp verifies both JWKS and the inactive introspection probe", asy
   const fetch = async (input, init) => {
     const url = input.href;
     calls.push({ url, method: init?.method ?? "GET", body: init?.body });
+    if (url.endsWith("/auth/introspections")) {
+      const assertion = new URLSearchParams(String(init?.body ?? "")).get("client_assertion") ?? "";
+      if (!JWT_PATTERN.test(assertion)) {
+        return new Response(JSON.stringify({ error: "invalid_client" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      }
+    }
     if (url.endsWith("/.well-known/oauth-authorization-server")) {
       return Response.json(providerMetadata(plan));
     }
@@ -1406,16 +1469,45 @@ test("verifyMcpApp verifies both JWKS and the inactive introspection probe", asy
       { name: "inactive_introspection", ok: true },
     ],
   );
-  const introspection = calls.find((call) => call.url.endsWith("/auth/introspections"));
-  assert.ok(introspection);
-  assert.equal(introspection.method, "POST");
-  const body = new URLSearchParams(String(introspection.body));
+  const introspectionCalls = calls.filter((call) => call.url.endsWith("/auth/introspections"));
+  assert.equal(introspectionCalls.length, 2);
+  const controlBody = new URLSearchParams(String(introspectionCalls[0]?.body));
+  assert.doesNotMatch(String(controlBody.get("client_assertion")), JWT_PATTERN);
+  const body = new URLSearchParams(String(introspectionCalls[1]?.body));
   assert.equal(body.get("token"), "tama-kit-bootstrap-inactive-probe");
   assert.equal(
     body.get("client_assertion_type"),
     "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
   );
-  assert.match(body.get("client_assertion"), /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u);
+  assert.match(body.get("client_assertion"), JWT_PATTERN);
+});
+
+test("verifyMcpApp rejects an introspection endpoint that accepts invalid client assertions", async () => {
+  const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
+  const result = await verifyMcpApp({
+    root,
+    plan,
+    // A public endpoint answers the negative control exactly like the
+    // authenticated request, so the probe must fail before trusting it.
+    fetch: async (input) => {
+      const url = input.href;
+      if (url.endsWith("/.well-known/oauth-authorization-server")) {
+        return Response.json(providerMetadata(plan));
+      }
+      if (url.endsWith("/.well-known/jwks.json")) {
+        return Response.json(
+          url.startsWith(plan.tamaOrigin)
+            ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+            : jwksDocument(plan.providerSigningKeyId, providerJwk),
+        );
+      }
+      return Response.json({ active: false });
+    },
+  });
+  const probe = result.probes.find(({ name }) => name === "inactive_introspection");
+  assert.equal(probe?.ok, false);
+  assert.match(probe?.reason ?? "", /invalid client assertion/u);
+  assert.equal(result.verified, false);
 });
 
 test("verifyMcpApp reports each failed probe independently", async () => {
@@ -1424,7 +1516,7 @@ test("verifyMcpApp reports each failed probe independently", async () => {
   const wrongProvider = await verifyMcpApp({
     root,
     plan,
-    fetch: async (input) => {
+    fetch: enforcingIntrospection(async (input) => {
       const url = input.href;
       if (url.endsWith("/.well-known/oauth-authorization-server")) {
         return Response.json(providerMetadata(plan));
@@ -1436,7 +1528,7 @@ test("verifyMcpApp reports each failed probe independently", async () => {
         status: 200,
         headers: { "content-type": "application/json" },
       });
-    },
+    }),
   });
   assert.equal(wrongProvider.mode, "prepared");
   assert.equal(wrongProvider.providerReachable, false);
@@ -1448,7 +1540,7 @@ test("verifyMcpApp reports each failed probe independently", async () => {
   const activeToken = await verifyMcpApp({
     root,
     plan,
-    fetch: async (input) => {
+    fetch: enforcingIntrospection(async (input) => {
       const url = input.href;
       if (url.endsWith("/.well-known/oauth-authorization-server")) {
         return Response.json(providerMetadata(plan));
@@ -1470,7 +1562,7 @@ test("verifyMcpApp reports each failed probe independently", async () => {
         status: 200,
         headers: { "content-type": "application/json" },
       });
-    },
+    }),
   });
   assert.equal(activeToken.verified, false);
 
@@ -1501,7 +1593,7 @@ test("verifyMcpApp gates enabled metadata, route, and exact provider advertiseme
   const result = await verifyMcpApp({
     root,
     plan: enabledPlan,
-    fetch: async (input) => {
+    fetch: enforcingIntrospection(async (input) => {
       const url = input.href;
       if (url.endsWith("/.well-known/oauth-authorization-server")) {
         return Response.json({
@@ -1526,7 +1618,7 @@ test("verifyMcpApp gates enabled metadata, route, and exact provider advertiseme
         return Response.json({ error: "missing_token" }, { status: 401 });
       }
       return Response.json({ active: false });
-    },
+    }),
   });
   assert.equal(result.verified, true);
   assert.deepEqual(
@@ -1549,7 +1641,7 @@ test("verifyMcpApp rejects a JWKS whose key material does not match the persiste
   const staleProvider = await verifyMcpApp({
     root,
     plan,
-    fetch: async (input) => {
+    fetch: enforcingIntrospection(async (input) => {
       const url = input.href;
       if (url.endsWith("/.well-known/oauth-authorization-server")) {
         return Response.json(providerMetadata(plan));
@@ -1562,7 +1654,7 @@ test("verifyMcpApp rejects a JWKS whose key material does not match the persiste
         );
       }
       return Response.json({ active: false });
-    },
+    }),
   });
   assert.equal(staleProvider.verified, false);
   assert.equal(staleProvider.providerReachable, false);
@@ -1574,7 +1666,7 @@ test("verifyMcpApp rejects a JWKS whose key material does not match the persiste
   const staleTama = await verifyMcpApp({
     root,
     plan,
-    fetch: async (input) => {
+    fetch: enforcingIntrospection(async (input) => {
       const url = input.href;
       if (url.endsWith("/.well-known/oauth-authorization-server")) {
         return Response.json(providerMetadata(plan));
@@ -1587,7 +1679,7 @@ test("verifyMcpApp rejects a JWKS whose key material does not match the persiste
         );
       }
       return Response.json({ active: false });
-    },
+    }),
   });
   assert.equal(staleTama.verified, false);
   assert.equal(staleTama.providerReachable, true);
@@ -1605,7 +1697,7 @@ test("verifyMcpApp rejects a JWKS that exposes private members under the expecte
   const leaked = await verifyMcpApp({
     root,
     plan,
-    fetch: async (input) => {
+    fetch: enforcingIntrospection(async (input) => {
       const url = input.href;
       if (url.endsWith("/.well-known/oauth-authorization-server")) {
         return Response.json(providerMetadata(plan));
@@ -1618,7 +1710,7 @@ test("verifyMcpApp rejects a JWKS that exposes private members under the expecte
         return Response.json(body);
       }
       return Response.json({ active: false });
-    },
+    }),
   });
   assert.equal(leaked.verified, false);
   assert.equal(leaked.providerReachable, false);
@@ -1629,21 +1721,23 @@ test("verifyMcpApp rejects a JWKS that exposes private members under the expecte
 
 test("verifyMcpApp probes the host-native provider over the loopback transport", async () => {
   const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
-  const fetchWith =
-    (metadata) => async (/** @type {URL} */ input, /** @type {RequestInit | undefined} */ init) => {
-      const url = input.href;
-      calls.push({ url, method: init?.method ?? "GET", body: init?.body });
-      if (url.endsWith("/.well-known/oauth-authorization-server")) {
-        return Response.json(metadata);
-      }
-      if (url.endsWith("/.well-known/jwks.json")) {
-        const body = url.startsWith(plan.tamaOrigin)
-          ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
-          : jwksDocument(plan.providerSigningKeyId, providerJwk);
-        return Response.json(body);
-      }
-      return Response.json({ active: false });
-    };
+  const fetchWith = (metadata) =>
+    enforcingIntrospection(
+      async (/** @type {URL} */ input, /** @type {RequestInit | undefined} */ init) => {
+        const url = input.href;
+        calls.push({ url, method: init?.method ?? "GET", body: init?.body });
+        if (url.endsWith("/.well-known/oauth-authorization-server")) {
+          return Response.json(metadata);
+        }
+        if (url.endsWith("/.well-known/jwks.json")) {
+          const body = url.startsWith(plan.tamaOrigin)
+            ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+            : jwksDocument(plan.providerSigningKeyId, providerJwk);
+          return Response.json(body);
+        }
+        return Response.json({ active: false });
+      },
+    );
   const calls = [];
   const result = await verifyMcpApp({ root, plan, fetch: fetchWith(providerMetadata(plan)) });
   assert.equal(plan.providerOrigin, "http://host.docker.internal:4000");
@@ -1659,9 +1753,9 @@ test("verifyMcpApp probes the host-native provider over the loopback transport",
     )?.url,
     "http://127.0.0.1:4000/.well-known/jwks.json",
   );
-  const introspection = calls.find((call) => call.url.endsWith("/auth/introspections"));
-  assert.equal(introspection?.url, "http://127.0.0.1:4000/auth/introspections");
-  const assertion = new URLSearchParams(String(introspection?.body)).get("client_assertion");
+  const authenticated = calls.filter((call) => call.url.endsWith("/auth/introspections")).at(-1);
+  assert.equal(authenticated?.url, "http://127.0.0.1:4000/auth/introspections");
+  const assertion = new URLSearchParams(String(authenticated?.body)).get("client_assertion");
   const payload = JSON.parse(
     Buffer.from(/** @type {string} */ (assertion).split(".")[1], "base64url").toString("utf8"),
   );
@@ -1683,7 +1777,7 @@ test("verifyMcpApp requires the protected route to reject anonymous requests", a
     verifyMcpApp({
       root,
       plan: enabledPlan,
-      fetch: async (input) => {
+      fetch: enforcingIntrospection(async (input) => {
         const url = input.href;
         if (url.endsWith("/.well-known/oauth-authorization-server")) {
           return Response.json(providerMetadata(plan));
@@ -1705,7 +1799,7 @@ test("verifyMcpApp requires the protected route to reject anonymous requests", a
           return new Response(null, { status });
         }
         return Response.json({ active: false });
-      },
+      }),
     });
   for (const status of [200, 400, 404, 503]) {
     const result = await withRouteStatus(status);
@@ -1738,7 +1832,7 @@ test("verifyMcpApp requires an RSA signing member for the expected identifier", 
     const result = await verifyMcpApp({
       root,
       plan,
-      fetch: async (input) => {
+      fetch: enforcingIntrospection(async (input) => {
         const url = input.href;
         if (url.endsWith("/.well-known/oauth-authorization-server")) {
           return Response.json(providerMetadata(plan));
@@ -1750,7 +1844,7 @@ test("verifyMcpApp requires an RSA signing member for the expected identifier", 
           return Response.json(body);
         }
         return Response.json({ active: false });
-      },
+      }),
     });
     assert.equal(result.providerReachable, false, JSON.stringify(member));
     assert.equal(result.probes.find(({ name }) => name === "provider_jwks")?.ok, false);

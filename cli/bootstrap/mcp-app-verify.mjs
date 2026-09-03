@@ -8,6 +8,7 @@ import { readEnvironmentValues } from "./environment.mjs";
 
 const CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
 const INACTIVE_PROBE_TOKEN = "tama-kit-bootstrap-inactive-probe";
+const NEGATIVE_CONTROL_CLIENT_ASSERTION = "tama-kit-bootstrap-negative-control-invalid-assertion";
 const PROBE_TIMEOUT_MS = 10_000;
 const TAMA_INTROSPECTION_KEY_VARIABLE = "TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY";
 
@@ -231,13 +232,35 @@ async function introspectInactiveToken({ root, plan, fetch }) {
   if (assertion === null) {
     return probe("inactive_introspection", false, "could not sign the client assertion");
   }
+  const headers = {
+    "content-type": "application/x-www-form-urlencoded",
+    accept: "application/json",
+  };
   try {
+    // Negative control: a deliberately invalid client assertion must be
+    // rejected. An endpoint that answers it anyway is not enforcing client
+    // authentication, so the authenticated result below could prove nothing.
+    const control = await fetch(new URL(endpoint), {
+      method: "POST",
+      headers,
+      body: new URLSearchParams({
+        token: INACTIVE_PROBE_TOKEN,
+        client_assertion: NEGATIVE_CONTROL_CLIENT_ASSERTION,
+        client_assertion_type: CLIENT_ASSERTION_TYPE,
+      }).toString(),
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    if (control.ok) {
+      return probe(
+        "inactive_introspection",
+        false,
+        `provider accepted an invalid client assertion (HTTP ${control.status}); the ` +
+          `introspection endpoint does not enforce client authentication`,
+      );
+    }
     const response = await fetch(new URL(endpoint), {
       method: "POST",
-      headers: {
-        "content-type": "application/x-www-form-urlencoded",
-        accept: "application/json",
-      },
+      headers,
       body: new URLSearchParams({
         token: INACTIVE_PROBE_TOKEN,
         client_assertion: assertion,
@@ -287,10 +310,11 @@ async function routeProbe(fetch, url) {
 /**
  * Verifies a running MCP App integration: the provider publishes the exact
  * access-token key the bootstrap planned from the persisted private JWK,
- * Tama publishes the exact introspection key, Tama's authenticated
- * inactive-token introspection is rejected by the provider exactly as an
- * inactive token must be, and (in enabled mode) the protected route rejects
- * anonymous requests. Provider probes travel over a host-resolvable
+ * Tama publishes the exact introspection key, the provider rejects a
+ * deliberately invalid client assertion (negative control) and then answers
+ * Tama's authenticated inactive-token introspection exactly as an inactive
+ * token must be, and (in enabled mode) the protected route rejects anonymous
+ * requests. Provider probes travel over a host-resolvable
  * transport while the advertised issuer is still validated. All probes are
  * read-only; nothing is activated or mutated here.
  *

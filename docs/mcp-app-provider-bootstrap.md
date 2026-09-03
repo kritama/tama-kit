@@ -103,8 +103,10 @@ new prepared identity before activating it.
 
 Run bootstrap with `--start --activate`. Tama Kit first writes and starts both
 sides as prepared, then verifies provider metadata, both JWKS documents, and
-an authenticated inactive-token introspection. Every probe is read-only and
-runs on the host; when the provider origin is `host.docker.internal` the
+the inactive-token introspection — first proving the provider rejects a
+deliberately invalid client assertion (negative control), then requiring the
+authenticated request to answer exactly as an inactive token must. Every probe
+is read-only and runs on the host; when the provider origin is `host.docker.internal` the
 provider probes travel over the host-resolvable loopback transport, while the
 advertised issuer and JWKS URI are still validated against the exact planned
 origin. Each JWKS must publish an RSA signing member (compatible `RS256`

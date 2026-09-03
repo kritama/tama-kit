@@ -75,7 +75,9 @@ npx @kritama/tama-kit bootstrap --start
 Use `--mcp-app` from the provider application's repository. Contract-aware
 providers can commit `priv/contracts/tama-mcp-app-bootstrap-v1.json`; other
 providers must supply an explicit name and origin. Non-interactive runs also
-require the exact browser/MCP client origins:
+require the exact browser/MCP client origins. The integration requires a Tama
+image pinned to a stable release inside the supported range (the floating
+default tag is rejected):
 
 ```bash
 npx @kritama/tama-kit bootstrap --mcp-app \
@@ -83,7 +85,8 @@ npx @kritama/tama-kit bootstrap --mcp-app \
   --provider-origin http://host.docker.internal:4000 \
   --tama-origin http://127.0.0.1:4001 \
   --allowed-origin http://127.0.0.1:3000 \
-  --port 4001
+  --port 4001 \
+  --image ghcr.io/upmaru/tama:0.13.1
 ```
 
 The provider origin must be one origin reachable from both the host-native
@@ -100,7 +103,8 @@ npx @kritama/tama-kit bootstrap --mcp-app \
   --provider-origin http://host.docker.internal:4000 \
   --tama-origin http://127.0.0.1:4001 \
   --allowed-origin http://127.0.0.1:3000 \
-  --port 4001 --start --activate
+  --port 4001 \
+  --image ghcr.io/upmaru/tama:0.13.1 --start --activate
 ```
 
 The first run verifies prepared state and enables/restarts Tama, then reports
@@ -121,7 +125,9 @@ npx @kritama/tama-kit bootstrap --mcp-app \
   --migrate-provider-identity --provider-name new-name \
   --provider-origin http://host.docker.internal:4000 \
   --tama-origin http://127.0.0.1:4001 \
-  --allowed-origin http://127.0.0.1:3000 --port 4001
+  --allowed-origin http://127.0.0.1:3000 \
+  --port 4001 \
+  --image ghcr.io/upmaru/tama:0.13.1
 ```
 
 The migration moves preserved provider-owned entries to the new fragment,

@@ -3,7 +3,7 @@
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-
+import { parseDocument } from "yaml";
 import { usageError } from "../errors.mjs";
 
 /** @typedef {import("../types.mjs").ProviderBindings} ProviderBindings */
@@ -893,22 +893,39 @@ function envrcLoadsFragment(envrc, environmentFile) {
 }
 
 /**
- * Reports whether a Compose file references the fragment on an active (non
- * comment) line, with the name standing alone rather than embedded in a
- * longer token.
+ * Reports whether a Compose file loads the fragment: the name must appear as
+ * a service `env_file` entry (string, flow list, or block list form). A
+ * textual mention in a command, label, or volume does not load the file, so
+ * it does not count.
  *
  * @param {string} compose
  * @param {string} environmentFile
  * @returns {boolean}
  */
 function composeReferencesFragment(compose, environmentFile) {
-  const escaped = environmentFile.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  const reference = new RegExp(`(^|[^A-Za-z0-9._-])${escaped}(?=$|[^A-Za-z0-9._-])`, "u");
-  for (const line of compose.split(/\r?\n/u)) {
-    if (line.trim().startsWith("#")) {
+  const document = parseDocument(compose);
+  if (document.errors.length > 0) {
+    return false;
+  }
+  const root = document.toJS();
+  const services = isPlainObject(root) && isPlainObject(root.services) ? root.services : null;
+  if (services === null) {
+    return false;
+  }
+  for (const service of Object.values(services)) {
+    if (!isPlainObject(service)) {
       continue;
     }
-    if (reference.test(line)) {
+    const envFile = service.env_file;
+    const entries = Array.isArray(envFile) ? envFile : envFile === undefined ? [] : [envFile];
+    if (
+      entries.some(
+        (entry) =>
+          entry === environmentFile ||
+          entry === `./${environmentFile}` ||
+          (isPlainObject(entry) && entry.path === environmentFile),
+      )
+    ) {
       return true;
     }
   }
