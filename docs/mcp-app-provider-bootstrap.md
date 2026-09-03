@@ -24,11 +24,15 @@ Compose namespaces.
 
 `--provider-origin` is both the public OAuth issuer and the origin used by Tama
 for provider metadata, JWKS, and introspection. It must be reachable from the
-host and the Tama container. Loopback provider origins are rejected: every
-verification probe runs on the host, so a loopback provider would pass them
-while the Tama container can never reach it. If its hostname is
-`host.docker.internal`, Tama Kit adds the Compose host-gateway mapping and
-keeps it on ordinary reruns.
+host and the Tama container. Any loopback provider origin is rejected —
+`localhost`, the full `127.0.0.0/8` range, `::1`, and IPv4-mapped loopback
+forms: every verification probe runs on the host, so a loopback provider would
+pass them while the Tama container can never reach it. An
+`https://host.docker.internal` origin is also rejected because the gateway name
+resolves only inside the container, so host-side TLS probes could not validate
+the certificate for that name; use `http://host.docker.internal:<port>` for the
+container-gateway topology. If its hostname is `host.docker.internal`, Tama Kit
+adds the Compose host-gateway mapping and keeps it on ordinary reruns.
 
 `--tama-origin` is the exact public Tama origin. It defaults from an accepted
 contract or to loopback at the selected Tama port. A fresh run without
@@ -47,12 +51,22 @@ manifest block) before bootstrapping the new port with `--mcp-app`.
 Pass at least one repeatable `--allowed-origin` for the actual browser or MCP
 client. Tama Kit never infers client origins from either service origin.
 
+## Tama image
+
+The MCP App integration writes trust material before the runtime starts, so
+`--mcp-app` requires a Tama image pinned to a version inside the bundled
+contract's supported range. Floating tags such as `latest` are rejected: they
+can move outside the range after secrets are written, leaving a runtime Tama
+Kit cannot hold to the contract.
+
 ## Private files
 
 Bootstrap manages `.tama.env`, `.tama.postgres.env`, and the provider fragment
 such as `.memovee.integration.env` as mode `0600` secret files. Root-anchored
 ignore rules are written before the files, and tracked or staged secret files
-cause bootstrap to stop. Existing keys and valid public overlap sets are
+cause bootstrap to stop — including a persisted provider fragment on an
+ordinary rerun, because the fragment holds the provider's private signing key.
+Existing keys and valid public overlap sets are
 preserved. A fresh overlap set is `[]`; the current public key is published by
 the runtime and must not be duplicated in its rotation set.
 

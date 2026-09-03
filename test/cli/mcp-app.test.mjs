@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -213,6 +214,10 @@ function preparedFor(root, extra = {}) {
   };
 }
 
+// The MCP App integration requires a pinned Tama image, so every planned
+// integration in the suite uses one inside the bundled supported range.
+const PINNED_TAMA_IMAGE = "ghcr.io/upmaru/tama:0.13.1";
+
 /**
  * @param {string} root
  * @param {ReturnType<typeof preparedFor>} prepared
@@ -222,6 +227,7 @@ function planWithMcp(root, prepared, mcpApp = {}) {
   return createBootstrapPlan({
     cwd: root,
     targetPath: root,
+    image: PINNED_TAMA_IMAGE,
     port: existsSync(join(root, ".tama.env")) ? undefined : 4001,
     mcpApp: {
       requested: true,
@@ -418,11 +424,12 @@ test("contractLocalOrigin reads the provider-keyed local development origin", ()
 test("unsupportedTamaImage checks semver tags against the contract range", () => {
   const range = loadTamaContract().supported_tama_versions;
   assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:latest", range), null);
-  assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.0", range), null);
+  assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1", range), null);
   assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.5", range), null);
+  assert.match(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.0", range) ?? "", /0\.13\.0/u);
   assert.match(unsupportedTamaImage("ghcr.io/upmaru/tama:0.12.0", range) ?? "", /0\.12\.0/u);
   assert.match(unsupportedTamaImage("ghcr.io/upmaru/tama:0.14.0", range) ?? "", /0\.14\.0/u);
-  assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.0", null), null);
+  assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1", null), null);
 });
 
 test("provider identity normalization derives the prefix and fragment file", () => {
@@ -767,8 +774,10 @@ test("bootstrap keeps provider endpoints on one shared origin and rejects loopba
 
   for (const loopbackOrigin of [
     "http://127.0.0.1:4000",
+    "http://127.1.2.3:4000",
     "http://localhost:4000",
     "http://[::1]:4000",
+    "http://[::ffff:127.0.0.1]:4000",
   ]) {
     const loopbackRoot = project();
     const loopbackContractPath = writeContract(loopbackRoot);
@@ -860,6 +869,29 @@ test("bootstrap rejects Tama image tags outside the supported contract range", (
   assert.ok(
     planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })).mcpApp,
   );
+});
+
+test("bootstrap rejects an unpinned Tama image for the MCP App integration", () => {
+  const root = project();
+  const contractPath = writeContract(root);
+  const contract = validContract();
+  for (const image of ["ghcr.io/upmaru/tama:latest", "ghcr.io/upmaru/tama"]) {
+    assert.throws(
+      () =>
+        createBootstrapPlan({
+          cwd: root,
+          targetPath: root,
+          image,
+          mcpApp: { requested: true, activate: false },
+          mcpAppPrepared: preparedFor(root, { contractPath, contractDocument: contract }),
+        }),
+      (error) =>
+        error instanceof CLIError &&
+        error.exitCode === EXIT_CODES.USAGE &&
+        /requires a pinned Tama image/u.test(error.message) &&
+        /unresolvable tag/u.test(error.message),
+    );
+  }
 });
 
 test("bootstrap fails closed when the provider identity or contract bindings drift", () => {
@@ -1145,6 +1177,7 @@ test("bootstrap derives MCP App origins from the persisted Tama port", () => {
   const first = createBootstrapPlan({
     cwd: root,
     targetPath: root,
+    image: PINNED_TAMA_IMAGE,
     port: 4567,
     mcpApp: {
       requested: true,
@@ -1752,6 +1785,7 @@ test("bootstrap derives the fresh Tama port from the accepted contract", () => {
   const plan = createBootstrapPlan({
     cwd: root,
     targetPath: root,
+    image: PINNED_TAMA_IMAGE,
     mcpApp: {
       requested: true,
       activate: false,
@@ -1775,6 +1809,7 @@ test("bootstrap rejects a Tama port that collides with the host-native provider"
       createBootstrapPlan({
         cwd: root,
         targetPath: root,
+        image: PINNED_TAMA_IMAGE,
         port: 4000,
         mcpApp: {
           requested: true,
@@ -1790,6 +1825,21 @@ test("bootstrap rejects a Tama port that collides with the host-native provider"
   );
 });
 
+test("bootstrap rejects an https container-gateway provider origin", () => {
+  const root = project();
+  assert.throws(
+    () =>
+      planWithMcp(root, preparedFor(root), {
+        providerOrigin: "https://host.docker.internal:5000",
+      }),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.USAGE &&
+      /cannot be verified from the host/u.test(error.message) &&
+      /http:\/\/host\.docker\.internal:5000/u.test(error.message),
+  );
+});
+
 test("bootstrap retains the host-gateway mapping on ordinary reruns", () => {
   const root = project();
   const contractPath = writeContract(root);
@@ -1802,11 +1852,34 @@ test("bootstrap retains the host-gateway mapping on ordinary reruns", () => {
 
   // The mapping is derived from the persisted provider origin, so an
   // ordinary rerun re-renders the identical Compose file.
-  const rerun = createBootstrapPlan({ cwd: root, targetPath: root });
+  const rerun = createBootstrapPlan({ cwd: root, targetPath: root, image: PINNED_TAMA_IMAGE });
   const composeOperation = rerun.operations.find((operation) =>
     operation.path.endsWith(join("tama", "compose.yaml")),
   );
   assert.equal(composeOperation?.action, "unchanged");
+});
+
+test("bootstrap rejects a tracked provider fragment even on ordinary reruns", () => {
+  const root = project();
+  execFileSync("git", ["init", "--quiet"], { cwd: root });
+  const contractPath = writeContract(root);
+  const contract = validContract();
+  const first = planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract }), {
+    providerOrigin: "http://host.docker.internal:4000",
+  });
+  applyOperations(first.operations);
+
+  // The fragment holds the provider's private signing key: force-adding it to
+  // the index must fail every subsequent plan, not only --mcp-app runs.
+  execFileSync("git", ["add", "--force", ".memovee.integration.env"], { cwd: root });
+  assert.throws(
+    () => createBootstrapPlan({ cwd: root, targetPath: root }),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      error.message.includes(".memovee.integration.env") &&
+      error.details.paths.includes(".memovee.integration.env"),
+  );
 });
 
 test("the bootstrap command plans the provider integration from explicit flags", async () => {
@@ -1821,6 +1894,8 @@ test("the bootstrap command plans the provider integration from explicit flags",
     "--mcp-app",
     "--port",
     "4001",
+    "--image",
+    "ghcr.io/upmaru/tama:0.13.1",
     "--provider-name",
     "acme",
     "--provider-origin",
@@ -1866,6 +1941,8 @@ test("MCP App JSON dry-runs are byte-for-byte deterministic and write no secrets
     "--mcp-app",
     "--port",
     "4001",
+    "--image",
+    "ghcr.io/upmaru/tama:0.13.1",
     "--provider-name",
     "acme",
     "--provider-origin",
@@ -1898,6 +1975,8 @@ test("the bootstrap command discovers the contract identity for --mcp-app", asyn
     "--mcp-app",
     "--port",
     "4001",
+    "--image",
+    "ghcr.io/upmaru/tama:0.13.1",
     "--allowed-origin",
     "http://127.0.0.1:3000",
   ]);

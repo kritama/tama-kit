@@ -86,15 +86,17 @@ export function createBootstrapPlan(options) {
       "internal error: the MCP App provider identity must be prepared before planning",
     );
   }
-  validateSecretFilesUntracked(inspection.root, [
+  // A persisted provider fragment holds the provider's private signing key,
+  // so it is a tracked-secret failure on every run, not only --mcp-app runs.
+  const persistedMcpApp = readMcpAppProvider(inspection.tamaDirectory);
+  const secretFiles = [
     ".tama.env",
     ".tama.postgres.env",
     ...(mcpAppPrepared ? [mcpAppPrepared.identity.environmentFile] : []),
-    ...(mcpAppPrepared?.persisted &&
-    mcpAppPrepared.persisted.identity.environmentFile !== mcpAppPrepared.identity.environmentFile
-      ? [mcpAppPrepared.persisted.identity.environmentFile]
-      : []),
-  ]);
+    ...(mcpAppPrepared?.persisted ? [mcpAppPrepared.persisted.identity.environmentFile] : []),
+    ...(persistedMcpApp ? [persistedMcpApp.identity.environmentFile] : []),
+  ];
+  validateSecretFilesUntracked(inspection.root, [...new Set(secretFiles)]);
   const mcpAppState = mcpAppPrepared
     ? resolveMcpAppState({
         root: inspection.root,
@@ -113,7 +115,6 @@ export function createBootstrapPlan(options) {
   // client id, and the provider fragment to the persisted Tama origin.
   // Planning a different port without --mcp-app would leave all of them on
   // the old origin, so the port change is rejected instead.
-  const persistedMcpApp = readMcpAppProvider(inspection.tamaDirectory);
   const persistedTamaOriginValue =
     persistedMcpApp?.tamaOrigin ?? persistedTamaOrigin(inspection.root);
   if (persistedTamaOriginValue !== null) {

@@ -525,6 +525,21 @@ export function unsupportedTamaImage(image, supportedRange) {
   return null;
 }
 
+/**
+ * Reports the Tama image tag when it is not a pinned version. Floating tags
+ * such as `latest` cannot be checked against the supported range offline, so
+ * planning the MCP App integration against them would start a runtime Tama
+ * Kit cannot hold to the contract once the tag moves.
+ *
+ * @param {string} image
+ * @returns {string | null} the unresolvable tag, or null for a pinned one
+ */
+export function unpinnedTamaImageTag(image) {
+  const separator = image.lastIndexOf(":");
+  const tag = separator > image.lastIndexOf("/") ? image.slice(separator + 1) : "latest";
+  return parseSemver(tag) === null ? tag : null;
+}
+
 /** @param {string} value @returns {[number, number, number] | null} */
 function parseSemver(value) {
   const match = value.match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?$/u);

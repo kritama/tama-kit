@@ -1,7 +1,7 @@
 {
   "schema_version": "1",
   "compatibility_identifier": "tama-mcp-app-bootstrap-v1",
-  "supported_tama_versions": ">= 0.13.0 and < 0.14.0",
+  "supported_tama_versions": ">= 0.13.1 and < 0.14.0",
   "lifecycle": {
     "default_production_mode": "disabled",
     "modes": ["disabled", "prepared", "enabled"],

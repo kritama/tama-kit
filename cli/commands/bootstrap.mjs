@@ -52,7 +52,7 @@ function usage() {
     "Options:",
     "  --compose <path>       Select an existing Compose file",
     "  --port <port>          Host port for Tama (default: 4000)",
-    "  --image <reference>    Override the tested Tama image",
+    "  --image <reference>    Override the tested Tama image (pinned tag required for --mcp-app)",
     "  --skills <mode>        Agent skills: local or manual",
     "  --dry-run              Inspect and report without writing",
     "  --start                Start Compose and wait for Tama health",

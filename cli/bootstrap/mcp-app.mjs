@@ -16,6 +16,7 @@ import {
   discoverProviderContract,
   loadTamaContract,
   resolveBindings,
+  unpinnedTamaImageTag,
   unsupportedTamaImage,
   verifyEnvironmentLoading,
 } from "./mcp-app-contract.mjs";
@@ -84,15 +85,44 @@ export function normalizeMcpAppOrigin(value, flag) {
 }
 
 /**
- * Reports whether a URL hostname is a loopback address. Loopback is valid for
- * client and Tama origins (both are reached from the host) but never for the
- * provider origin, which the Tama container must also reach.
+ * Reports whether a URL hostname names a loopback address: localhost, the
+ * full IPv4 127.0.0.0/8 range, the IPv6 loopback, and IPv4-mapped loopback
+ * forms. Loopback is valid for client and Tama origins (both are reached from
+ * the host) but never for the provider origin, which the Tama container must
+ * also reach: from inside the container 127/8 is the container itself.
  *
  * @param {string} hostname
  * @returns {boolean}
  */
 function isLoopbackHostname(hostname) {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+  const bare =
+    hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+  if (bare === "localhost") {
+    return true;
+  }
+  const ipv4 = bare.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/u);
+  if (ipv4) {
+    const octets = ipv4.slice(1, 5).map((part) => Number(part));
+    return octets.every((octet) => octet <= 255) && octets[0] === 127;
+  }
+  const ipv6 = bare.toLowerCase();
+  if (ipv6 === "::1") {
+    return true;
+  }
+  const dottedMapped = ipv6.match(/^::ffff:(\d{1,3})\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u);
+  if (dottedMapped !== null) {
+    return Number(dottedMapped[1]) === 127;
+  }
+  // WHATWG URLs render IPv4-mapped loopback addresses with hex groups
+  // (127.0.0.1 becomes ::ffff:7f00:1), so the 32-bit suffix is decoded
+  // instead of pattern-matched against a dotted form.
+  const hexMapped = ipv6.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u);
+  if (hexMapped !== null) {
+    const mappedAddress =
+      (Number.parseInt(hexMapped[1], 16) << 16) | Number.parseInt(hexMapped[2], 16);
+    return mappedAddress >>> 24 === 127;
+  }
+  return false;
 }
 
 /**
@@ -417,6 +447,17 @@ export function planMcpApp(input) {
   if (unsupported) {
     throw usageError(`${unsupported}; the MCP App integration requires a supported Tama image`);
   }
+  // A floating tag such as :latest can move outside the supported range at
+  // any time, and the integration writes secrets before the runtime starts,
+  // so the Tama image must be pinned to a checkable version.
+  const unpinnedTag = unpinnedTamaImageTag(tamaImage);
+  if (unpinnedTag !== null) {
+    throw usageError(
+      `the MCP App integration requires a pinned Tama image, but ${tamaImage} uses the ` +
+        `unresolvable tag ${unpinnedTag}; pass --image with a version inside the supported ` +
+        `Tama range ${tamaContract.supported_tama_versions}`,
+    );
+  }
 
   if (persisted) {
     const identityFields = /** @type {(keyof ProviderIdentity)[]} */ ([
@@ -479,6 +520,19 @@ export function planMcpApp(input) {
         ? 443
         : 80
       : Number(providerUrl.port);
+  // An https container-gateway origin cannot be verified from the host: the
+  // name resolves only inside the Tama container, and the host-side TLS
+  // probes would validate the certificate against the loopback transport
+  // instead of the name it was issued for.
+  if (providerUrl.protocol === "https:" && providerUrl.hostname === "host.docker.internal") {
+    throw usageError(
+      `the provider origin ${providerOrigin} cannot be verified from the host: host.docker.internal ` +
+        `resolves only inside the Tama container, so the host-side TLS probes would validate the ` +
+        `certificate against a loopback transport instead of that name. Pass --provider-origin with ` +
+        `http://host.docker.internal:${providerUrl.port || "80"} (the documented container-gateway ` +
+        `topology) or with a host-resolvable https origin`,
+    );
+  }
   if (providerUrl.hostname === "host.docker.internal" && providerHostPort === port) {
     throw usageError(
       `the selected Tama port ${port} collides with the provider origin ${providerOrigin}; ` +
