@@ -1,6 +1,7 @@
 // @ts-check
 
 /** @typedef {"create" | "update"} WriteAction */
+/** @typedef {"delete"} DeleteAction */
 /** @typedef {"unchanged"} UnchangedAction */
 /** @typedef {"tama-kit" | "user" | string} FileOwner */
 
@@ -29,7 +30,19 @@
  * @property {string} reason
  */
 
-/** @typedef {WriteOperation | UnchangedOperation} FileOperation */
+/**
+ * @typedef {object} DeleteOperation
+ * @property {DeleteAction} action
+ * @property {string} path
+ * @property {FileOwner} owner
+ * @property {boolean} sensitive
+ * @property {number} [mode]
+ * @property {string} beforeDigest
+ * @property {null} afterDigest
+ * @property {string} reason
+ */
+
+/** @typedef {WriteOperation | DeleteOperation | UnchangedOperation} FileOperation */
 
 /**
  * @typedef {object} FileOperationOptions
@@ -41,6 +54,112 @@
 
 /** @typedef {"rails" | "phoenix" | "node" | "generic"} Framework */
 /** @typedef {"local" | "manual"} AgentSkillMode */
+/** @typedef {"disabled" | "prepared" | "enabled"} McpAppMode */
+
+/**
+ * @typedef {object} EnvironmentLoadingEvidence
+ * @property {"verified" | "unverified"} status
+ * @property {"direnv" | "compose-env-file" | null} mechanism
+ * @property {string | null} evidencePath
+ */
+
+/**
+ * @typedef {object} McpAppLocalContract
+ * @property {"1"} schema_version
+ * @property {"tama-kit-mcp-app-local-provider-contract"} kind
+ * @property {"tama-mcp-app-bootstrap-v1"} compatibility_identifier
+ * @property {"local-development"} scope
+ * @property {{type: "generated" | "provider-contract", provider_contract_path: string | null, provider_contract_digest: string | null}} source
+ * @property {{name: string, environment_prefix: string, environment_file: string}} provider
+ * @property {{modes: McpAppMode[]}} lifecycle
+ * @property {Record<string, string>} bindings
+ * @property {{authorization_server_metadata: string, jwks: string, introspection: string}} public_endpoints
+ * @property {{status: "verified" | "unverified", mechanism: "direnv" | "compose-env-file" | null, evidence_path: string | null}} environment_loading
+ */
+
+/**
+ * @typedef {object} ProviderIdentity
+ * @property {string} name
+ * @property {string} environmentPrefix
+ * @property {string} environmentFile
+ * @property {"manifest" | "contract" | "flags" | "framework" | "git" | "directory"} source
+ */
+
+/**
+ * @typedef {object} ProviderBindings
+ * @property {Record<string, string>} roles
+ * @property {"contract" | "conventional"} source
+ */
+
+/**
+ * @typedef {object} PersistedMcpAppProvider
+ * @property {ProviderIdentity} identity
+ * @property {"contract" | "conventional"} contractSource
+ * @property {string | null} contractPath
+ * @property {Record<string, string>} bindings
+ * @property {"verified" | "unverified"} environmentLoading
+ * @property {"direnv" | "compose-env-file" | null} [environmentLoadingMechanism]
+ * @property {string | null} [environmentLoadingEvidencePath]
+ * @property {string} [providerOrigin]
+ * @property {string} [tamaOrigin]
+ * @property {string[]} [allowedOrigins]
+ */
+
+/**
+ * @typedef {PersistedMcpAppProvider & {
+ *   localContract: McpAppLocalContract,
+ *   bindingSource: "contract" | "conventional",
+ *   environmentLoadingMechanism: "direnv" | "compose-env-file" | null,
+ *   environmentLoadingEvidencePath: string | null,
+ * }} ResolvedMcpAppProvider
+ */
+
+/**
+ * @typedef {object} McpAppBootstrapOptions
+ * @property {boolean} requested
+ * @property {string} [contractPath]
+ * @property {string} [providerName]
+ * @property {string} [providerPrefix]
+ * @property {string} [providerEnvironmentFile]
+ * @property {string} [providerOrigin]
+ * @property {string} [tamaOrigin]
+ * @property {string[]} [allowedOrigins]
+ * @property {boolean} activate
+ * @property {McpAppMode} [targetMode]
+ * @property {McpAppMode} [providerMode]
+ * @property {boolean} [preserveEnabledProvider]
+ * @property {boolean} [migrateProviderIdentity]
+ * @property {ProviderIdentity["source"]} [identitySource]
+ */
+
+/**
+ * @typedef {object} McpAppEnvironmentInput
+ * @property {Record<string, string>} variables
+ * @property {McpAppEnvironmentValidation} validation
+ */
+
+/**
+ * @typedef {object} McpAppEnvironmentValidation
+ * @property {McpAppMode} mode
+ * @property {string} resource
+ * @property {string} authorizationServerOrigin
+ * @property {string} serviceOrigin
+ * @property {string[]} allowedOrigins
+ * @property {string} introspectionClientId
+ */
+
+/**
+ * The command layer resolves and (when detected) interactively confirms the
+ * provider identity before planning, because a non-interactive run must fail
+ * on ambiguity before any plan is produced.
+ *
+ * @typedef {object} McpAppPrepared
+ * @property {ProviderIdentity} identity
+ * @property {PersistedMcpAppProvider | null} persisted
+ * @property {string | null} contractPath
+ * @property {Record<string, unknown> | null} contractDocument
+ * @property {string[]} allowedOrigins
+ */
 
 /**
  * @typedef {object} FrameworkDetection
@@ -56,6 +175,9 @@
  * @property {number} [port]
  * @property {string} [image]
  * @property {AgentSkillMode} [skillMode]
+ * @property {McpAppBootstrapOptions} [mcpApp]
+ * @property {McpAppPrepared | null} [mcpAppPrepared]
+ * @property {boolean} [materializeSecrets]
  */
 
 /**
@@ -92,6 +214,45 @@
  */
 
 /**
+ * @typedef {object} McpAppPlan
+ * @property {ProviderIdentity} provider
+ * @property {"contract" | "conventional"} contractSource
+ * @property {string | null} contractPath
+ * @property {ProviderBindings} bindings
+ * @property {McpAppMode} lifecycle
+ * @property {McpAppMode} providerLifecycle
+ * @property {"verified" | "unverified"} environmentLoading
+ * @property {"direnv" | "compose-env-file" | null} environmentLoadingMechanism
+ * @property {string | null} environmentLoadingEvidencePath
+ * @property {McpAppLocalContract} [localContract]
+ * @property {FileOperation} [localContractOperation]
+ * @property {string} providerOrigin
+ * @property {string} tamaOrigin
+ * @property {string} resource
+ * @property {string[]} allowedOrigins
+ * @property {string} introspectionClientId
+ * @property {string} providerSigningKeyId
+ * @property {string} introspectionSigningKeyId
+ * @property {FileOperation[]} operations
+ */
+
+/**
+ * @typedef {object} McpAppProbe
+ * @property {string} name
+ * @property {boolean} ok
+ * @property {string | null} reason
+ */
+
+/**
+ * @typedef {object} McpAppVerification
+ * @property {McpAppMode} mode
+ * @property {McpAppProbe[]} probes
+ * @property {boolean} providerReachable
+ * @property {boolean} tamaReachable
+ * @property {boolean} verified
+ */
+
+/**
  * @typedef {object} BootstrapPlan
  * @property {number} schemaVersion
  * @property {string} root
@@ -104,17 +265,41 @@
  * @property {AgentSkillMode} skillMode
  * @property {{foundation: "created" | "preserved", providerVersion: string | null, globalModuleVersion: string | null}} terraform
  * @property {FileOperation[]} operations
+ * @property {McpAppPlan | null} mcpApp
+ * @property {McpAppVerification | null} mcpAppVerification
  */
 
 /**
  * @typedef {object} PublicChange
- * @property {WriteAction | UnchangedAction} action
+ * @property {WriteAction | DeleteAction | UnchangedAction} action
  * @property {string} path
  * @property {FileOwner} owner
  * @property {boolean} sensitive
  * @property {string | null} beforeDigest
- * @property {string} afterDigest
+ * @property {string | null} afterDigest
  * @property {string} reason
+ */
+
+/**
+ * @typedef {object} PublicMcpApp
+ * @property {string} compatibilityIdentifier
+ * @property {McpAppMode} mode
+ * @property {string} providerOrigin
+ * @property {string} tamaOrigin
+ * @property {string} resource
+ * @property {string[]} allowedOrigins
+ * @property {string} jwksUri
+ * @property {string} introspectionEndpoint
+ * @property {string} introspectionClientId
+ * @property {string} providerSigningKeyId
+ * @property {string} introspectionSigningKeyId
+ * @property {"verified" | "unverified"} environmentLoading
+ * @property {boolean} activated
+ * @property {boolean} providerActivationRequired
+ * @property {boolean} providerReachable
+ * @property {boolean} tamaReachable
+ * @property {boolean} verified
+ * @property {McpAppProbe[]} probes
  */
 
 /**
@@ -130,6 +315,9 @@
  * @property {AgentSkillMode} skillMode
  * @property {{foundation: "created" | "preserved", providerVersion: string | null, globalModuleVersion: string | null}} terraform
  * @property {PublicChange[]} changes
+ * @property {{name: string, environmentPrefix: string, environmentFile: string, identitySource: string, contractPath: string | null, mode: McpAppMode, modeVariable: string, environmentLoading: "verified" | "unverified"} | null} provider
+ * @property {{path: string, source: "generated" | "provider-contract", sourcePath: string | null, bindingSource: "contract" | "conventional", compatibilityIdentifier: string, environmentLoading: "verified" | "unverified", environmentLoadingMechanism: "direnv" | "compose-env-file" | null, environmentLoadingEvidencePath: string | null, action: WriteAction | DeleteAction | UnchangedAction} | null} providerContract
+ * @property {PublicMcpApp | null} mcpApp
  */
 
 /**

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createPrivateKey } from "node:crypto";
 import {
   chmodSync,
   chownSync,
@@ -15,6 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { parseEnv } from "node:util";
 import { formatAgentSetupPrompt } from "../../cli/bootstrap/agent-prompt.mjs";
 import { formatComposeUpCommand } from "../../cli/bootstrap/compose-command.mjs";
 import { inspectProject } from "../../cli/bootstrap/detect-project.mjs";
@@ -78,11 +80,29 @@ test("bootstrap installs complete repository-local agent skills when selected", 
     ),
   );
   assert.ok(existsSync(join(root, ".agents", "skills", "graph-audit", "SKILL.md")));
+  assert.ok(existsSync(join(root, ".agents", "skills", "app-integration", "SKILL.md")));
+  assert.ok(
+    existsSync(
+      join(root, ".agents", "skills", "app-integration", "references", "mcp-app-oauth.md"),
+    ),
+  );
+  assert.ok(existsSync(join(root, ".agents", "skills", "tama-kit-cli", "SKILL.md")));
+  assert.ok(
+    existsSync(join(root, ".agents", "skills", "tama-kit-cli", "references", "cli-reference.md")),
+  );
 
   const manifest = JSON.parse(readFileSync(join(root, "tama", ".tama-kit.json"), "utf8"));
   assert.equal(manifest.agentSkills, "local");
   assert.match(
     manifest.managedFiles[".agents/skills/graph-builder/SKILL.md"],
+    /^sha256:[0-9a-f]{64}$/u,
+  );
+  assert.match(
+    manifest.managedFiles[".agents/skills/app-integration/SKILL.md"],
+    /^sha256:[0-9a-f]{64}$/u,
+  );
+  assert.match(
+    manifest.managedFiles[".agents/skills/tama-kit-cli/SKILL.md"],
     /^sha256:[0-9a-f]{64}$/u,
   );
 
@@ -205,6 +225,14 @@ test("JSON bootstrap accepts an explicit local skill mode without prompting", as
   assert.equal(payload.skillMode, "local");
   assert.ok(
     payload.changes.some((change) => change.path.endsWith(".agents/skills/graph-builder/SKILL.md")),
+  );
+  assert.ok(
+    payload.changes.some((change) =>
+      change.path.endsWith(".agents/skills/app-integration/SKILL.md"),
+    ),
+  );
+  assert.ok(
+    payload.changes.some((change) => change.path.endsWith(".agents/skills/tama-kit-cli/SKILL.md")),
   );
 });
 
@@ -954,6 +982,273 @@ test("bootstrap rejects an invalid persisted port instead of silently changing i
   );
 });
 
+function oauthJwkLines(content) {
+  const values = parseEnv(content);
+  return {
+    jwk: values.TAMA_OAUTH_PRIVATE_JWK,
+    id: values.TAMA_OAUTH_PRIVATE_JWK_ID,
+  };
+}
+
+const OAUTH_PRIVATE_MEMBERS = ["d", "p", "q", "dp", "dq", "qi"];
+
+test("bootstrap generates an asymmetric System OAuth signing key", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const content = readFileSync(join(root, ".tama.env"), "utf8");
+  const { jwk, id } = oauthJwkLines(content);
+  assert.ok(jwk);
+  assert.ok(id);
+  assert.doesNotMatch(content, /TAMA_OAUTH_SIGNING_KEY/u);
+
+  const parsed = /** @type {Record<string, string>} */ (JSON.parse(jwk));
+  assert.equal(parsed.kty, "RSA");
+  assert.equal(parsed.alg, "RS256");
+  assert.equal(parsed.use, "sig");
+  assert.equal(parsed.kid, id);
+  const keyObject = createPrivateKey({ key: parsed, format: "jwk" });
+  assert.equal(keyObject.asymmetricKeyType, "rsa");
+  assert.equal(keyObject.asymmetricKeyDetails?.modulusLength, 3072);
+
+  execFileSync(
+    "bash",
+    [
+      "-c",
+      "set -a\n. \"$1\"\nset +a\nnode -e 'const key = JSON.parse(process.env.TAMA_OAUTH_PRIVATE_JWK); if (key.kid !== process.env.TAMA_OAUTH_PRIVATE_JWK_ID) process.exit(1)'",
+      "bash",
+      join(root, ".tama.env"),
+    ],
+    { stdio: "ignore" },
+  );
+
+  const example = readFileSync(join(root, ".tama.env.example"), "utf8");
+  assert.match(example, /^TAMA_OAUTH_PRIVATE_JWK=replace-me$/mu);
+  assert.match(example, /^TAMA_OAUTH_PRIVATE_JWK_ID=replace-me$/mu);
+  assert.doesNotMatch(example, /TAMA_OAUTH_SIGNING_KEY/u);
+
+  const postgresEnvironment = readFileSync(join(root, ".tama.postgres.env"), "utf8");
+  assert.doesNotMatch(postgresEnvironment, /TAMA_OAUTH/u);
+  for (const member of OAUTH_PRIVATE_MEMBERS) {
+    assert.equal(postgresEnvironment.includes(parsed[member]), false, `leaked ${member}`);
+  }
+});
+
+test("bootstrap preserves the OAuth private JWK across reruns, ports, and skill modes", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  const before = readFileSync(filename, "utf8");
+  const beforePair = oauthJwkLines(before);
+  const jwtSecret = before.match(/^TAMA_JWT_SECRET=.+$/mu)[0];
+
+  applyOperations(planFor(root, { skillMode: "local" }).operations);
+  assert.equal(readFileSync(filename, "utf8"), before);
+
+  applyOperations(planFor(root, { port: 4567, skillMode: "local" }).operations);
+  const after = readFileSync(filename, "utf8");
+  assert.deepEqual(oauthJwkLines(after), beforePair);
+  assert.ok(after.includes(jwtSecret));
+});
+
+test("bootstrap dry-run output never contains the OAuth private JWK", async () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const { jwk, id } = oauthJwkLines(readFileSync(join(root, ".tama.env"), "utf8"));
+  const parsed = /** @type {Record<string, string>} */ (JSON.parse(jwk));
+
+  const output = [];
+  const errors = [];
+  const exitCode = await run(["bootstrap", root, "--dry-run", "--json"], {
+    cwd: root,
+    stdout: (message) => output.push(message),
+    stderr: (message) => errors.push(message),
+  });
+  assert.equal(exitCode, EXIT_CODES.SUCCESS);
+  const transcript = [...output, ...errors].join("\n");
+  assert.equal(transcript.includes(jwk), false, "leaked encoded JWK");
+  assert.equal(transcript.includes(id), false, "leaked kid");
+  for (const member of OAUTH_PRIVATE_MEMBERS) {
+    assert.equal(transcript.includes(parsed[member]), false, `leaked ${member}`);
+  }
+});
+
+test("bootstrap fails closed for an unmanaged environment without the private JWK pair", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8")
+      .replace(/^# Generated by Tama Kit.*$/mu, "# User-managed environment")
+      .replace(/^TAMA_OAUTH_PRIVATE_JWK=.*$/mu, "TAMA_OAUTH_SIGNING_KEY=legacy-symmetric-secret")
+      .replace(/^TAMA_OAUTH_PRIVATE_JWK_ID=.*$/mu, "TAMA_OAUTH_SIGNING_KEY_ID=oauth-local-1"),
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      error.message.includes("TAMA_OAUTH_PRIVATE_JWK") &&
+      error.message.includes("TAMA_OAUTH_PRIVATE_JWK_ID"),
+  );
+  assert.equal(readFileSync(filename, "utf8").includes("legacy-symmetric-secret"), true);
+});
+
+test("bootstrap fails closed when only one half of the private JWK pair is present", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8").replace(/^TAMA_OAUTH_PRIVATE_JWK=.*$/mu, ""),
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      error.message.includes("TAMA_OAUTH_PRIVATE_JWK"),
+  );
+});
+
+test("bootstrap migrates a managed environment from the retired signing key pair", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  const before = readFileSync(filename, "utf8");
+  const migrated = before
+    .replace(/^TAMA_OAUTH_PRIVATE_JWK=.*$/mu, "TAMA_OAUTH_SIGNING_KEY=legacy-symmetric-secret")
+    .replace(/^TAMA_OAUTH_PRIVATE_JWK_ID=.*$/mu, "TAMA_OAUTH_SIGNING_KEY_ID=oauth-local-1");
+  writeFileSync(filename, migrated);
+  const retiredIndex = migrated
+    .split("\n")
+    .findIndex((line) => line.startsWith("TAMA_OAUTH_SIGNING_KEY="));
+
+  applyOperations(planFor(root).operations);
+  const after = readFileSync(filename, "utf8");
+  const afterLines = after.split("\n");
+  assert.ok(afterLines[retiredIndex].startsWith("TAMA_OAUTH_PRIVATE_JWK="));
+  assert.ok(afterLines[retiredIndex + 1].startsWith("TAMA_OAUTH_PRIVATE_JWK_ID="));
+  assert.doesNotMatch(after, /TAMA_OAUTH_SIGNING_KEY/u);
+  assert.deepEqual(
+    migrated.split("\n").filter((line) => !line.startsWith("TAMA_OAUTH_SIGNING_KEY")),
+    afterLines.filter((line) => !line.startsWith("TAMA_OAUTH_PRIVATE_JWK")),
+  );
+
+  const { jwk, id } = oauthJwkLines(after);
+  const parsed = /** @type {Record<string, string>} */ (JSON.parse(jwk));
+  assert.equal(parsed.kid, id);
+  assert.equal(createPrivateKey({ key: parsed, format: "jwk" }).asymmetricKeyType, "rsa");
+
+  const second = planFor(root);
+  assert.equal(
+    second.operations.find((operation) => operation.path.endsWith(".tama.env"))?.action,
+    "unchanged",
+  );
+});
+
+test("bootstrap migrates the retired pair and applies a port change in one pass", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8")
+      .replace(/^TAMA_OAUTH_PRIVATE_JWK=.*$/mu, "TAMA_OAUTH_SIGNING_KEY=legacy-symmetric-secret")
+      .replace(/^TAMA_OAUTH_PRIVATE_JWK_ID=.*$/mu, "TAMA_OAUTH_SIGNING_KEY_ID=oauth-local-1"),
+  );
+
+  applyOperations(planFor(root, { port: 4567 }).operations);
+  const after = readFileSync(filename, "utf8");
+  assert.match(after, /^TAMA_PORT=4567$/mu);
+  assert.match(after, /^TAMA_BASE_URL=http:\/\/localhost:4567$/mu);
+  assert.doesNotMatch(after, /TAMA_OAUTH_SIGNING_KEY/u);
+  assert.ok(oauthJwkLines(after).jwk);
+});
+
+test("bootstrap fails closed for an incomplete retired signing key pair", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8")
+      .replace(/^TAMA_OAUTH_PRIVATE_JWK=.*$/mu, "TAMA_OAUTH_SIGNING_KEY=legacy-symmetric-secret")
+      .replace(/^TAMA_OAUTH_PRIVATE_JWK_ID=.*$/mu, ""),
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      error.message.includes("TAMA_OAUTH_SIGNING_KEY") &&
+      error.message.includes("TAMA_OAUTH_SIGNING_KEY_ID"),
+  );
+});
+
+test("bootstrap fails closed when exactly one half of the new pair is present", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8").replace(
+      /^TAMA_OAUTH_PRIVATE_JWK=.*$/mu,
+      "TAMA_OAUTH_SIGNING_KEY=legacy-symmetric-secret",
+    ),
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      error.message.includes("TAMA_OAUTH_PRIVATE_JWK and TAMA_OAUTH_PRIVATE_JWK_ID"),
+  );
+});
+
+test("bootstrap fails closed for a managed environment with an invalid private JWK", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8").replace(
+      /^TAMA_OAUTH_PRIVATE_JWK=.*$/mu,
+      "TAMA_OAUTH_PRIVATE_JWK=not-a-jwk",
+    ),
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      error.message.includes("not a valid RSA private JWK for RS256 signing"),
+  );
+  assert.match(readFileSync(filename, "utf8"), /TAMA_OAUTH_PRIVATE_JWK=not-a-jwk/u);
+});
+
+test("bootstrap leaves a valid new pair untouched when retired variables are also present", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8") +
+      "TAMA_OAUTH_SIGNING_KEY=legacy-symmetric-secret\nTAMA_OAUTH_SIGNING_KEY_ID=oauth-local-1\n",
+  );
+
+  const plan = planFor(root);
+  assert.equal(
+    plan.operations.find((operation) => operation.path.endsWith(".tama.env"))?.action,
+    "unchanged",
+  );
+});
+
 test("bootstrap rejects a persisted internal port that disagrees with Compose", () => {
   const root = project();
   const first = planFor(root);
@@ -1088,6 +1383,73 @@ test("bootstrap rejects PostgreSQL credentials that disagree with DATABASE_URL",
       error instanceof CLIError &&
       error.exitCode === EXIT_CODES.OWNERSHIP &&
       error.details.variable === "DATABASE_URL",
+  );
+});
+
+test("bootstrap quotes parsed PostgreSQL values in the derived Compose environment", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  const password = "pass # word\nnext";
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8")
+      .replace(/^POSTGRES_PASSWORD=.*$/mu, 'POSTGRES_PASSWORD="pass # word\\nnext"')
+      .replace(
+        /^DATABASE_URL=.*$/mu,
+        "DATABASE_URL=ecto://tama:pass%20%23%20word%0Anext@tama-postgres/tama",
+      ),
+  );
+
+  applyOperations(planFor(root).operations);
+  const derived = readFileSync(join(root, ".tama.postgres.env"), "utf8");
+
+  assert.match(derived, /^POSTGRES_PASSWORD="pass # word\\nnext"$/mu);
+  assert.equal(parseEnv(derived).POSTGRES_PASSWORD, password);
+});
+
+test("bootstrap protects PostgreSQL dollar signs from Compose interpolation", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8")
+      .replace(/^POSTGRES_PASSWORD=.*$/mu, "POSTGRES_PASSWORD='dollar $HOME'")
+      .replace(
+        /^DATABASE_URL=.*$/mu,
+        "DATABASE_URL=ecto://tama:dollar%20%24HOME@tama-postgres/tama",
+      ),
+  );
+
+  applyOperations(planFor(root).operations);
+  const derived = readFileSync(join(root, ".tama.postgres.env"), "utf8");
+
+  assert.match(derived, /^POSTGRES_PASSWORD="dollar \$\$HOME"$/mu);
+});
+
+test("bootstrap rejects PostgreSQL values Compose cannot represent faithfully", () => {
+  const root = project();
+  applyOperations(planFor(root).operations);
+  const filename = join(root, ".tama.env");
+  const password = `control${String.fromCharCode(1)}value`;
+  writeFileSync(
+    filename,
+    readFileSync(filename, "utf8")
+      .replace(/^POSTGRES_PASSWORD=.*$/mu, `POSTGRES_PASSWORD='${password}'`)
+      .replace(
+        /^DATABASE_URL=.*$/mu,
+        "DATABASE_URL=ecto://tama:control%01value@tama-postgres/tama",
+      ),
+  );
+
+  assert.throws(
+    () => planFor(root),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      error.details.variable === "POSTGRES_PASSWORD" &&
+      !error.message.includes(password),
   );
 });
 
