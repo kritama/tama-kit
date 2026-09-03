@@ -114,8 +114,10 @@ Existing keys and valid public overlap sets are
 preserved. A fresh overlap set is `[]`; the current public key is published by
 the runtime and must not be duplicated in its rotation set. Persisted overlap
 members are republished by the runtime as trusted `RS256` material, so each
-must be an RSA public key at least 2048 bits with a sane public exponent — the
-same strength the private signing key is held to — or the re-bootstrap fails.
+must be an RSA public key at least 2048 bits with a sane public exponent and
+no cheaply detectable small factor — the same strength the private signing
+key is held to — or the re-bootstrap fails. Key identifiers use the portable
+dotenv-safe alphabet documented by `tama-kit oauth generate-key`.
 
 Dry-run does not generate keys or write files. Repeated JSON dry-runs with the
 same inputs are deterministic and contain no private material.
@@ -152,7 +154,10 @@ JWKS URI remain bound to the exact planned origin. Each JWKS must publish an
 RSA signing member (compatible `RS256`
 metadata, no private members) whose modulus and exponent match the persisted
 private JWK, so a stale or misloaded key under the expected identifier fails
-the probe. Only after that checkpoint does it enable and restart Tama and
+the probe. The prepared checkpoint also requires provider metadata not to
+advertise a protected resource; this catches a provider process that has not
+been restarted after an enabled-state rollback. Only after that checkpoint
+does it enable and restart Tama and
 verify protected-resource metadata and `/mcp/app`; the protected route must
 reject the deliberately anonymous probe with `401` or `403`, so a publicly
 accessible `/mcp/app` fails verification.

@@ -1868,6 +1868,7 @@ test("verifyMcpApp verifies both JWKS and the inactive introspection probe", asy
     result.probes.map(({ name, ok }) => ({ name, ok })),
     [
       { name: "provider_metadata", ok: true },
+      { name: "provider_prepared_lifecycle", ok: true },
       { name: "provider_jwks", ok: true },
       { name: "provider_container_reachability", ok: true },
       { name: "tama_jwks", ok: true },
@@ -1894,6 +1895,38 @@ test("verifyMcpApp verifies both JWKS and the inactive introspection probe", asy
     await clientAssertionIsValid({ root, plan }, String(body.get("client_assertion"))),
     true,
   );
+});
+
+test("verifyMcpApp rejects a live enabled provider during the prepared checkpoint", async () => {
+  const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
+  const result = await verifyMcpApp({
+    root,
+    plan,
+    fetch: enforcingIntrospection(
+      async (input) => {
+        const url = input.href;
+        if (url.endsWith("/.well-known/oauth-authorization-server")) {
+          return Response.json({
+            ...providerMetadata(plan),
+            protected_resources: [plan.resource],
+          });
+        }
+        if (url.endsWith("/.well-known/jwks.json")) {
+          return Response.json(
+            url.startsWith(plan.tamaOrigin)
+              ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+              : jwksDocument(plan.providerSigningKeyId, providerJwk),
+          );
+        }
+        return Response.json({ active: false });
+      },
+      root,
+      plan,
+    ),
+    inspectProviderListener: noContainerInspection,
+  });
+  assert.equal(result.verified, false);
+  assert.equal(result.probes.find(({ name }) => name === "provider_prepared_lifecycle")?.ok, false);
 });
 
 test("verifyMcpApp rejects an introspection endpoint that skips assertion signature verification", async () => {

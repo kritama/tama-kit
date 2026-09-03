@@ -564,6 +564,19 @@ export async function verifyMcpApp({
         : "provider metadata was unreachable",
     ),
   );
+  if (plan.providerLifecycle === "prepared") {
+    const protectedResources = providerMetadata.body?.protected_resources;
+    probes.push(
+      probe(
+        "provider_prepared_lifecycle",
+        metadataValid &&
+          (protectedResources === undefined ||
+            protectedResources === null ||
+            (Array.isArray(protectedResources) && protectedResources.length === 0)),
+        "the live provider is not in prepared mode: its metadata already advertises protected resources; restart the provider with its prepared fragment before activating Tama",
+      ),
+    );
+  }
 
   const providerKey = expectedPublicMembers(
     root,

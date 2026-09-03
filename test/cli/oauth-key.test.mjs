@@ -337,6 +337,9 @@ test("validation rejects weak RSA keys and conflicting metadata", () => {
 
 test("validation rejects mismatched identifiers and oversized keys", () => {
   const { jwk } = generateOAuthPrivateJwk();
+  for (const unsafeKid of ["key#fragment", "key'quote", "key$value", "key/segment"]) {
+    assert.throws(() => generateOAuthPrivateJwk(unsafeKid));
+  }
   expectInvalid(jwk, "oauth-mismatched-identifier");
   expectInvalid(jwk, "");
   expectInvalid(jwk, `oauth-${"x".repeat(128)}`);
@@ -414,6 +417,14 @@ test("validatePublicJwkSet rejects private, non-RSA, duplicate, and oversized me
   expectInvalidSet(JSON.stringify([{ ...key, kid: null }]));
   expectInvalidSet(JSON.stringify([{ ...key, kid: `key-${"x".repeat(128)}` }]));
   expectInvalidSet(JSON.stringify([{ ...key, n: "!!" }]));
+  expectInvalidSet(
+    JSON.stringify([{ ...key, n: base64urlUnsigned(1n << 2047n), kid: "even-modulus" }]),
+  );
+  expectInvalidSet(
+    JSON.stringify([
+      { ...key, n: base64urlUnsigned(3n * ((1n << 2046n) + 1n)), kid: "small-factor" },
+    ]),
+  );
   expectInvalidSet(JSON.stringify([{ ...key }, { ...key }]));
   expectInvalidSet(JSON.stringify([{ ...key, padding: "x".repeat(OAUTH_JWK_MAX_ENCODED_BYTES) }]));
   expectInvalidSet(

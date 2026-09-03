@@ -16,11 +16,13 @@ export const OAUTH_JWK_MIN_MODULUS_BITS = 2_048;
 export const OAUTH_JWK_MAX_ENCODED_BYTES = 65_536;
 export const OAUTH_JWK_MAX_KID_BYTES = 128;
 export const OAUTH_JWK_PUBLIC_SET_MAX_ITEMS = 30;
+const OAUTH_JWK_KID_PATTERN = /^[A-Za-z0-9._~-]+$/u;
+const OAUTH_JWK_SMALL_FACTOR_LIMIT = 997n;
 
 /**
- * Reports whether a value is an identifier that Tama accepts for a System
- * OAuth private JWK: non-empty, control-character-free, and no larger than
- * the contract maximum.
+ * Reports whether a value is an identifier Tama Kit can round-trip through
+ * both an unquoted dotenv assignment and a single-quoted JSON JWK without
+ * interpolation or comment/quote ambiguity.
  *
  * @param {unknown} value
  * @returns {boolean}
@@ -306,8 +308,8 @@ export function validateOAuthPrivateJwk(
 }
 
 /**
- * The configured key identifier must be a bounded, printable, non-blank
- * string, mirroring the signing-key contract's identifier bound.
+ * The configured key identifier must use the portable dotenv-safe alphabet
+ * Tama Kit emits and remain within the signing-key contract's byte bound.
  *
  * @param {unknown} value
  * @returns {boolean}
@@ -317,15 +319,7 @@ function isBoundedKid(value) {
     return false;
   }
   const bytes = Buffer.byteLength(value, "utf8");
-  return (
-    bytes >= 1 &&
-    bytes <= OAUTH_JWK_MAX_KID_BYTES &&
-    value.trim() !== "" &&
-    !Array.from(value).some((character) => {
-      const code = character.codePointAt(0);
-      return code !== undefined && (code < 0x20 || code === 0x7f);
-    })
-  );
+  return bytes >= 1 && bytes <= OAUTH_JWK_MAX_KID_BYTES && OAUTH_JWK_KID_PATTERN.test(value);
 }
 
 /**
@@ -409,6 +403,9 @@ function isPublicJwkMember(member, kids, currentKid) {
   if (bigintBitLength(modulusValue) < OAUTH_JWK_MIN_MODULUS_BITS) {
     return false;
   }
+  if (hasTrivialFactor(modulusValue)) {
+    return false;
+  }
   if (exponentValue < 3n || exponentValue % 2n === 0n || exponentValue >= modulusValue) {
     return false;
   }
@@ -467,6 +464,27 @@ function base64urlUnsigned(value) {
  */
 function bigintBitLength(integer) {
   return integer.toString(2).length;
+}
+
+/**
+ * Rejects public moduli with factors cheap enough to discover during bounded
+ * configuration validation. Valid RSA moduli are odd products of two large
+ * primes; divisibility by any integer through 997 proves the key is unsafe
+ * without attempting general-purpose factorization.
+ *
+ * @param {bigint} modulus
+ * @returns {boolean}
+ */
+function hasTrivialFactor(modulus) {
+  if (modulus % 2n === 0n) {
+    return true;
+  }
+  for (let factor = 3n; factor <= OAUTH_JWK_SMALL_FACTOR_LIMIT; factor += 2n) {
+    if (modulus % factor === 0n) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** @param {bigint} integer @returns {boolean} */
