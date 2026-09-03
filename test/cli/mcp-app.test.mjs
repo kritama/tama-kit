@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import test from "node:test";
@@ -2512,6 +2520,58 @@ test("verifyMcpApp rejects duplicate live keys with the current identifier", asy
   assert.equal(result.probes.find(({ name }) => name === "provider_jwks")?.ok, false);
 });
 
+test("verifyMcpApp rejects redirects from both introspection requests", async () => {
+  const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
+  const redirectingFetch = (calls) => async (input, init) => {
+    const url = input.href;
+    if (url.endsWith("/.well-known/oauth-authorization-server")) {
+      return Response.json(providerMetadata(plan));
+    }
+    if (url.endsWith("/.well-known/jwks.json")) {
+      return Response.json(
+        url.startsWith(plan.tamaOrigin)
+          ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+          : jwksDocument(plan.providerSigningKeyId, providerJwk),
+      );
+    }
+    if (url.endsWith("/auth/introspections")) {
+      calls.push(init?.redirect);
+      return new Response(null, {
+        status: 307,
+        headers: { location: "http://untrusted.example.test/introspections" },
+      });
+    }
+    return Response.json({ active: false });
+  };
+
+  const controlCalls = [];
+  const redirectedControl = await verifyMcpApp({
+    root,
+    plan,
+    fetch: redirectingFetch(controlCalls),
+    inspectProviderListener: noContainerInspection,
+  });
+  assert.deepEqual(controlCalls, ["manual"]);
+  assert.match(
+    redirectedControl.probes.find(({ name }) => name === "inactive_introspection")?.reason ?? "",
+    /redirected the negative control \(HTTP 307\)/u,
+  );
+
+  const authenticatedCalls = [];
+  const redirectedAuthenticated = await verifyMcpApp({
+    root,
+    plan,
+    fetch: enforcingIntrospection(redirectingFetch(authenticatedCalls), root, plan),
+    inspectProviderListener: noContainerInspection,
+  });
+  assert.deepEqual(authenticatedCalls, ["manual"]);
+  assert.match(
+    redirectedAuthenticated.probes.find(({ name }) => name === "inactive_introspection")?.reason ??
+      "",
+    /redirected the authenticated request \(HTTP 307\)/u,
+  );
+});
+
 test("bootstrap preserves unrelated .integration.env ignore entries on MCP App reruns", async () => {
   const root = project();
   const originalPrepared = await prepareFor(root, {
@@ -2784,6 +2844,31 @@ test("ordinary reruns enforce the persisted provider Tama version range", () => 
       error.exitCode === EXIT_CODES.USAGE &&
       /outside the supported Tama range >= 0\.13\.2 and < 0\.14\.0/u.test(error.message) &&
       /persisted provider contract/u.test(error.message),
+  );
+});
+
+test("project-local provider contract paths remain valid after the project moves", async () => {
+  const root = project();
+  const contractPath = writeContract(root);
+  const contract = validContract();
+  const first = planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract }));
+  applyOperations(first.operations);
+
+  const persisted = JSON.parse(readFileSync(join(root, "tama", ".tama-kit.json"), "utf8"));
+  assert.equal(
+    persisted.mcpAppProvider.contractPath,
+    "priv/contracts/tama-mcp-app-bootstrap-v1.json",
+  );
+
+  const movedRoot = `${root}-moved`;
+  renameSync(root, movedRoot);
+  assert.doesNotThrow(() =>
+    createBootstrapPlan({ cwd: movedRoot, targetPath: movedRoot, image: PINNED_TAMA_IMAGE }),
+  );
+  const preparedAfterMove = await prepareFor(movedRoot);
+  assert.equal(
+    preparedAfterMove.contractPath,
+    join(movedRoot, "priv", "contracts", "tama-mcp-app-bootstrap-v1.json"),
   );
 });
 

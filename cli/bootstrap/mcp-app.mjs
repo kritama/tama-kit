@@ -300,7 +300,10 @@ export async function prepareMcpApp({
   io,
 }) {
   const persisted = readMcpAppProvider(tamaDirectory);
-  const contract = discoverProviderContract(root, options.contractPath);
+  const contract = discoverProviderContract(
+    root,
+    options.contractPath ?? persisted?.contractPath ?? undefined,
+  );
   let identity = resolveProviderIdentity({
     root,
     framework,

@@ -441,8 +441,16 @@ async function introspectInactiveToken({ root, plan, fetch, providerTransport })
         client_assertion: controlAssertion,
         client_assertion_type: CLIENT_ASSERTION_TYPE,
       }).toString(),
+      redirect: "manual",
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
+    if (control.status >= 300 && control.status < 400) {
+      return probe(
+        "inactive_introspection",
+        false,
+        `provider introspection redirected the negative control (HTTP ${control.status})`,
+      );
+    }
     if (control.ok) {
       return probe(
         "inactive_introspection",
@@ -459,8 +467,16 @@ async function introspectInactiveToken({ root, plan, fetch, providerTransport })
         client_assertion: assertion,
         client_assertion_type: CLIENT_ASSERTION_TYPE,
       }).toString(),
+      redirect: "manual",
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
+    if (response.status >= 300 && response.status < 400) {
+      return probe(
+        "inactive_introspection",
+        false,
+        `provider introspection redirected the authenticated request (HTTP ${response.status})`,
+      );
+    }
     if (!response.ok) {
       return probe("inactive_introspection", false, `provider returned HTTP ${response.status}`);
     }
