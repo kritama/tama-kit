@@ -138,7 +138,19 @@ function isLoopbackHostname(hostname) {
 function isUnspecifiedHostname(hostname) {
   const bare =
     hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
-  return bare === "0.0.0.0" || bare === "::" || bare.toLowerCase() === "::ffff:0.0.0.0";
+  if (bare === "0.0.0.0" || bare === "::") {
+    return true;
+  }
+  // WHATWG URLs canonicalize the dotted mapped form to hex groups
+  // (::ffff:0.0.0.0 becomes ::ffff:0:0), so the 32-bit suffix is decoded
+  // instead of pattern-matched against the dotted spelling.
+  const hexMapped = bare.toLowerCase().match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u);
+  if (hexMapped === null) {
+    return false;
+  }
+  const mappedAddress =
+    (Number.parseInt(hexMapped[1], 16) << 16) | Number.parseInt(hexMapped[2], 16);
+  return mappedAddress === 0;
 }
 
 /**

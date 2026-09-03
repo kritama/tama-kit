@@ -177,6 +177,30 @@ function safeRelativePath(value, label) {
   return path;
 }
 
+/**
+ * Paths a provider fragment must never occupy: bootstrap writes the Tama
+ * runtime environment, the Tama Kit manifest, and the Compose configuration
+ * under these names, and `.envrc` belongs to the application's loader. A
+ * fragment planned onto any of them would overwrite that managed content
+ * with only the provider bindings.
+ */
+const RESERVED_FRAGMENT_PATHS = new Set([
+  ".tama.env",
+  ".tama.postgres.env",
+  ".gitignore",
+  ".envrc",
+]);
+
+/** @param {string} path @param {string} label */
+function assertUnreservedFragmentPath(path, label) {
+  if (RESERVED_FRAGMENT_PATHS.has(path) || path.startsWith("tama/")) {
+    throw usageError(
+      `MCP App contract ${label} collides with a bootstrap-managed or application-owned path: ` +
+        `${path}; choose a dedicated provider fragment filename such as .<provider>.integration.env`,
+    );
+  }
+}
+
 /** @param {unknown} value @param {string} label @returns {string} */
 function absoluteHttpOrigin(value, label) {
   const origin = requiredSafeString(value, label);
@@ -385,7 +409,8 @@ function validateProvider(value) {
   if (!ENVIRONMENT_NAME_PATTERN.test(prefix)) {
     throw usageError("MCP App contract provider.environment_prefix is invalid");
   }
-  safeRelativePath(value.environment_file, "provider.environment_file");
+  const environmentFile = safeRelativePath(value.environment_file, "provider.environment_file");
+  assertUnreservedFragmentPath(environmentFile, "provider.environment_file");
   return value;
 }
 
@@ -401,6 +426,7 @@ function validateEnvironmentLoading(value, provider) {
   requiredSafeString(value.mechanism, "environment_loading.mechanism");
   safeRelativePath(value.loader, "environment_loading.loader");
   const loads = safeRelativePath(value.loads, "environment_loading.loads");
+  assertUnreservedFragmentPath(loads, "environment_loading.loads");
   if (provider && loads !== provider.environment_file) {
     throw usageError(
       "MCP App contract environment_loading.loads must match provider.environment_file",

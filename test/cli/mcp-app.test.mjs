@@ -834,7 +834,11 @@ test("bootstrap keeps provider endpoints on one shared origin and rejects loopba
 });
 
 test("bootstrap rejects unspecified provider bind addresses", () => {
-  for (const providerOrigin of ["http://0.0.0.0:4000", "http://[::]:4000"]) {
+  for (const providerOrigin of [
+    "http://0.0.0.0:4000",
+    "http://[::]:4000",
+    "http://[::ffff:0.0.0.0]:4000",
+  ]) {
     const root = project();
     const contractPath = writeContract(root);
     const contract = validContract();
@@ -1814,7 +1818,9 @@ test("bootstrap rejects a Tama port change while an MCP App integration is persi
         error.message,
       ),
   );
-  assert.doesNotThrow(() => createBootstrapPlan({ cwd: root, targetPath: root }));
+  assert.doesNotThrow(() =>
+    createBootstrapPlan({ cwd: root, targetPath: root, image: PINNED_TAMA_IMAGE }),
+  );
 });
 
 test("contractTamaPort derives the fresh Tama port from the accepted contract", () => {
@@ -1908,6 +1914,49 @@ test("bootstrap retains the host-gateway mapping on ordinary reruns", () => {
     operation.path.endsWith(join("tama", "compose.yaml")),
   );
   assert.equal(composeOperation?.action, "unchanged");
+});
+
+test("an ordinary rerun keeps the pinned image for a persisted MCP App integration", () => {
+  const root = project();
+  const contractPath = writeContract(root);
+  const contract = validContract();
+  const first = planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract }), {
+    providerOrigin: "http://host.docker.internal:4000",
+  });
+  applyOperations(first.operations);
+
+  // The default floating tag must not silently replace the pinned runtime.
+  assert.throws(
+    () => createBootstrapPlan({ cwd: root, targetPath: root }),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.USAGE &&
+      /requires a pinned Tama image/u.test(error.message) &&
+      /unresolvable tag latest/u.test(error.message),
+  );
+  assert.doesNotThrow(() =>
+    createBootstrapPlan({ cwd: root, targetPath: root, image: PINNED_TAMA_IMAGE }),
+  );
+});
+
+test("provider fragment paths that collide with managed files are rejected", () => {
+  for (const environmentFile of [
+    ".tama.env",
+    ".tama.postgres.env",
+    ".envrc",
+    ".gitignore",
+    "tama/compose.yaml",
+    "tama/.tama-kit.json",
+  ]) {
+    const document = structuredClone(memoveeContract());
+    document.provider.environment_file = environmentFile;
+    document.environment_loading.loads = environmentFile;
+    assert.throws(
+      () => validateMcpAppContract(document),
+      (error) =>
+        error instanceof CLIError && /collides with a bootstrap-managed/u.test(error.message),
+    );
+  }
 });
 
 test("bootstrap rejects a tracked provider fragment even on ordinary reruns", () => {

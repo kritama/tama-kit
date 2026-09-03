@@ -14,6 +14,8 @@ import {
   contractTamaPort,
   loadTamaContract,
   MCP_APP_COMPATIBILITY_IDENTIFIER,
+  unpinnedTamaImageTag,
+  unsupportedTamaImage,
 } from "./mcp-app-contract.mjs";
 import { planAgentSkills } from "./skills.mjs";
 import { renderTemplate } from "./templates.mjs";
@@ -141,6 +143,33 @@ export function createBootstrapPlan(options) {
           `(the TAMA_MCP_APP_* variables in .tama.env, ` +
           `${persistedMcpApp?.identity.environmentFile ?? "the provider fragment"}, and the mcpAppProvider block in .tama/.tama-kit.json) ` +
           `before bootstrapping the new port with --mcp-app`,
+      );
+    }
+  }
+  // The persisted integration was created with a pinned, contract-compatible
+  // Tama image. An ordinary rerun without --image would fall back to the
+  // floating default tag and silently replace that runtime with a release
+  // Tama Kit cannot hold to the contract, so the image gate applies to
+  // ordinary reruns as well.
+  if (persistedMcpApp !== null) {
+    const persistedTamaContract = loadTamaContract();
+    const plannedImage = options.image ?? DEFAULTS.tamaImage;
+    const unpinnedTag = unpinnedTamaImageTag(plannedImage);
+    if (unpinnedTag !== null) {
+      throw usageError(
+        `the persisted MCP App integration requires a pinned Tama image, but the planned image ` +
+          `${plannedImage} uses the unresolvable tag ${unpinnedTag}; pass --image with a version ` +
+          `inside the supported Tama range ${persistedTamaContract.supported_tama_versions}`,
+      );
+    }
+    const unsupported = unsupportedTamaImage(
+      plannedImage,
+      persistedTamaContract.supported_tama_versions,
+    );
+    if (unsupported) {
+      throw usageError(
+        `${unsupported}; the persisted MCP App integration requires a supported Tama image; ` +
+          `pass --image to keep the pinned runtime`,
       );
     }
   }

@@ -18,7 +18,10 @@ before generating secrets or planning files.
 Providers without a contract use conventional variables derived from
 `--provider-name` and must supply `--provider-origin`. Environment prefixes are
 limited to 24 characters and may not use reserved Tama, database, Docker, or
-Compose namespaces.
+Compose namespaces. A contract's `provider.environment_file` must not collide
+with a bootstrap-managed or application-owned path (`.tama.env`,
+`.tama.postgres.env`, `.envrc`, `.gitignore`, or any `tama/` output), because
+the fragment write would overwrite that content.
 
 ## Exact topology
 
@@ -63,7 +66,9 @@ can move outside the range after secrets are written, leaving a runtime Tama
 Kit cannot hold to the contract. Prerelease and build tags are rejected as
 well: SemVer orders a prerelease below the stable version it decorates, and the
 range grammar cannot express prerelease bounds, so such a tag cannot be held to
-the range.
+the range. While an integration is persisted, ordinary reruns without
+`--mcp-app` must pass the same pinned, supported `--image`: the floating
+default tag would otherwise silently replace the pinned runtime.
 
 ## Private files
 
