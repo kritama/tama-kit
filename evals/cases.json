@@ -72,6 +72,34 @@
       "fixture_data": "A trusted application repository with its framework and Compose files available for inspection, no stated MCP App status, and permission to plan a local Tama bootstrap."
     },
     {
+      "id": "prepare-tama-source-checkout",
+      "skill": "tama-kit-cli",
+      "prompt": "Prepare this Tama source checkout for development without starting Docker or running Mix.",
+      "expected_behavior": [
+        "Select tama-kit dev setup rather than application bootstrap and verify its installed help before choosing flags.",
+        "Use --prepare-only, optionally with --json, to generate the private development environment without starting services.",
+        "Do not pass bootstrap-only --skills, --compose, --image, --start, or MCP App flags.",
+        "Preserve existing development ports and secrets unless the user explicitly requests supported port changes.",
+        "Report generated private environment files separately from services or setup commands that were intentionally not run."
+      ],
+      "expected_result_shape": "A supported tama-kit dev setup --prepare-only command and a concise report that no Docker services or Mix tasks were started.",
+      "fixture_data": "A trusted Tama Phoenix source checkout with its repository-owned compose.yml and no request to start services."
+    },
+    {
+      "id": "generate-standalone-system-oauth-key",
+      "skill": "tama-kit-cli",
+      "prompt": "Generate a standalone Tama System OAuth signing key into a private file for transfer to our staging secret manager.",
+      "expected_behavior": [
+        "Select tama-kit oauth generate-key and inspect its installed help rather than invoking bootstrap.",
+        "Use --output with a new explicit private path and use --kid only when an identifier is actually required.",
+        "Do not pass --dry-run, --json, --skills, --start, or MCP App flags because generate-key does not accept them.",
+        "Verify the destination is private, ignored and untracked inside Git, has trusted ancestors, and does not already exist.",
+        "Never print or reproduce the generated private JWK and report only the created path."
+      ],
+      "expected_result_shape": "A supported tama-kit oauth generate-key --output command plus destination-safety checks and a secret-free handoff.",
+      "fixture_data": "A trusted staging configuration repository with an existing private ignored transfer directory and authorization to generate one new System OAuth signing key file."
+    },
+    {
       "id": "bootstrap-global-foundation",
       "skill": "graph-builder",
       "prompt": "Start a new standalone Tama Terraform graph with a messaging surface, model provider, and router in an otherwise empty repository.",

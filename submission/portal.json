@@ -18,6 +18,8 @@
     "bootstrap-mcp-app-without-oauth",
     "bootstrap-partial-oauth-mcp-app-provider",
     "bootstrap-application-with-tama",
+    "prepare-tama-source-checkout",
+    "generate-standalone-system-oauth-key",
     "bootstrap-global-foundation",
     "routed-conversation-artifact",
     "direct-forwarded-action",

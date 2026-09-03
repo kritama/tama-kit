@@ -34,9 +34,9 @@ ports, migrating provider identity, or activating an MCP App integration.
 
 ## Inspect before running
 
-1. Read the target repository's `AGENTS.md` and inspect its Git status, framework,
-   Compose files, existing `tama/` directory, `.tama.env*` files, and
-   `tama/.tama-kit.json` when present.
+1. For repository workflows, read the target repository's `AGENTS.md` and
+   inspect its Git status, framework, Compose files, existing `tama/`
+   directory, `.tama.env*` files, and `tama/.tama-kit.json` when present.
 2. Confirm Node.js 20.12 or newer. Prefer an already installed `tama-kit`
    executable; otherwise use `npx @kritama/tama-kit` without installing it
    globally.
@@ -45,12 +45,18 @@ ports, migrating provider identity, or activating an MCP App integration.
    Never ask the user to paste private JWKs, tokens, passwords, or the private
    Tama setup URL into chat.
 
-## Plan, then write
+## Plan bootstrap, then write
 
-Use `--dry-run --json` first. Since JSON mode cannot prompt, always make the
-agent-skill choice explicit with `--skills local` or `--skills manual`.
-Recommend `local` when the user wants future agents in this repository to have
-Tama Kit's skills; respect an existing recorded choice.
+For `bootstrap` workflows, use `--dry-run --json` first. Since JSON mode cannot
+prompt, always make the agent-skill choice explicit with `--skills local` or
+`--skills manual`. Recommend `local` when the user wants future agents in this
+repository to have Tama Kit's skills; respect an existing recorded choice.
+
+Do not carry these flags into other workflows. `dev setup` has its own
+`--dry-run`, `--prepare-only`, and `--json` sequence, while
+`oauth generate-key` requires exactly one of `--stdout` or `--output` and
+accepts none of those planning or skill-installation flags. Follow the selected
+command's section in the CLI reference.
 
 Review the JSON plan for the selected root, Compose file, host port, image,
 managed-file operations, sensitive-file markers, and Terraform foundation
@@ -74,11 +80,13 @@ framework and Compose file unless discovery is ambiguous; use `--compose` to
 select the intended existing file. Use `--port` or `--image` only for an actual
 project requirement.
 
-After the write, verify the reported managed files are untracked as intended
-and that the working tree contains only expected changes. If the runtime was
-started, verify the reported health result. Hand off the generated
-`tama/README.md` and `tama/AGENTS.md` instructions for onboarding and Terraform
-planning, while keeping the private setup URL out of the response.
+After the write, verify that sensitive generated files such as `.tama.env*` are
+ignored and untracked. Non-sensitive Terraform, documentation, skill, manifest,
+and application-owned Compose changes may be intended for version control;
+verify that all reported changes are expected rather than untracking them. If
+the runtime was started, verify the reported health result. Hand off the
+generated `tama/README.md` and `tama/AGENTS.md` instructions for onboarding and
+Terraform planning, while keeping the private setup URL out of the response.
 
 ## MCP App provider bootstrap
 
