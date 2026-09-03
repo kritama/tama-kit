@@ -18,6 +18,11 @@ import {
   unpinnedTamaImageTag,
   unsupportedTamaImage,
 } from "./mcp-app-contract.mjs";
+import {
+  MCP_APP_LOCAL_CONTRACT_PATH,
+  mcpAppLocalContractFilename,
+  serializeMcpAppLocalContract,
+} from "./mcp-app-local-contract.mjs";
 import { planAgentSkills } from "./skills.mjs";
 import { renderTemplate } from "./templates.mjs";
 import { planTerraform } from "./terraform.mjs";
@@ -58,6 +63,8 @@ function persistedMcpDocView(persisted, root) {
     lifecycle,
     providerLifecycle: lifecycle,
     environmentLoading: persisted.environmentLoading,
+    environmentLoadingMechanism: persisted.environmentLoadingMechanism ?? null,
+    environmentLoadingEvidencePath: persisted.environmentLoadingEvidencePath ?? null,
     providerOrigin: persisted.providerOrigin,
     tamaOrigin: persisted.tamaOrigin,
     resource,
@@ -99,6 +106,8 @@ function mcpAppReadmeGuidance(mcpApp) {
     "## MCP App provider integration",
     "",
     `The provider fragment \`${mcpApp.provider.environmentFile}\` and \`.tama.env\` contain private signing material. Keep both files untracked and never paste their values into chat or logs.`,
+    "",
+    "The non-secret local bridge contract is managed at `tama/contracts/mcp-app-provider-v1.json`. It records resolved names and loader evidence; it is local configuration, not proof that the provider implements the OAuth runtime contract.",
     "",
     `The exact provider issuer is \`${mcpApp.providerOrigin}\`; the exact Tama resource is \`${mcpApp.resource}\`. Browser/MCP clients are limited to: ${mcpApp.allowedOrigins.map((origin) => `\`${origin}\``).join(", ")}.`,
     "",
@@ -184,14 +193,12 @@ export function createBootstrapPlan(options) {
         { path: join(inspection.tamaDirectory, ".tama-kit.json") },
       );
     }
-    if (persistedPort !== port) {
+    if (persistedPort !== port && mcpAppPrepared === null) {
       throw usageError(
         `the persisted MCP App integration advertises Tama at ${persistedTamaOriginValue}; ` +
           `planning port ${port} would leave the MCP resource, introspection client id, and provider fragment ` +
-          `on the old port. Rerun without changing the Tama port, or remove the persisted MCP App state ` +
-          `(the TAMA_MCP_APP_* variables in .tama.env, ` +
-          `${persistedMcpApp?.identity.environmentFile ?? "the provider fragment"}, and the mcpAppProvider block in .tama/.tama-kit.json) ` +
-          `before bootstrapping the new port with --mcp-app`,
+          `on the old port. Rerun with --mcp-app and the provider integration options so both owners' ` +
+          `environment files are updated atomically, or rerun without changing the Tama port`,
       );
     }
   }
@@ -242,6 +249,12 @@ export function createBootstrapPlan(options) {
     skillMode,
     mcpAppState,
   );
+  const localContractOperation = mcpAppState
+    ? managedFiles.plan(
+        mcpAppLocalContractFilename(inspection.root),
+        serializeMcpAppLocalContract(mcpAppState.localContract),
+      )
+    : null;
   /** @type {McpAppPlan | null} */
   let mcpApp = null;
   /** @type {import("../types.mjs").McpAppEnvironmentInput | null} */
@@ -259,6 +272,7 @@ export function createBootstrapPlan(options) {
       manageFile: managedFiles.plan,
       removeManagedFile: managedFiles.remove,
       materializeKeys: options.materializeSecrets ?? true,
+      localContractOperation: /** @type {FileOperation} */ (localContractOperation),
     });
     mcpApp = result.plan;
     mcpAppEnvironment = result.environmentInput;
@@ -458,6 +472,21 @@ export function publicPlan(plan) {
           environmentLoading: plan.mcpApp.environmentLoading,
         }
       : null,
+    providerContract:
+      plan.mcpApp?.localContract && plan.mcpApp.localContractOperation
+        ? {
+            path: MCP_APP_LOCAL_CONTRACT_PATH,
+            source: plan.mcpApp.localContract.source.type,
+            sourcePath: plan.mcpApp.localContract.source.provider_contract_path,
+            bindingSource: plan.mcpApp.bindings.source,
+            compatibilityIdentifier: plan.mcpApp.localContract.compatibility_identifier,
+            environmentLoading: plan.mcpApp.localContract.environment_loading.status,
+            environmentLoadingMechanism: plan.mcpApp.localContract.environment_loading.mechanism,
+            environmentLoadingEvidencePath:
+              plan.mcpApp.localContract.environment_loading.evidence_path,
+            action: plan.mcpApp.localContractOperation.action,
+          }
+        : null,
     mcpApp: plan.mcpApp
       ? {
           compatibilityIdentifier: MCP_APP_COMPATIBILITY_IDENTIFIER,
@@ -466,8 +495,8 @@ export function publicPlan(plan) {
           tamaOrigin: plan.mcpApp.tamaOrigin,
           resource: plan.mcpApp.resource,
           allowedOrigins: plan.mcpApp.allowedOrigins,
-          jwksUri: `${plan.mcpApp.providerOrigin}/.well-known/jwks.json`,
-          introspectionEndpoint: `${plan.mcpApp.providerOrigin}/auth/introspections`,
+          jwksUri: `${plan.mcpApp.providerOrigin}${plan.mcpApp.localContract?.public_endpoints.jwks ?? "/.well-known/jwks.json"}`,
+          introspectionEndpoint: `${plan.mcpApp.providerOrigin}${plan.mcpApp.localContract?.public_endpoints.introspection ?? "/auth/introspections"}`,
           introspectionClientId: plan.mcpApp.introspectionClientId,
           providerSigningKeyId: plan.mcpApp.providerSigningKeyId,
           introspectionSigningKeyId: plan.mcpApp.introspectionSigningKeyId,

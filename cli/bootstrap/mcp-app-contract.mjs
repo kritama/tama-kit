@@ -1,7 +1,7 @@
 // @ts-check
 
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseDocument } from "yaml";
 import { usageError } from "../errors.mjs";
@@ -51,7 +51,7 @@ const PROVIDER_NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const SAFE_PATH_SEGMENT_PATTERN = /^[A-Za-z0-9._-]+$/u;
 const ENDPOINT_PATH_PATTERN = /^\/[A-Za-z0-9._~-]+(?:\/[A-Za-z0-9._~-]+)*$/u;
 const LOCAL_KEY_PATTERN = /^[a-z][a-z0-9_.-]*$/u;
-const PROVIDER_PUBLIC_ENDPOINTS = Object.freeze({
+export const MCP_APP_PROVIDER_PUBLIC_ENDPOINTS = Object.freeze({
   authorization_server_metadata: "/.well-known/oauth-authorization-server",
   jwks: "/.well-known/jwks.json",
   introspection: "/auth/introspections",
@@ -391,7 +391,7 @@ function validatePublicEndpoints(value) {
 /** @param {unknown} value */
 function validateProviderPublicEndpoints(value) {
   const endpoints = /** @type {Record<string, unknown>} */ (value);
-  for (const [name, path] of Object.entries(PROVIDER_PUBLIC_ENDPOINTS)) {
+  for (const [name, path] of Object.entries(MCP_APP_PROVIDER_PUBLIC_ENDPOINTS)) {
     if (endpoints[name] !== path) {
       throw usageError(
         `MCP App contract public_endpoints.${name} must be ${path}; Tama Kit cannot plan a different provider endpoint`,
@@ -1097,13 +1097,13 @@ export function resolveBindings(contractDocument, environmentPrefix) {
 
 /**
  * Determines whether the provider fragment is loaded by an application-owned
- * mechanism that Tama Kit can safely confirm. A contract that declares
- * `environment_loading` is authoritative; otherwise an active direnv
- * `dotenv`/`dotenv_load` directive or a Compose `env_file` entry that
- * references the fragment verifies it. A bare textual occurrence — a comment
- * or an unrelated command naming the file — does not count: migration deletes
- * the fragment this check exists to protect. When no loader can be confirmed
- * the integration is reported unverified rather than failing, because the
+ * mechanism that Tama Kit can safely confirm. A provider contract declaration
+ * records intent but is not evidence by itself. An active direnv
+ * `dotenv`/`dotenv_load` directive or a Compose `env_file` entry that references
+ * the fragment verifies it. A bare textual occurrence — a comment or an
+ * unrelated command naming the file — does not count: migration deletes the
+ * fragment this check exists to protect. When no loader can be confirmed the
+ * integration is reported unverified rather than failing, because the
  * application owns its loader.
  *
  * @param {string} root
@@ -1113,16 +1113,35 @@ export function resolveBindings(contractDocument, environmentPrefix) {
  * @returns {"verified" | "unverified"}
  */
 export function verifyEnvironmentLoading(root, environmentFile, contractDocument, selectedCompose) {
-  if (contractDocument && isPlainObject(contractDocument.environment_loading)) {
-    if (typeof contractDocument.environment_loading.loads === "string") {
-      return contractDocument.environment_loading.loads === environmentFile
-        ? "verified"
-        : "unverified";
-    }
-  }
+  return verifyEnvironmentLoadingEvidence(root, environmentFile, contractDocument, selectedCompose)
+    .status;
+}
+
+/**
+ * Returns the exact static evidence behind the loader status. Provider
+ * contract declarations describe intent but are not evidence by themselves:
+ * the referenced application-owned loader must exist and actively consume the
+ * generated fragment.
+ *
+ * @param {string} root
+ * @param {string} environmentFile
+ * @param {Record<string, unknown> | null} contractDocument
+ * @param {string} [selectedCompose]
+ * @returns {import("../types.mjs").EnvironmentLoadingEvidence}
+ */
+export function verifyEnvironmentLoadingEvidence(
+  root,
+  environmentFile,
+  contractDocument,
+  selectedCompose,
+) {
+  // Reading the declaration keeps this verifier deliberately aware of the
+  // accepted provider contract without treating the object as certification.
+  // The validator already requires `loads` to match the provider fragment.
+  void contractDocument;
   const envrc = safeRead(join(root, ".envrc"));
   if (envrc !== null && envrcLoadsFragment(envrc, environmentFile)) {
-    return "verified";
+    return { status: "verified", mechanism: "direnv", evidencePath: ".envrc" };
   }
   const composePaths = [
     ...(selectedCompose ? [resolve(root, selectedCompose)] : []),
@@ -1136,10 +1155,18 @@ export function verifyEnvironmentLoading(root, environmentFile, contractDocument
       compose !== null &&
       composeReferencesFragment(compose, resolve(root, environmentFile), composePath)
     ) {
-      return "verified";
+      const local = relative(root, composePath);
+      return {
+        status: "verified",
+        mechanism: "compose-env-file",
+        evidencePath:
+          local !== "" && !isAbsolute(local) && local !== ".." && !local.startsWith(`..${sep}`)
+            ? local.split(sep).join("/")
+            : composePath,
+      };
     }
   }
-  return "unverified";
+  return { status: "unverified", mechanism: null, evidencePath: null };
 }
 
 /** @param {string} value */

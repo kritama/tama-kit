@@ -57,6 +57,27 @@
 /** @typedef {"disabled" | "prepared" | "enabled"} McpAppMode */
 
 /**
+ * @typedef {object} EnvironmentLoadingEvidence
+ * @property {"verified" | "unverified"} status
+ * @property {"direnv" | "compose-env-file" | null} mechanism
+ * @property {string | null} evidencePath
+ */
+
+/**
+ * @typedef {object} McpAppLocalContract
+ * @property {"1"} schema_version
+ * @property {"tama-kit-mcp-app-local-provider-contract"} kind
+ * @property {"tama-mcp-app-bootstrap-v1"} compatibility_identifier
+ * @property {"local-development"} scope
+ * @property {{type: "generated" | "provider-contract", provider_contract_path: string | null, provider_contract_digest: string | null}} source
+ * @property {{name: string, environment_prefix: string, environment_file: string}} provider
+ * @property {{modes: McpAppMode[]}} lifecycle
+ * @property {Record<string, string>} bindings
+ * @property {{authorization_server_metadata: string, jwks: string, introspection: string}} public_endpoints
+ * @property {{status: "verified" | "unverified", mechanism: "direnv" | "compose-env-file" | null, evidence_path: string | null}} environment_loading
+ */
+
+/**
  * @typedef {object} ProviderIdentity
  * @property {string} name
  * @property {string} environmentPrefix
@@ -77,9 +98,20 @@
  * @property {string | null} contractPath
  * @property {Record<string, string>} bindings
  * @property {"verified" | "unverified"} environmentLoading
+ * @property {"direnv" | "compose-env-file" | null} [environmentLoadingMechanism]
+ * @property {string | null} [environmentLoadingEvidencePath]
  * @property {string} [providerOrigin]
  * @property {string} [tamaOrigin]
  * @property {string[]} [allowedOrigins]
+ */
+
+/**
+ * @typedef {PersistedMcpAppProvider & {
+ *   localContract: McpAppLocalContract,
+ *   bindingSource: "contract" | "conventional",
+ *   environmentLoadingMechanism: "direnv" | "compose-env-file" | null,
+ *   environmentLoadingEvidencePath: string | null,
+ * }} ResolvedMcpAppProvider
  */
 
 /**
@@ -190,6 +222,10 @@
  * @property {McpAppMode} lifecycle
  * @property {McpAppMode} providerLifecycle
  * @property {"verified" | "unverified"} environmentLoading
+ * @property {"direnv" | "compose-env-file" | null} environmentLoadingMechanism
+ * @property {string | null} environmentLoadingEvidencePath
+ * @property {McpAppLocalContract} [localContract]
+ * @property {FileOperation} [localContractOperation]
  * @property {string} providerOrigin
  * @property {string} tamaOrigin
  * @property {string} resource
@@ -280,6 +316,7 @@
  * @property {{foundation: "created" | "preserved", providerVersion: string | null, globalModuleVersion: string | null}} terraform
  * @property {PublicChange[]} changes
  * @property {{name: string, environmentPrefix: string, environmentFile: string, identitySource: string, contractPath: string | null, mode: McpAppMode, modeVariable: string, environmentLoading: "verified" | "unverified"} | null} provider
+ * @property {{path: string, source: "generated" | "provider-contract", sourcePath: string | null, bindingSource: "contract" | "conventional", compatibilityIdentifier: string, environmentLoading: "verified" | "unverified", environmentLoadingMechanism: "direnv" | "compose-env-file" | null, environmentLoadingEvidencePath: string | null, action: WriteAction | DeleteAction | UnchangedAction} | null} providerContract
  * @property {PublicMcpApp | null} mcpApp
  */
 

@@ -6,7 +6,29 @@ configuration, process lifecycle, access-token signing key, and OAuth policy.
 Tama owns its resource policy and introspection client key. Tama Kit only plans
 and verifies the shared local-development contract.
 
-## Provider contract
+## Local bootstrap contract
+
+Every `bootstrap --mcp-app` run resolves one normalized, non-secret local
+contract and manages it at `tama/contracts/mcp-app-provider-v1.json`. The
+contract records the accepted provider identity, exact nine semantic variable
+bindings, public provider endpoint paths, source provenance, and statically
+verified environment-loader evidence. The same in-memory document is validated
+before key generation and then drives provider and Tama environment planning.
+
+This file configures the local bridge; it does not certify that the provider
+implements OAuth metadata, JWKS, introspection, authorization, or lifecycle
+behavior. It never contains private JWKs, tokens, passwords, assertions, or
+environment values. Tama Kit writes it in the same managed transaction as the
+environment fragments, Compose files, Terraform root, and manifest. An
+identical rerun leaves it unchanged, while a user edit or identity/binding drift
+stops bootstrap instead of being overwritten.
+
+When no application-owned contract exists, the local contract records
+`source.type: "generated"` and uses conventional bindings derived from the
+accepted provider prefix. This generated projection is immediately usable for
+local file generation and does not require a separate promotion step.
+
+## Application-owned provider contract
 
 A contract-aware provider commits
 `priv/contracts/tama-mcp-app-bootstrap-v1.json`. The contract must use schema
@@ -14,6 +36,13 @@ version `1` and compatibility identifier `tama-mcp-app-bootstrap-v1`. Tama Kit
 validates the lifecycle, every semantic environment binding, public endpoint
 paths, local topology, loader declaration, limits, and supported version ranges
 before generating secrets or planning files.
+
+The application-owned contract remains optional and authoritative only for
+the provider declarations it contains. Tama Kit reads it but never creates or
+rewrites it. A matching contract added after a conventional bootstrap changes
+the local contract provenance to `provider-contract` without renaming bindings
+or rotating keys. A mismatching identity or binding remains drift and requires
+an explicit migration.
 
 Every contract that declares a provider identity is cross-checked against its
 declared `variables`: each role is bound either by the contract's `bindings`
@@ -75,14 +104,14 @@ contract or to loopback at the selected Tama port. A fresh run without
 `--port` selects the Tama port the accepted contract documents (normally
 `4001`), and a selected port that collides with a `host.docker.internal`
 provider origin is rejected because both host-native services would share the
-same host port. Origins are persisted and compared on reruns. Changing
-`localhost` to `127.0.0.1`, changing to `::1`, or changing any accepted origin
-is a topology migration, not a normal rerun. Planning a Tama port that
-differs from the persisted integration's Tama origin is rejected: the MCP
-resource, the introspection client id, and the provider fragment are bound to
-that origin, so the integration must be reset (remove the `TAMA_MCP_APP_*`
-variables from `.tama.env`, the provider fragment, and the `mcpAppProvider`
-manifest block) before bootstrapping the new port with `--mcp-app`.
+same host port. Origins are persisted and compared on reruns. A
+`bootstrap --mcp-app --port <new-port>` rerun updates the Tama origin, resource,
+introspection client id, and both owner-specific environment files atomically
+without renaming bindings or rotating keys. Changing `localhost` to
+`127.0.0.1`, changing to `::1`, or changing the public scheme or host remains
+an explicit topology migration. An ordinary bootstrap without `--mcp-app`
+still rejects a Tama port change because it cannot safely update the provider
+fragment as part of that plan.
 
 Pass at least one repeatable `--allowed-origin` for the actual browser or MCP
 client. Tama Kit never infers client origins from either service origin.
@@ -119,8 +148,18 @@ no cheaply detectable small factor — the same strength the private signing
 key is held to — or the re-bootstrap fails. Key identifiers use the portable
 dotenv-safe alphabet documented by `tama-kit oauth generate-key`.
 
-Dry-run does not generate keys or write files. Repeated JSON dry-runs with the
-same inputs are deterministic and contain no private material.
+Dry-run does not generate keys or write files. It still renders and validates
+the local contract in memory, reports its planned operation in the
+`providerContract` result block, and uses it for the rest of the plan. Repeated
+JSON dry-runs with the same inputs are deterministic and contain no private
+material.
+
+An `environment_loading` declaration in an application-owned contract is not
+loader evidence by itself. Tama Kit reports loading as verified only when an
+exact active `.envrc` `dotenv`/`dotenv_load` directive or a Compose service
+`env_file` entry consumes the provider fragment. Otherwise bootstrap can
+prepare the files, but reports the integration as not yet runnable until the
+application owner wires the loader.
 
 ## Identity migration
 

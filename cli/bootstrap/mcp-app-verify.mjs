@@ -447,8 +447,10 @@ async function signWrongKeyAssertion({ kid, clientId, audience }) {
 async function introspectInactiveToken({ root, plan, fetch, providerTransport }) {
   // The request travels over the host-resolvable transport, but the client
   // assertion names the advertised endpoint the provider validates.
-  const endpoint = `${providerTransport}/auth/introspections`;
-  const audience = `${plan.providerOrigin}/auth/introspections`;
+  const introspectionPath =
+    plan.localContract?.public_endpoints.introspection ?? "/auth/introspections";
+  const endpoint = `${providerTransport}${introspectionPath}`;
+  const audience = `${plan.providerOrigin}${introspectionPath}`;
   const assertion = await signClientAssertion({
     privateJwk: readEnvironmentValues(root, ".tama.env").get(TAMA_INTROSPECTION_KEY_VARIABLE) ?? "",
     kid: plan.introspectionSigningKeyId,
@@ -594,11 +596,16 @@ export async function verifyMcpApp({
   // A host-mapped provider fetch connects through the resolved Docker gateway
   // while these URLs retain the advertised provider authority.
   const providerTransport = plan.providerOrigin;
-  const metadataUrl = `${providerTransport}/.well-known/oauth-authorization-server`;
+  const providerEndpoints = plan.localContract?.public_endpoints ?? {
+    authorization_server_metadata: "/.well-known/oauth-authorization-server",
+    jwks: "/.well-known/jwks.json",
+    introspection: "/auth/introspections",
+  };
+  const metadataUrl = `${providerTransport}${providerEndpoints.authorization_server_metadata}`;
   const providerMetadata = await fetchJson(providerFetch, metadataUrl);
   const metadataValid =
     providerMetadata.body?.issuer === plan.providerOrigin &&
-    providerMetadata.body?.jwks_uri === `${plan.providerOrigin}/.well-known/jwks.json`;
+    providerMetadata.body?.jwks_uri === `${plan.providerOrigin}${providerEndpoints.jwks}`;
   probes.push(
     probe(
       "provider_metadata",
@@ -629,7 +636,7 @@ export async function verifyMcpApp({
   );
   const providerJwksResult = await fetchJson(
     providerFetch,
-    `${providerTransport}/.well-known/jwks.json`,
+    `${providerTransport}${providerEndpoints.jwks}`,
   );
   const providerReachable = jwksPublishesExpectedKey(
     providerJwksResult.body,
@@ -657,7 +664,7 @@ export async function verifyMcpApp({
     if (probeProviderFromContainer) {
       try {
         containerReachable = await probeProviderFromContainer(
-          `${plan.providerOrigin}/.well-known/oauth-authorization-server`,
+          `${plan.providerOrigin}${providerEndpoints.authorization_server_metadata}`,
         );
       } catch {
         containerReachable = false;
