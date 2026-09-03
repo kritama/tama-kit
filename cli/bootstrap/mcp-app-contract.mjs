@@ -125,7 +125,7 @@ function safeString(value) {
 /** @param {unknown} value @param {string} label @returns {string} */
 function requiredSafeString(value, label) {
   if (typeof value !== "string" || !safeString(value)) {
-    throw usageError(`MCP App contract ${label} must be a non-empty control-free string`);
+    throw usageError(`${label} must be a non-empty control-free string`);
   }
   return value;
 }
@@ -157,10 +157,10 @@ function rejectUnknownKeys(value, allowed, label) {
 }
 
 /** @param {unknown} value @param {string} label @returns {string} */
-function safeRelativePath(value, label) {
+export function safeRelativePath(value, label) {
   const path = requiredSafeString(value, label);
   if (isAbsolute(path) || path.includes("\\") || Buffer.byteLength(path, "utf8") > 256) {
-    throw usageError(`MCP App contract ${label} must be a safe project-relative path`);
+    throw usageError(`${label} must be a safe project-relative path`);
   }
   const segments = path.split("/");
   if (
@@ -173,7 +173,7 @@ function safeRelativePath(value, label) {
         !SAFE_PATH_SEGMENT_PATTERN.test(segment),
     )
   ) {
-    throw usageError(`MCP App contract ${label} must be a safe project-relative path`);
+    throw usageError(`${label} must be a safe project-relative path`);
   }
   return path;
 }
@@ -193,10 +193,10 @@ const RESERVED_FRAGMENT_PATHS = new Set([
 ]);
 
 /** @param {string} path @param {string} label */
-function assertUnreservedFragmentPath(path, label) {
+export function assertUnreservedFragmentPath(path, label) {
   if (RESERVED_FRAGMENT_PATHS.has(path) || path.startsWith("tama/")) {
     throw usageError(
-      `MCP App contract ${label} collides with a bootstrap-managed or application-owned path: ` +
+      `${label} collides with a bootstrap-managed or application-owned path: ` +
         `${path}; choose a dedicated provider fragment filename such as .<provider>.integration.env`,
     );
   }
@@ -410,8 +410,11 @@ function validateProvider(value) {
   if (!ENVIRONMENT_NAME_PATTERN.test(prefix)) {
     throw usageError("MCP App contract provider.environment_prefix is invalid");
   }
-  const environmentFile = safeRelativePath(value.environment_file, "provider.environment_file");
-  assertUnreservedFragmentPath(environmentFile, "provider.environment_file");
+  const environmentFile = safeRelativePath(
+    value.environment_file,
+    "MCP App contract provider.environment_file",
+  );
+  assertUnreservedFragmentPath(environmentFile, "MCP App contract provider.environment_file");
   return value;
 }
 
@@ -425,9 +428,9 @@ function validateEnvironmentLoading(value, provider) {
   }
   rejectUnknownKeys(value, ["mechanism", "loader", "loads"], "environment_loading");
   requiredSafeString(value.mechanism, "environment_loading.mechanism");
-  safeRelativePath(value.loader, "environment_loading.loader");
-  const loads = safeRelativePath(value.loads, "environment_loading.loads");
-  assertUnreservedFragmentPath(loads, "environment_loading.loads");
+  safeRelativePath(value.loader, "MCP App contract environment_loading.loader");
+  const loads = safeRelativePath(value.loads, "MCP App contract environment_loading.loads");
+  assertUnreservedFragmentPath(loads, "MCP App contract environment_loading.loads");
   if (provider && loads !== provider.environment_file) {
     throw usageError(
       "MCP App contract environment_loading.loads must match provider.environment_file",

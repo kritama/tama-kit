@@ -1600,15 +1600,82 @@ const noContainerInspection = async () => "unknown";
  * authentication the way a real provider must: a client assertion that is not
  * a signed JWT is rejected with HTTP 400.
  *
- * @param {(input: URL, init?: RequestInit) => Promise<Response>} fetch
+/**
+ * @param {{root: string, plan: import("../../cli/types.mjs").McpAppPlan}} context
+ * @param {string | null} assertion
+ * @returns {Promise<boolean>}
  */
-function enforcingIntrospection(fetch) {
+async function clientAssertionIsValid({ root, plan }, assertion) {
+  if (typeof assertion !== "string" || !JWT_PATTERN.test(assertion)) {
+    return false;
+  }
+  const [header, payload, signature] = assertion.split(".");
+  /** @type {Record<string, unknown> | null} */
+  let headerJson = null;
+  /** @type {Record<string, unknown> | null} */
+  let payloadJson = null;
+  try {
+    const parsedHeader = JSON.parse(Buffer.from(header, "base64url").toString("utf8"));
+    const parsedPayload = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (typeof parsedHeader !== "object" || parsedHeader === null) {
+      return false;
+    }
+    if (typeof parsedPayload !== "object" || parsedPayload === null) {
+      return false;
+    }
+    headerJson = parsedHeader;
+    payloadJson = parsedPayload;
+  } catch {
+    return false;
+  }
+  if (headerJson.alg !== "RS256" || headerJson.kid !== plan.introspectionSigningKeyId) {
+    return false;
+  }
+  if (payloadJson.aud !== `${plan.providerOrigin}/auth/introspections`) {
+    return false;
+  }
+  const tamaJwk = parseEnv(
+    readFileSync(join(root, ".tama.env"), "utf8"),
+  ).TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY;
+  if (typeof tamaJwk !== "string") {
+    return false;
+  }
+  try {
+    const jwk = /** @type {Record<string, string>} */ (JSON.parse(tamaJwk));
+    const key = await globalThis.crypto.subtle.importKey(
+      "jwk",
+      { kty: jwk.kty, n: jwk.n, e: jwk.e },
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      true,
+      ["verify"],
+    );
+    return await globalThis.crypto.subtle.verify(
+      "RSASSA-PKCS1-v1_5",
+      key,
+      new Uint8Array(Buffer.from(signature, "base64url")),
+      new TextEncoder().encode(`${header}.${payload}`),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Wraps a fake provider fetch so its introspection endpoint enforces real
+ * client authentication the way a compliant provider must: the assertion must
+ * be a valid RS256 JWT for the expected key and audience.
+ *
+ * @param {(input: URL, init?: RequestInit) => Promise<Response>} fetch
+ * @param {string} root
+ * @param {import("../../cli/types.mjs").McpAppPlan} plan
+ */
+function enforcingIntrospection(fetch, root, plan) {
   return async (input, init) => {
     if (/** @type {URL} */ (input).href.endsWith("/auth/introspections")) {
-      const assertion = new URLSearchParams(String(init?.body ?? "")).get("client_assertion") ?? "";
-      if (!JWT_PATTERN.test(assertion)) {
+      const assertion = new URLSearchParams(String(init?.body ?? "")).get("client_assertion");
+      if (!(await clientAssertionIsValid({ root, plan }, assertion))) {
         return new Response(JSON.stringify({ error: "invalid_client" }), {
-          status: 400,
+          status: 401,
           headers: { "content-type": "application/json" },
         });
       }
@@ -1647,10 +1714,10 @@ test("verifyMcpApp verifies both JWKS and the inactive introspection probe", asy
     const url = input.href;
     calls.push({ url, method: init?.method ?? "GET", body: init?.body });
     if (url.endsWith("/auth/introspections")) {
-      const assertion = new URLSearchParams(String(init?.body ?? "")).get("client_assertion") ?? "";
-      if (!JWT_PATTERN.test(assertion)) {
+      const assertion = new URLSearchParams(String(init?.body ?? "")).get("client_assertion");
+      if (!(await clientAssertionIsValid({ root, plan }, assertion))) {
         return new Response(JSON.stringify({ error: "invalid_client" }), {
-          status: 400,
+          status: 401,
           headers: { "content-type": "application/json" },
         });
       }
@@ -1694,23 +1761,33 @@ test("verifyMcpApp verifies both JWKS and the inactive introspection probe", asy
   const introspectionCalls = calls.filter((call) => call.url.endsWith("/auth/introspections"));
   assert.equal(introspectionCalls.length, 2);
   const controlBody = new URLSearchParams(String(introspectionCalls[0]?.body));
-  assert.doesNotMatch(String(controlBody.get("client_assertion")), JWT_PATTERN);
+  // The negative control is structurally valid — a real JWT shape — but
+  // signed by an unrelated key, so only signature verification rejects it.
+  assert.match(String(controlBody.get("client_assertion")), JWT_PATTERN);
+  assert.equal(
+    await clientAssertionIsValid({ root, plan }, String(controlBody.get("client_assertion"))),
+    false,
+  );
   const body = new URLSearchParams(String(introspectionCalls[1]?.body));
   assert.equal(body.get("token"), "tama-kit-bootstrap-inactive-probe");
   assert.equal(
     body.get("client_assertion_type"),
     "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
   );
-  assert.match(body.get("client_assertion"), JWT_PATTERN);
+  assert.equal(
+    await clientAssertionIsValid({ root, plan }, String(body.get("client_assertion"))),
+    true,
+  );
 });
 
-test("verifyMcpApp rejects an introspection endpoint that accepts invalid client assertions", async () => {
+test("verifyMcpApp rejects an introspection endpoint that skips assertion signature verification", async () => {
   const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
   const result = await verifyMcpApp({
     root,
     plan,
-    // A public endpoint answers the negative control exactly like the
-    // authenticated request, so the probe must fail before trusting it.
+    // A public endpoint answers the wrong-key negative control exactly like
+    // the authenticated request — it parses JWTs but never verifies the
+    // signature — so the probe must fail before trusting it.
     fetch: async (input) => {
       const url = input.href;
       if (url.endsWith("/.well-known/oauth-authorization-server")) {
@@ -1729,7 +1806,7 @@ test("verifyMcpApp rejects an introspection endpoint that accepts invalid client
   });
   const probe = result.probes.find(({ name }) => name === "inactive_introspection");
   assert.equal(probe?.ok, false);
-  assert.match(probe?.reason ?? "", /invalid client assertion/u);
+  assert.match(probe?.reason ?? "", /signed by an unrelated key/u);
   assert.equal(result.verified, false);
 });
 
@@ -1739,19 +1816,23 @@ test("verifyMcpApp reports each failed probe independently", async () => {
   const wrongProvider = await verifyMcpApp({
     root,
     plan,
-    fetch: enforcingIntrospection(async (input) => {
-      const url = input.href;
-      if (url.endsWith("/.well-known/oauth-authorization-server")) {
-        return Response.json(providerMetadata(plan));
-      }
-      const body = url.startsWith(plan.tamaOrigin)
-        ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
-        : jwksDocument("wrong-kid");
-      return new Response(JSON.stringify(body), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }),
+    fetch: enforcingIntrospection(
+      async (input) => {
+        const url = input.href;
+        if (url.endsWith("/.well-known/oauth-authorization-server")) {
+          return Response.json(providerMetadata(plan));
+        }
+        const body = url.startsWith(plan.tamaOrigin)
+          ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+          : jwksDocument("wrong-kid");
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+      root,
+      plan,
+    ),
     inspectProviderListener: noContainerInspection,
   });
   assert.equal(wrongProvider.mode, "prepared");
@@ -1764,29 +1845,33 @@ test("verifyMcpApp reports each failed probe independently", async () => {
   const activeToken = await verifyMcpApp({
     root,
     plan,
-    fetch: enforcingIntrospection(async (input) => {
-      const url = input.href;
-      if (url.endsWith("/.well-known/oauth-authorization-server")) {
-        return Response.json(providerMetadata(plan));
-      }
-      if (url.endsWith("/.well-known/jwks.json")) {
-        return new Response(
-          JSON.stringify(
-            url.startsWith(plan.tamaOrigin)
-              ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
-              : jwksDocument(plan.providerSigningKeyId, providerJwk),
-          ),
-          {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          },
-        );
-      }
-      return new Response(JSON.stringify({ active: true }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }),
+    fetch: enforcingIntrospection(
+      async (input) => {
+        const url = input.href;
+        if (url.endsWith("/.well-known/oauth-authorization-server")) {
+          return Response.json(providerMetadata(plan));
+        }
+        if (url.endsWith("/.well-known/jwks.json")) {
+          return new Response(
+            JSON.stringify(
+              url.startsWith(plan.tamaOrigin)
+                ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+                : jwksDocument(plan.providerSigningKeyId, providerJwk),
+            ),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+        return new Response(JSON.stringify({ active: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+      root,
+      plan,
+    ),
     inspectProviderListener: noContainerInspection,
   });
   assert.equal(activeToken.verified, false);
@@ -1819,32 +1904,36 @@ test("verifyMcpApp gates enabled metadata, route, and exact provider advertiseme
   const result = await verifyMcpApp({
     root,
     plan: enabledPlan,
-    fetch: enforcingIntrospection(async (input) => {
-      const url = input.href;
-      if (url.endsWith("/.well-known/oauth-authorization-server")) {
-        return Response.json({
-          ...providerMetadata(enabledPlan),
-          protected_resources: [enabledPlan.resource],
-        });
-      }
-      if (url.endsWith("/.well-known/oauth-protected-resource/mcp/app")) {
-        return Response.json({
-          resource: enabledPlan.resource,
-          authorization_servers: [enabledPlan.providerOrigin],
-        });
-      }
-      if (url.endsWith("/.well-known/jwks.json")) {
-        return Response.json(
-          url.startsWith(enabledPlan.tamaOrigin)
-            ? jwksDocument(enabledPlan.introspectionSigningKeyId, tamaJwk)
-            : jwksDocument(enabledPlan.providerSigningKeyId, providerJwk),
-        );
-      }
-      if (url === enabledPlan.resource) {
-        return Response.json({ error: "missing_token" }, { status: 401 });
-      }
-      return Response.json({ active: false });
-    }),
+    fetch: enforcingIntrospection(
+      async (input) => {
+        const url = input.href;
+        if (url.endsWith("/.well-known/oauth-authorization-server")) {
+          return Response.json({
+            ...providerMetadata(enabledPlan),
+            protected_resources: [enabledPlan.resource],
+          });
+        }
+        if (url.endsWith("/.well-known/oauth-protected-resource/mcp/app")) {
+          return Response.json({
+            resource: enabledPlan.resource,
+            authorization_servers: [enabledPlan.providerOrigin],
+          });
+        }
+        if (url.endsWith("/.well-known/jwks.json")) {
+          return Response.json(
+            url.startsWith(enabledPlan.tamaOrigin)
+              ? jwksDocument(enabledPlan.introspectionSigningKeyId, tamaJwk)
+              : jwksDocument(enabledPlan.providerSigningKeyId, providerJwk),
+          );
+        }
+        if (url === enabledPlan.resource) {
+          return Response.json({ error: "missing_token" }, { status: 401 });
+        }
+        return Response.json({ active: false });
+      },
+      root,
+      plan,
+    ),
     inspectProviderListener: noContainerInspection,
   });
   assert.equal(result.verified, true);
@@ -1868,20 +1957,24 @@ test("verifyMcpApp rejects a JWKS whose key material does not match the persiste
   const staleProvider = await verifyMcpApp({
     root,
     plan,
-    fetch: enforcingIntrospection(async (input) => {
-      const url = input.href;
-      if (url.endsWith("/.well-known/oauth-authorization-server")) {
-        return Response.json(providerMetadata(plan));
-      }
-      if (url.endsWith("/.well-known/jwks.json")) {
-        return Response.json(
-          url.startsWith(plan.tamaOrigin)
-            ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
-            : jwksDocument(plan.providerSigningKeyId),
-        );
-      }
-      return Response.json({ active: false });
-    }),
+    fetch: enforcingIntrospection(
+      async (input) => {
+        const url = input.href;
+        if (url.endsWith("/.well-known/oauth-authorization-server")) {
+          return Response.json(providerMetadata(plan));
+        }
+        if (url.endsWith("/.well-known/jwks.json")) {
+          return Response.json(
+            url.startsWith(plan.tamaOrigin)
+              ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+              : jwksDocument(plan.providerSigningKeyId),
+          );
+        }
+        return Response.json({ active: false });
+      },
+      root,
+      plan,
+    ),
     inspectProviderListener: noContainerInspection,
   });
   assert.equal(staleProvider.verified, false);
@@ -1894,20 +1987,24 @@ test("verifyMcpApp rejects a JWKS whose key material does not match the persiste
   const staleTama = await verifyMcpApp({
     root,
     plan,
-    fetch: enforcingIntrospection(async (input) => {
-      const url = input.href;
-      if (url.endsWith("/.well-known/oauth-authorization-server")) {
-        return Response.json(providerMetadata(plan));
-      }
-      if (url.endsWith("/.well-known/jwks.json")) {
-        return Response.json(
-          url.startsWith(plan.tamaOrigin)
-            ? jwksDocument(plan.introspectionSigningKeyId)
-            : jwksDocument(plan.providerSigningKeyId, providerJwk),
-        );
-      }
-      return Response.json({ active: false });
-    }),
+    fetch: enforcingIntrospection(
+      async (input) => {
+        const url = input.href;
+        if (url.endsWith("/.well-known/oauth-authorization-server")) {
+          return Response.json(providerMetadata(plan));
+        }
+        if (url.endsWith("/.well-known/jwks.json")) {
+          return Response.json(
+            url.startsWith(plan.tamaOrigin)
+              ? jwksDocument(plan.introspectionSigningKeyId)
+              : jwksDocument(plan.providerSigningKeyId, providerJwk),
+          );
+        }
+        return Response.json({ active: false });
+      },
+      root,
+      plan,
+    ),
     inspectProviderListener: noContainerInspection,
   });
   assert.equal(staleTama.verified, false);
@@ -1926,20 +2023,24 @@ test("verifyMcpApp rejects a JWKS that exposes private members under the expecte
   const leaked = await verifyMcpApp({
     root,
     plan,
-    fetch: enforcingIntrospection(async (input) => {
-      const url = input.href;
-      if (url.endsWith("/.well-known/oauth-authorization-server")) {
-        return Response.json(providerMetadata(plan));
-      }
-      if (url.endsWith("/.well-known/jwks.json")) {
-        const body = url.startsWith(plan.tamaOrigin)
-          ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
-          : jwksDocument(plan.providerSigningKeyId, providerJwk);
-        body.keys[0].d = "leaked-private-exponent";
-        return Response.json(body);
-      }
-      return Response.json({ active: false });
-    }),
+    fetch: enforcingIntrospection(
+      async (input) => {
+        const url = input.href;
+        if (url.endsWith("/.well-known/oauth-authorization-server")) {
+          return Response.json(providerMetadata(plan));
+        }
+        if (url.endsWith("/.well-known/jwks.json")) {
+          const body = url.startsWith(plan.tamaOrigin)
+            ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+            : jwksDocument(plan.providerSigningKeyId, providerJwk);
+          body.keys[0].d = "leaked-private-exponent";
+          return Response.json(body);
+        }
+        return Response.json({ active: false });
+      },
+      root,
+      plan,
+    ),
     inspectProviderListener: noContainerInspection,
   });
   assert.equal(leaked.verified, false);
@@ -1967,6 +2068,8 @@ test("verifyMcpApp probes the host-native provider over the loopback transport",
         }
         return Response.json({ active: false });
       },
+      root,
+      plan,
     );
   const calls = [];
   const result = await verifyMcpApp({
@@ -2012,20 +2115,24 @@ test("verifyMcpApp fails the host-gateway topology when the provider bind is loo
     verifyMcpApp({
       root,
       plan,
-      fetch: enforcingIntrospection(async (input) => {
-        const url = input.href;
-        if (url.endsWith("/.well-known/oauth-authorization-server")) {
-          return Response.json(providerMetadata(plan));
-        }
-        if (url.endsWith("/.well-known/jwks.json")) {
-          return Response.json(
-            url.startsWith(plan.tamaOrigin)
-              ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
-              : jwksDocument(plan.providerSigningKeyId, providerJwk),
-          );
-        }
-        return Response.json({ active: false });
-      }),
+      fetch: enforcingIntrospection(
+        async (input) => {
+          const url = input.href;
+          if (url.endsWith("/.well-known/oauth-authorization-server")) {
+            return Response.json(providerMetadata(plan));
+          }
+          if (url.endsWith("/.well-known/jwks.json")) {
+            return Response.json(
+              url.startsWith(plan.tamaOrigin)
+                ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+                : jwksDocument(plan.providerSigningKeyId, providerJwk),
+            );
+          }
+          return Response.json({ active: false });
+        },
+        root,
+        plan,
+      ),
       inspectProviderListener: async () => inspection,
     });
 
@@ -2058,20 +2165,24 @@ test("verifyMcpApp inspects the effective default port for a portless host-gatew
   const result = await verifyMcpApp({
     root,
     plan: portlessPlan,
-    fetch: enforcingIntrospection(async (input) => {
-      const url = input.href;
-      if (url.endsWith("/.well-known/oauth-authorization-server")) {
-        return Response.json(providerMetadata(portlessPlan));
-      }
-      if (url.endsWith("/.well-known/jwks.json")) {
-        return Response.json(
-          url.startsWith(portlessPlan.tamaOrigin)
-            ? jwksDocument(portlessPlan.introspectionSigningKeyId, tamaJwk)
-            : jwksDocument(portlessPlan.providerSigningKeyId, providerJwk),
-        );
-      }
-      return Response.json({ active: false });
-    }),
+    fetch: enforcingIntrospection(
+      async (input) => {
+        const url = input.href;
+        if (url.endsWith("/.well-known/oauth-authorization-server")) {
+          return Response.json(providerMetadata(portlessPlan));
+        }
+        if (url.endsWith("/.well-known/jwks.json")) {
+          return Response.json(
+            url.startsWith(portlessPlan.tamaOrigin)
+              ? jwksDocument(portlessPlan.introspectionSigningKeyId, tamaJwk)
+              : jwksDocument(portlessPlan.providerSigningKeyId, providerJwk),
+          );
+        }
+        return Response.json({ active: false });
+      },
+      root,
+      portlessPlan,
+    ),
     inspectProviderListener: async (port) => {
       inspectedPorts.push(port);
       return "wide";
@@ -2143,29 +2254,33 @@ test("verifyMcpApp requires the protected route to reject anonymous requests", a
     verifyMcpApp({
       root,
       plan: enabledPlan,
-      fetch: enforcingIntrospection(async (input) => {
-        const url = input.href;
-        if (url.endsWith("/.well-known/oauth-authorization-server")) {
-          return Response.json(providerMetadata(plan));
-        }
-        if (url.endsWith("/.well-known/oauth-protected-resource/mcp/app")) {
-          return Response.json({
-            resource: plan.resource,
-            authorization_servers: [plan.providerOrigin],
-          });
-        }
-        if (url.endsWith("/.well-known/jwks.json")) {
-          return Response.json(
-            url.startsWith(plan.tamaOrigin)
-              ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
-              : jwksDocument(plan.providerSigningKeyId, providerJwk),
-          );
-        }
-        if (url === plan.resource) {
-          return new Response(null, { status });
-        }
-        return Response.json({ active: false });
-      }),
+      fetch: enforcingIntrospection(
+        async (input) => {
+          const url = input.href;
+          if (url.endsWith("/.well-known/oauth-authorization-server")) {
+            return Response.json(providerMetadata(plan));
+          }
+          if (url.endsWith("/.well-known/oauth-protected-resource/mcp/app")) {
+            return Response.json({
+              resource: plan.resource,
+              authorization_servers: [plan.providerOrigin],
+            });
+          }
+          if (url.endsWith("/.well-known/jwks.json")) {
+            return Response.json(
+              url.startsWith(plan.tamaOrigin)
+                ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+                : jwksDocument(plan.providerSigningKeyId, providerJwk),
+            );
+          }
+          if (url === plan.resource) {
+            return new Response(null, { status });
+          }
+          return Response.json({ active: false });
+        },
+        root,
+        plan,
+      ),
       inspectProviderListener: noContainerInspection,
     });
   for (const status of [200, 400, 404, 503]) {
@@ -2199,19 +2314,23 @@ test("verifyMcpApp requires an RSA signing member for the expected identifier", 
     const result = await verifyMcpApp({
       root,
       plan,
-      fetch: enforcingIntrospection(async (input) => {
-        const url = input.href;
-        if (url.endsWith("/.well-known/oauth-authorization-server")) {
-          return Response.json(providerMetadata(plan));
-        }
-        if (url.endsWith("/.well-known/jwks.json")) {
-          const body = url.startsWith(plan.tamaOrigin)
-            ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
-            : { keys: [member] };
-          return Response.json(body);
-        }
-        return Response.json({ active: false });
-      }),
+      fetch: enforcingIntrospection(
+        async (input) => {
+          const url = input.href;
+          if (url.endsWith("/.well-known/oauth-authorization-server")) {
+            return Response.json(providerMetadata(plan));
+          }
+          if (url.endsWith("/.well-known/jwks.json")) {
+            const body = url.startsWith(plan.tamaOrigin)
+              ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+              : { keys: [member] };
+            return Response.json(body);
+          }
+          return Response.json({ active: false });
+        },
+        root,
+        plan,
+      ),
       inspectProviderListener: noContainerInspection,
     });
     assert.equal(result.providerReachable, false, JSON.stringify(member));
@@ -2443,6 +2562,75 @@ test("provider fragment paths that collide with managed files are rejected", () 
   }
 });
 
+test("resolveProviderIdentity rejects reserved and unsafe provider fragment paths", () => {
+  const root = project();
+  for (const [environmentFile, pattern] of [
+    [".tama.env", /collides with a bootstrap-managed/u],
+    ["tama/compose.yaml", /collides with a bootstrap-managed/u],
+    ["../evil.env", /safe project-relative path/u],
+    ["/etc/passwd", /safe project-relative path/u],
+    ["", /non-empty control-free string|safe project-relative path/u],
+  ]) {
+    // Explicit flag.
+    assert.throws(
+      () =>
+        resolveProviderIdentity({
+          root,
+          framework: "generic",
+          manifestProvider: null,
+          contractDocument: null,
+          name: "acme",
+          environmentFile,
+        }),
+      (error) => error instanceof CLIError && pattern.test(error.message),
+    );
+    // Persisted manifest state (the production rerun path).
+    assert.throws(
+      () =>
+        resolveProviderIdentity({
+          root,
+          framework: "generic",
+          manifestProvider: { ...MEMOVEE, source: "manifest", environmentFile },
+          contractDocument: null,
+        }),
+      (error) => error instanceof CLIError && pattern.test(error.message),
+    );
+  }
+  const identity = resolveProviderIdentity({
+    root,
+    framework: "generic",
+    manifestProvider: null,
+    contractDocument: null,
+    name: "acme",
+  });
+  assert.equal(identity.environmentFile, ".acme.integration.env");
+});
+
+test("bootstrap fails closed when a persisted provider fragment path no longer matches", () => {
+  const root = project();
+  const contractPath = writeContract(root);
+  const contract = validContract();
+  applyOperations(
+    planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })).operations,
+  );
+
+  // The manifest is disk-resident trusted state: a tampered fragment path
+  // must fail closed instead of overwriting a bootstrap-managed file. In the
+  // production path resolveProviderIdentity re-validates the persisted path;
+  // here the plan-level mismatch guard catches the divergence first.
+  const manifestPath = join(root, "tama", ".tama-kit.json");
+  const manifest = /** @type {Record<string, any>} */ (
+    JSON.parse(readFileSync(manifestPath, "utf8"))
+  );
+  manifest.mcpAppProvider.environmentFile = ".tama.env";
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  assert.throws(
+    () => planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })),
+    (error) =>
+      error instanceof CLIError && /does not match the resolved identity/u.test(error.message),
+  );
+});
+
 test("bootstrap rejects a tracked provider fragment even on ordinary reruns", () => {
   const root = project();
   execFileSync("git", ["init", "--quiet"], { cwd: root });
@@ -2557,6 +2745,33 @@ test("the bootstrap command accepts --provider-env-file for the provider fragmen
   ]);
   assert.equal(rejected.exitCode, EXIT_CODES.USAGE);
   assert.match(rejected.stderr, /require --mcp-app/u);
+
+  // A flag fragment path colliding with a bootstrap-managed file is rejected
+  // before planning, exactly like the contract-declared one.
+  const reserved = await command(root, [
+    "bootstrap",
+    root,
+    "--json",
+    "--dry-run",
+    "--skills",
+    "manual",
+    "--mcp-app",
+    "--port",
+    "4001",
+    "--image",
+    "ghcr.io/upmaru/tama:0.13.1",
+    "--provider-name",
+    "acme",
+    "--provider-env-file",
+    ".tama.env",
+    "--provider-origin",
+    "http://host.docker.internal:5000",
+    "--allowed-origin",
+    "http://127.0.0.1:3000",
+  ]);
+  assert.equal(reserved.exitCode, EXIT_CODES.USAGE);
+  const reservedError = /** @type {{error: {message: string}}} */ (JSON.parse(reserved.stdout));
+  assert.match(reservedError.error.message, /collides with a bootstrap-managed/u);
 });
 
 test("MCP App JSON dry-runs are byte-for-byte deterministic and write no secrets", async () => {

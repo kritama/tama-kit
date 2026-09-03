@@ -16,7 +16,6 @@ import { readEnvironmentValues } from "./environment.mjs";
 
 const CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
 const INACTIVE_PROBE_TOKEN = "tama-kit-bootstrap-inactive-probe";
-const NEGATIVE_CONTROL_CLIENT_ASSERTION = "tama-kit-bootstrap-negative-control-invalid-assertion";
 const PROBE_TIMEOUT_MS = 10_000;
 const TAMA_INTROSPECTION_KEY_VARIABLE = "TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY";
 
@@ -293,30 +292,83 @@ async function signClientAssertion({ privateJwk, kid, clientId, audience }) {
       false,
       ["sign"],
     );
-    const encoder = new TextEncoder();
-    const b64url = (/** @type {ArrayBuffer | Uint8Array} */ input) =>
-      Buffer.from(new Uint8Array(input)).toString("base64url");
-    const header = b64url(encoder.encode(JSON.stringify({ alg: "RS256", typ: "JWT", kid })));
-    const now = Math.floor(Date.now() / 1000);
-    const payload = b64url(
-      encoder.encode(
-        JSON.stringify({
-          iss: clientId,
-          sub: clientId,
-          aud: audience,
-          iat: now,
-          exp: now + 300,
-          jti: globalThis.crypto.randomUUID(),
-        }),
-      ),
-    );
-    const signingInput = `${header}.${payload}`;
-    const signature = await globalThis.crypto.subtle.sign(
-      "RSASSA-PKCS1-v1_5",
-      key,
-      encoder.encode(signingInput),
-    );
-    return `${signingInput}.${b64url(signature)}`;
+    return await buildClientAssertion({ key, kid, clientId, audience });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Builds an RS256 client assertion carrying the claims the provider validates.
+ *
+ * @param {{key: CryptoKey, kid: string, clientId: string, audience: string}} input
+ * @returns {Promise<string | null>}
+ */
+async function buildClientAssertion({ key, kid, clientId, audience }) {
+  const encoder = new TextEncoder();
+  const b64url = (/** @type {ArrayBuffer | Uint8Array} */ input) =>
+    Buffer.from(new Uint8Array(input)).toString("base64url");
+  const header = b64url(encoder.encode(JSON.stringify({ alg: "RS256", typ: "JWT", kid })));
+  const now = Math.floor(Date.now() / 1000);
+  const payload = b64url(
+    encoder.encode(
+      JSON.stringify({
+        iss: clientId,
+        sub: clientId,
+        aud: audience,
+        iat: now,
+        exp: now + 300,
+        jti: globalThis.crypto.randomUUID(),
+      }),
+    ),
+  );
+  const signingInput = `${header}.${payload}`;
+  const signature = await globalThis.crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5",
+    key,
+    encoder.encode(signingInput),
+  );
+  return `${signingInput}.${b64url(signature)}`;
+}
+
+/**
+ * The negative control is signed with a throwaway RSA key that is unrelated
+ * to the integration, generated once per process.
+ *
+ * @type {Promise<CryptoKey> | null}
+ */
+let negativeControlKeyPromise = null;
+
+/** @returns {Promise<CryptoKey>} */
+function negativeControlKey() {
+  negativeControlKeyPromise ??= globalThis.crypto.subtle
+    .generateKey(
+      {
+        name: "RSASSA-PKCS1-v1_5",
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 0, 1]),
+        hash: "SHA-256",
+      },
+      true,
+      ["sign"],
+    )
+    .then(({ privateKey }) => privateKey);
+  return negativeControlKeyPromise;
+}
+
+/**
+ * Builds a structurally valid client assertion — the expected header, claims,
+ * and key identifier — signed with a key unrelated to the integration. An
+ * endpoint that parses JWTs but skips signature verification cannot
+ * distinguish it from a legitimate request, so accepting it proves nothing.
+ *
+ * @param {{kid: string, clientId: string, audience: string}} input
+ * @returns {Promise<string | null>}
+ */
+async function signWrongKeyAssertion({ kid, clientId, audience }) {
+  try {
+    const key = await negativeControlKey();
+    return await buildClientAssertion({ key, kid, clientId, audience });
   } catch {
     return null;
   }
@@ -330,29 +382,43 @@ async function introspectInactiveToken({ root, plan, fetch }) {
   // The request travels over the host-resolvable transport, but the client
   // assertion names the advertised endpoint the provider validates.
   const endpoint = `${hostTransportOrigin(plan.providerOrigin)}/auth/introspections`;
+  const audience = `${plan.providerOrigin}/auth/introspections`;
   const assertion = await signClientAssertion({
     privateJwk: readEnvironmentValues(root, ".tama.env").get(TAMA_INTROSPECTION_KEY_VARIABLE) ?? "",
     kid: plan.introspectionSigningKeyId,
     clientId: plan.introspectionClientId,
-    audience: `${plan.providerOrigin}/auth/introspections`,
+    audience,
   });
   if (assertion === null) {
     return probe("inactive_introspection", false, "could not sign the client assertion");
+  }
+  const controlAssertion = await signWrongKeyAssertion({
+    kid: plan.introspectionSigningKeyId,
+    clientId: plan.introspectionClientId,
+    audience,
+  });
+  if (controlAssertion === null) {
+    return probe(
+      "inactive_introspection",
+      false,
+      "could not build the wrong-key negative control assertion",
+    );
   }
   const headers = {
     "content-type": "application/x-www-form-urlencoded",
     accept: "application/json",
   };
   try {
-    // Negative control: a deliberately invalid client assertion must be
-    // rejected. An endpoint that answers it anyway is not enforcing client
-    // authentication, so the authenticated result below could prove nothing.
+    // Negative control: a structurally valid assertion signed by an unrelated
+    // key must be rejected. An endpoint that parses JWTs but skips signature
+    // verification would accept it anyway, so the authenticated result below
+    // could prove nothing.
     const control = await fetch(new URL(endpoint), {
       method: "POST",
       headers,
       body: new URLSearchParams({
         token: INACTIVE_PROBE_TOKEN,
-        client_assertion: NEGATIVE_CONTROL_CLIENT_ASSERTION,
+        client_assertion: controlAssertion,
         client_assertion_type: CLIENT_ASSERTION_TYPE,
       }).toString(),
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
@@ -361,8 +427,8 @@ async function introspectInactiveToken({ root, plan, fetch }) {
       return probe(
         "inactive_introspection",
         false,
-        `provider accepted an invalid client assertion (HTTP ${control.status}); the ` +
-          `introspection endpoint does not enforce client authentication`,
+        `provider accepted a client assertion signed by an unrelated key (HTTP ${control.status}); ` +
+          `the introspection endpoint does not verify assertion signatures`,
       );
     }
     const response = await fetch(new URL(endpoint), {
@@ -418,7 +484,8 @@ async function routeProbe(fetch, url) {
  * Verifies a running MCP App integration: the provider publishes the exact
  * access-token key the bootstrap planned from the persisted private JWK,
  * Tama publishes the exact introspection key, the provider rejects a
- * deliberately invalid client assertion (negative control) and then answers
+ * a structurally valid client assertion signed by an unrelated key
+ * (negative control) and then answers
  * Tama's authenticated inactive-token introspection exactly as an inactive
  * token must be, and (in enabled mode) the protected route rejects anonymous
  * requests. In the host-gateway topology, the host's listening sockets are

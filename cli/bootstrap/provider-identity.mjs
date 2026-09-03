@@ -5,6 +5,7 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 
 import { usageError } from "../errors.mjs";
+import { assertUnreservedFragmentPath, safeRelativePath } from "./mcp-app-contract.mjs";
 
 /** @typedef {import("../types.mjs").Framework} Framework */
 /** @typedef {import("../types.mjs").ProviderIdentity} ProviderIdentity */
@@ -215,6 +216,21 @@ export function detectProviderIdentity(root, framework) {
  */
 
 /**
+ * A provider fragment may only be written to a safe project-relative path
+ * that no bootstrap-managed or application-owned file occupies, no matter
+ * where the path came from (contract, manifest, or flag).
+ *
+ * @param {unknown} value
+ * @param {string} label
+ * @returns {string}
+ */
+function assertFragmentPath(value, label) {
+  const path = safeRelativePath(value, label);
+  assertUnreservedFragmentPath(path, label);
+  return path;
+}
+
+/**
  * Resolves the accepted provider identity using the documented precedence:
  * managed manifest, then explicit contract identity, then explicit flags, then
  * safe static detection. The directory name is only ever a suggestion and is
@@ -238,10 +254,16 @@ export function resolveProviderIdentity(input) {
   } = input;
 
   if (manifestProvider) {
+    // The manifest is trusted state, but it is disk-resident: re-validate the
+    // fragment path so a tampered or stale entry cannot point the fragment at
+    // a bootstrap-managed file.
     return {
       name: manifestProvider.name,
       environmentPrefix: manifestProvider.environmentPrefix,
-      environmentFile: manifestProvider.environmentFile,
+      environmentFile: assertFragmentPath(
+        manifestProvider.environmentFile,
+        "the persisted MCP App provider environment file",
+      ),
       source: "manifest",
     };
   }
@@ -263,7 +285,10 @@ export function resolveProviderIdentity(input) {
           : prefixFromName(resolvedName),
       environmentFile:
         typeof contractIdentity?.environment_file === "string"
-          ? contractIdentity.environment_file
+          ? assertFragmentPath(
+              contractIdentity.environment_file,
+              "the provider MCP App contract environment file",
+            )
           : environmentFileForName(resolvedName),
       source: identitySource ?? "contract",
     };
@@ -279,7 +304,10 @@ export function resolveProviderIdentity(input) {
     return {
       name: resolvedName,
       environmentPrefix: prefix ? normalizeEnvironmentPrefix(prefix) : prefixFromName(resolvedName),
-      environmentFile: environmentFile ?? environmentFileForName(resolvedName),
+      environmentFile:
+        environmentFile === undefined
+          ? environmentFileForName(resolvedName)
+          : assertFragmentPath(environmentFile, "--provider-env-file"),
       source: identitySource ?? "flags",
     };
   }
