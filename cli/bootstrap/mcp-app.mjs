@@ -754,7 +754,11 @@ export function planMcpApp(input) {
     fragmentOverlapLine = `${fragmentOverlapVariable}='[]'`;
   } else {
     fragmentOverlapValue = existingFragmentOverlap;
-    validatePublicJwkSet(existingFragmentOverlap, sourceFragmentOverlapVariable);
+    validatePublicJwkSet(
+      existingFragmentOverlap,
+      sourceFragmentOverlapVariable,
+      providerSigningKeyId,
+    );
     const rawOverlapLine = readRawEnvironmentLine(
       root,
       sourceIdentity.environmentFile,
@@ -834,7 +838,11 @@ export function planMcpApp(input) {
   // left untouched by the environment update so it survives byte-for-byte.
   const existingTamaPublicKeys = tamaValues.get(TAMA_INTROSPECTION_PUBLIC_KEYS_VARIABLE);
   if (existingTamaPublicKeys !== undefined) {
-    validatePublicJwkSet(existingTamaPublicKeys, TAMA_INTROSPECTION_PUBLIC_KEYS_VARIABLE);
+    validatePublicJwkSet(
+      existingTamaPublicKeys,
+      TAMA_INTROSPECTION_PUBLIC_KEYS_VARIABLE,
+      introspectionSigningKeyId,
+    );
   }
 
   /** @type {Record<string, string>} */

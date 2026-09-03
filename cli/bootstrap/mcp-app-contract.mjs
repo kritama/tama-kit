@@ -51,6 +51,12 @@ const PROVIDER_NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const SAFE_PATH_SEGMENT_PATTERN = /^[A-Za-z0-9._-]+$/u;
 const ENDPOINT_PATH_PATTERN = /^\/[A-Za-z0-9._~-]+(?:\/[A-Za-z0-9._~-]+)*$/u;
 const LOCAL_KEY_PATTERN = /^[a-z][a-z0-9_.-]*$/u;
+const VERSION_CONSTRAINT_SOURCE = "(?:>=|<=|>|<|=)\\s*v?\\d+\\.\\d+\\.\\d+";
+const VERSION_RANGE_PATTERN = new RegExp(
+  `^${VERSION_CONSTRAINT_SOURCE}(?:\\s+and\\s+${VERSION_CONSTRAINT_SOURCE})*$`,
+  "u",
+);
+const VERSION_CONSTRAINT_PATTERN = /(>=|<=|>|<|=)\s*v?(\d+\.\d+\.\d+)/gu;
 const VARIABLE_FORMATS = Object.freeze([
   "absolute-uri",
   "absolute-origin",
@@ -187,17 +193,37 @@ export function safeRelativePath(value, label) {
  */
 const RESERVED_FRAGMENT_PATHS = new Set([
   ".tama.env",
+  ".tama.env.example",
   ".tama.postgres.env",
   ".gitignore",
   ".envrc",
+  ".agents",
+  ".agents/skills",
+  "compose.yaml",
+  "compose.yml",
+  "docker-compose.yaml",
+  "docker-compose.yml",
 ]);
 
 /** @param {string} path @param {string} label */
 export function assertUnreservedFragmentPath(path, label) {
-  if (RESERVED_FRAGMENT_PATHS.has(path) || path.startsWith("tama/")) {
+  if (
+    RESERVED_FRAGMENT_PATHS.has(path) ||
+    path.startsWith("tama/") ||
+    path.startsWith(".agents/skills/")
+  ) {
     throw usageError(
       `${label} collides with a bootstrap-managed or application-owned path: ` +
         `${path}; choose a dedicated provider fragment filename such as .<provider>.integration.env`,
+    );
+  }
+}
+
+/** @param {string} value @param {string} label */
+function validateSupportedVersionRange(value, label) {
+  if (!VERSION_RANGE_PATTERN.test(value)) {
+    throw usageError(
+      `MCP App contract ${label} must be a comparison range such as >= 0.13.1 and < 0.14.0`,
     );
   }
 }
@@ -527,6 +553,7 @@ export function unsupportedTamaImage(image, supportedRange) {
   if (typeof supportedRange !== "string" || supportedRange.length === 0) {
     return null;
   }
+  validateSupportedVersionRange(supportedRange, "supported_tama_versions");
   const tag = image.slice(image.lastIndexOf(":") + 1);
   const version = parseSemver(tag);
   if (!version) {
@@ -538,9 +565,7 @@ export function unsupportedTamaImage(image, supportedRange) {
   if (!/^v?\d+\.\d+\.\d+$/u.test(tag)) {
     return `Tama image tag ${tag} is a prerelease or build tag; the supported Tama range ${supportedRange} admits stable release tags only`;
   }
-  const constraints = supportedRange.matchAll(
-    /(>=|<=|>|<|=)\s*v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)/gu,
-  );
+  const constraints = supportedRange.matchAll(VERSION_CONSTRAINT_PATTERN);
   for (const match of constraints) {
     const bound = parseSemver(match[2]);
     if (!bound) {
@@ -639,7 +664,10 @@ export function validateMcpAppContract(document) {
   }
   for (const [key, value] of Object.entries(document)) {
     if (key.startsWith("supported_")) {
-      requiredSafeString(value, key);
+      const supported = requiredSafeString(value, key);
+      if (key.endsWith("_versions")) {
+        validateSupportedVersionRange(supported, key);
+      }
     }
   }
   validateVariables(document.variables, modes);

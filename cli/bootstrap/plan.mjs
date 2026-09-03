@@ -1,6 +1,6 @@
 // @ts-check
 
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { ownershipError, usageError } from "../errors.mjs";
 import { planRootCompose } from "./compose.mjs";
 import { formatComposePsCommand, formatComposeUpCommand } from "./compose-command.mjs";
@@ -12,6 +12,7 @@ import { createManagedFilePlanner, readMcpAppProvider } from "./manifest.mjs";
 import { persistedTamaOrigin, planMcpApp, resolveMcpAppState } from "./mcp-app.mjs";
 import {
   contractTamaPort,
+  discoverProviderContract,
   loadTamaContract,
   MCP_APP_COMPATIBILITY_IDENTIFIER,
   unpinnedTamaImageTag,
@@ -129,6 +130,15 @@ export function createBootstrapPlan(options) {
   // A persisted provider fragment holds the provider's private signing key,
   // so it is a tracked-secret failure on every run, not only --mcp-app runs.
   const persistedMcpApp = readMcpAppProvider(inspection.tamaDirectory);
+  if (
+    mcpAppPrepared &&
+    resolve(inspection.root, mcpAppPrepared.identity.environmentFile) ===
+      resolve(inspection.selectedCompose)
+  ) {
+    throw usageError(
+      `the provider environment fragment collides with the selected Compose file: ${mcpAppPrepared.identity.environmentFile}`,
+    );
+  }
   const secretFiles = [
     ".tama.env",
     ".tama.postgres.env",
@@ -191,6 +201,10 @@ export function createBootstrapPlan(options) {
   // ordinary reruns as well.
   if (persistedMcpApp !== null) {
     const persistedTamaContract = loadTamaContract();
+    const persistedProviderContract =
+      persistedMcpApp.contractSource === "contract" && persistedMcpApp.contractPath !== null
+        ? discoverProviderContract(inspection.root, persistedMcpApp.contractPath).document
+        : null;
     const plannedImage = options.image ?? DEFAULTS.tamaImage;
     const unpinnedTag = unpinnedTamaImageTag(plannedImage);
     if (unpinnedTag !== null) {
@@ -208,6 +222,16 @@ export function createBootstrapPlan(options) {
       throw usageError(
         `${unsupported}; the persisted MCP App integration requires a supported Tama image; ` +
           `pass --image to keep the pinned runtime`,
+      );
+    }
+    const providerUnsupported = unsupportedTamaImage(
+      plannedImage,
+      persistedProviderContract?.supported_tama_versions,
+    );
+    if (providerUnsupported) {
+      throw usageError(
+        `${providerUnsupported}; the persisted provider contract requires a supported Tama image; ` +
+          `pass --image to keep the provider-compatible runtime`,
       );
     }
   }

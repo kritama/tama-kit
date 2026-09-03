@@ -143,8 +143,10 @@ export function generateOAuthKeyPair(kidPrefix) {
  *
  * @param {string} encoded
  * @param {string} variable Environment variable name used in diagnostics.
+ * @param {string} [currentKid] Current signing key identifier, which an
+ *   overlap member must not reuse.
  */
-export function validatePublicJwkSet(encoded, variable) {
+export function validatePublicJwkSet(encoded, variable, currentKid) {
   if (typeof encoded !== "string" || Buffer.byteLength(encoded, "utf8") === 0) {
     throw invalidPublicJwkSetError(variable);
   }
@@ -161,7 +163,7 @@ export function validatePublicJwkSet(encoded, variable) {
   /** @type {Set<string>} */
   const kids = new Set();
   for (const member of parsed) {
-    if (!isPublicJwkMember(member, kids)) {
+    if (!isPublicJwkMember(member, kids, currentKid)) {
       throw invalidPublicJwkSetError(variable);
     }
   }
@@ -377,9 +379,10 @@ const PUBLIC_JWK_PRIVATE_MEMBERS = Object.freeze(["d", "p", "q", "dp", "dq", "qi
  *
  * @param {unknown} member
  * @param {Set<string>} kids Identifiers already present in the set.
+ * @param {string | undefined} currentKid Current signing key identifier.
  * @returns {boolean}
  */
-function isPublicJwkMember(member, kids) {
+function isPublicJwkMember(member, kids, currentKid) {
   const modulus = isPlainObject(member) && typeof member.n === "string" ? member.n : null;
   const exponent = isPlainObject(member) && typeof member.e === "string" ? member.e : null;
   const modulusValue = modulus === null ? null : base64urlUnsigned(modulus);
@@ -398,6 +401,7 @@ function isPublicJwkMember(member, kids) {
     !isVerificationKeyOps(member.key_ops) ||
     typeof member.kid !== "string" ||
     !isBoundedKid(member.kid) ||
+    member.kid === currentKid ||
     kids.has(member.kid)
   ) {
     return false;

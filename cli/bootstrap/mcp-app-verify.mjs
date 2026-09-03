@@ -264,29 +264,29 @@ function jwksPublishesExpectedKey(jwks, kid, expected) {
   if (expectedModulus === null || expectedExponent === null) {
     return false;
   }
-  return jwks.keys.some((key) => {
-    if (!isPlainObject(key) || key.kid !== kid) {
-      return false;
-    }
-    if (JWK_PRIVATE_MEMBERS.some((name) => key[name] !== undefined)) {
-      return false;
-    }
-    if (key.kty !== "RSA") {
-      return false;
-    }
-    if (key.alg !== undefined && key.alg !== "RS256") {
-      return false;
-    }
-    if (key.use !== undefined && key.use !== "sig") {
-      return false;
-    }
-    if (!permitsVerification(key.key_ops)) {
-      return false;
-    }
-    const modulus = typeof key.n === "string" ? base64urlUnsigned(key.n) : null;
-    const exponent = typeof key.e === "string" ? base64urlUnsigned(key.e) : null;
-    return modulus === expectedModulus && exponent === expectedExponent;
-  });
+  const matchingKeys = jwks.keys.filter((key) => isPlainObject(key) && key.kid === kid);
+  if (matchingKeys.length !== 1) {
+    return false;
+  }
+  const [key] = matchingKeys;
+  if (JWK_PRIVATE_MEMBERS.some((name) => key[name] !== undefined)) {
+    return false;
+  }
+  if (key.kty !== "RSA") {
+    return false;
+  }
+  if (key.alg !== undefined && key.alg !== "RS256") {
+    return false;
+  }
+  if (key.use !== undefined && key.use !== "sig") {
+    return false;
+  }
+  if (!permitsVerification(key.key_ops)) {
+    return false;
+  }
+  const modulus = typeof key.n === "string" ? base64urlUnsigned(key.n) : null;
+  const exponent = typeof key.e === "string" ? base64urlUnsigned(key.e) : null;
+  return modulus === expectedModulus && exponent === expectedExponent;
 }
 
 /**

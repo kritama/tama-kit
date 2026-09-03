@@ -509,7 +509,11 @@ function validateMcpAppVariables(values, filename, validation) {
       { path: filename, variable: "TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS" },
     );
   }
-  validatePublicJwkSet(publicKeys, "TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS");
+  validatePublicJwkSet(
+    publicKeys,
+    "TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS",
+    values.get("TAMA_MCP_APP_INTROSPECTION_SIGNING_KEY_ID"),
+  );
 
   const privateJwk = values.get("TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY");
   const kid = values.get("TAMA_MCP_APP_INTROSPECTION_SIGNING_KEY_ID");

@@ -550,6 +550,12 @@ test("validateMcpAppContract rejects malformed v1 contract sections", () => {
       contract.supported_memovee_versions = 1;
     },
     (contract) => {
+      contract.supported_tama_versions = "^0.14.0";
+    },
+    (contract) => {
+      contract.supported_tama_versions = ">= 0.13.1 garbage < 0.14.0";
+    },
+    (contract) => {
       contract.unexpected = true;
     },
   ];
@@ -683,6 +689,10 @@ test("unsupportedTamaImage checks semver tags against the contract range", () =>
     /prerelease or build tag/u,
   );
   assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1", null), null);
+  assert.throws(
+    () => unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1", "^0.14.0"),
+    /comparison range/u,
+  );
 });
 
 test("provider identity normalization derives the prefix and fragment file", () => {
@@ -1440,6 +1450,27 @@ test("bootstrap fails closed on an invalid persisted public JWK overlap set", ()
   );
   fragmentLines[overlapIndex] =
     'MEMOVEE_OAUTH_PUBLIC_SIGNING_KEYS=\'[{"kty":"RSA","n":"AQ","e":"AQ","kid":"bad","d":"AQ"}]\'';
+  writeFileSync(fragmentPath, fragmentLines.join("\n"));
+  assert.throws(
+    () => planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      /MEMOVEE_OAUTH_PUBLIC_SIGNING_KEYS/u.test(error.message),
+  );
+
+  const currentValues = parseEnv(readFileSync(fragmentPath, "utf8"));
+  const currentPrivateJwk = JSON.parse(currentValues.MEMOVEE_OAUTH_PRIVATE_SIGNING_KEY);
+  const duplicateCurrentKey = {
+    alg: "RS256",
+    kid: currentValues.MEMOVEE_OAUTH_SIGNING_KEY_ID,
+    kty: "RSA",
+    use: "sig",
+    n: currentPrivateJwk.n,
+    e: currentPrivateJwk.e,
+  };
+  fragmentLines[overlapIndex] =
+    `MEMOVEE_OAUTH_PUBLIC_SIGNING_KEYS='${JSON.stringify([duplicateCurrentKey])}'`;
   writeFileSync(fragmentPath, fragmentLines.join("\n"));
   assert.throws(
     () => planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })),
@@ -2449,6 +2480,38 @@ test("verifyMcpApp requires an RSA signing member for the expected identifier", 
   }
 });
 
+test("verifyMcpApp rejects duplicate live keys with the current identifier", async () => {
+  const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
+  const currentProviderKey = jwksDocument(plan.providerSigningKeyId, providerJwk).keys[0];
+  const conflicting = JSON.parse(generateOAuthKeyPair("conflicting").publicJwk);
+  conflicting.kid = plan.providerSigningKeyId;
+  const result = await verifyMcpApp({
+    root,
+    plan,
+    fetch: enforcingIntrospection(
+      async (input) => {
+        const url = input.href;
+        if (url.endsWith("/.well-known/oauth-authorization-server")) {
+          return Response.json(providerMetadata(plan));
+        }
+        if (url.endsWith("/.well-known/jwks.json")) {
+          return Response.json(
+            url.startsWith(plan.tamaOrigin)
+              ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+              : { keys: [currentProviderKey, conflicting] },
+          );
+        }
+        return Response.json({ active: false });
+      },
+      root,
+      plan,
+    ),
+    inspectProviderListener: noContainerInspection,
+  });
+  assert.equal(result.providerReachable, false);
+  assert.equal(result.probes.find(({ name }) => name === "provider_jwks")?.ok, false);
+});
+
 test("bootstrap preserves unrelated .integration.env ignore entries on MCP App reruns", async () => {
   const root = project();
   const originalPrepared = await prepareFor(root, {
@@ -2695,12 +2758,44 @@ test("an ordinary rerun keeps the pinned image for a persisted MCP App integrati
   );
 });
 
+test("ordinary reruns enforce the persisted provider Tama version range", () => {
+  const root = project();
+  const contract = validContract();
+  contract.supported_tama_versions = ">= 0.13.2 and < 0.14.0";
+  const contractPath = writeContract(root, contract);
+  const first = createBootstrapPlan({
+    cwd: root,
+    targetPath: root,
+    image: "ghcr.io/upmaru/tama:0.13.2",
+    port: 4001,
+    mcpApp: {
+      requested: true,
+      activate: false,
+      allowedOrigins: ["http://127.0.0.1:3000"],
+    },
+    mcpAppPrepared: preparedFor(root, { contractPath, contractDocument: contract }),
+  });
+  applyOperations(first.operations);
+
+  assert.throws(
+    () => createBootstrapPlan({ cwd: root, targetPath: root, image: PINNED_TAMA_IMAGE }),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.USAGE &&
+      /outside the supported Tama range >= 0\.13\.2 and < 0\.14\.0/u.test(error.message) &&
+      /persisted provider contract/u.test(error.message),
+  );
+});
+
 test("provider fragment paths that collide with managed files are rejected", () => {
   for (const environmentFile of [
     ".tama.env",
+    ".tama.env.example",
     ".tama.postgres.env",
     ".envrc",
     ".gitignore",
+    "compose.yaml",
+    ".agents/skills/graph-builder",
     "tama/compose.yaml",
     "tama/.tama-kit.json",
   ]) {
@@ -2713,6 +2808,39 @@ test("provider fragment paths that collide with managed files are rejected", () 
         error instanceof CLIError && /collides with a bootstrap-managed/u.test(error.message),
     );
   }
+});
+
+test("bootstrap rejects a provider fragment matching a custom selected Compose file", () => {
+  const root = project();
+  writeFileSync(join(root, "custom-stack.yaml"), "services: {}\n");
+  assert.throws(
+    () =>
+      createBootstrapPlan({
+        cwd: root,
+        targetPath: root,
+        composePath: "custom-stack.yaml",
+        image: PINNED_TAMA_IMAGE,
+        port: 4001,
+        mcpApp: {
+          requested: true,
+          activate: false,
+          providerOrigin: "http://host.docker.internal:4000",
+          allowedOrigins: ["http://127.0.0.1:3000"],
+        },
+        mcpAppPrepared: preparedFor(root, {
+          identity: {
+            name: "acme",
+            environmentPrefix: "ACME",
+            environmentFile: "custom-stack.yaml",
+            source: "flags",
+          },
+        }),
+      }),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.USAGE &&
+      /collides with the selected Compose file/u.test(error.message),
+  );
 });
 
 test("resolveProviderIdentity rejects reserved and unsafe provider fragment paths", () => {
