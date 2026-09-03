@@ -2,6 +2,76 @@
   "version": 2,
   "positive_cases": [
     {
+      "id": "provision-mcp-app-oauth-provider",
+      "skill": "app-integration",
+      "prompt": "Make this application an OAuth provider for Tama's /mcp/app endpoint and provision the local integration.",
+      "expected_behavior": [
+        "Treat the application as the OAuth authorization server and Tama as the owner of the exact /mcp/app protected resource instead of implementing that endpoint in the application.",
+        "Read or generate tama/contracts/mcp-app-provider-v1.json through Tama Kit, then use its semantic bindings and endpoint paths rather than inventing independent environment names.",
+        "Implement lifecycle-gated metadata, public JWKS, authorization, token, revocation, registration when supported, and private-key-JWT-authenticated introspection with exact mcp.message resource binding.",
+        "Retain actors, consent, grants, persistence, lifecycle, revocation, locking, and key custody in the application while using a compatible library only for generic OAuth and JWT mechanics.",
+        "Prepare configuration first, verify provider loader evidence and prepared behavior, and require explicit authority before the two-step Tama Kit activation handoff."
+      ],
+      "expected_result_shape": "A provider-side implementation and test plan or patch, application loader and Tama Kit provisioning commands, and a status report separating generated configuration, prepared readiness, provider activation, Tama activation, and live verification.",
+      "fixture_data": "A trusted application repository with an existing user or actor model, persistence layer, routing, tests, and permission to implement local OAuth integration; Tama Kit and a compatible pinned Tama image are available."
+    },
+    {
+      "id": "bootstrap-oauth-ready-mcp-app-provider",
+      "skill": "app-integration",
+      "prompt": "This application already has an OAuth 2.1 provider. Verify it and bootstrap the app for Tama's /mcp/app endpoint.",
+      "expected_behavior": [
+        "Inspect repository and runtime evidence for the exact Tama OAuth contract rather than assuming that any existing OAuth provider is compatible.",
+        "Verify PKCE S256, fixed metadata and public JWKS paths, exact /mcp/app audience, mcp.message scope, application actor subjects, lifecycle behavior, persistence and revocation, and Tama-authenticated introspection.",
+        "Reuse compatible provider capabilities and identify only evidence-backed gaps instead of rebuilding the OAuth server.",
+        "Generate or consume the Tama Kit local contract and provision prepared configuration before activation.",
+        "Activate only with explicit authority and only after the provider satisfies readiness and prepared-mode verification."
+      ],
+      "expected_result_shape": "A readiness verdict with evidence and exact gaps, followed by reviewed Tama Kit dry-run and write commands and a status report that does not confuse existing OAuth with verified Tama compatibility.",
+      "fixture_data": "A trusted application repository containing an existing OAuth 2.1 authorization server, persistence and tests; its exact compatibility with the Tama MCP App contract has not yet been verified."
+    },
+    {
+      "id": "bootstrap-mcp-app-without-oauth",
+      "skill": "app-integration",
+      "prompt": "Bootstrap this application as a Tama MCP App provider. It does not have an OAuth server.",
+      "expected_behavior": [
+        "Clearly state that an application-side OAuth 2.1 provider integration is a prerequisite for usable Tama /mcp/app access.",
+        "Explain that Tama Kit provisions configuration and trust material but cannot supply application authorization, actors, consent, persistence, token issuance, revocation, or introspection behavior.",
+        "Summarize the required PKCE, metadata, public JWKS, exact /mcp/app audience, mcp.message scope, lifecycle, and Tama-authenticated introspection capabilities.",
+        "Ask whether the user wants the prerequisite implemented because a bootstrap-only request does not authorize that material scope expansion.",
+        "Do not activate or claim readiness; stage configuration-only prepared state solely when the user explicitly requests it, and offer ordinary non-MCP bootstrap if appropriate."
+      ],
+      "expected_result_shape": "A concise prerequisite notice and implementation consent question, with no activation command or false readiness claim and an optional clearly labeled configuration-only staging path.",
+      "fixture_data": "A trusted application repository with no OAuth authorization server and a request limited to Tama MCP App bootstrap rather than authorization to implement application-side OAuth."
+    },
+    {
+      "id": "bootstrap-partial-oauth-mcp-app-provider",
+      "skill": "app-integration",
+      "prompt": "This app already issues OAuth tokens for its own API. Adapt it to work as Tama's MCP App provider.",
+      "expected_behavior": [
+        "Classify the existing implementation as partial until exact Tama MCP App compatibility is established rather than treating generic OAuth as ready.",
+        "Inspect PKCE S256, RS256 signing and public JWKS, exact /mcp/app audience, mcp.message scope, actor-derived subjects, lifecycle gates, persistence and revocation, private-key-JWT introspection, and provider reachability from Tama.",
+        "Report concrete compatible capabilities and gaps before changing application behavior or provisioning activation.",
+        "Reuse the application's actors, clients, grants, consent, persistence, and compatible OAuth mechanics instead of replacing its authorization server or importing another application's domain policy.",
+        "Implement the identified gaps because the user explicitly requested adaptation, then prepare and verify configuration before seeking separate activation authority."
+      ],
+      "expected_result_shape": "An evidence-backed partial-readiness assessment followed by a minimal gap-closing implementation and test plan, prepared Tama Kit provisioning commands, and no implicit activation.",
+      "fixture_data": "A trusted application repository with an OAuth authorization server for an application API but no proven Tama resource binding, lifecycle, or authenticated introspection support."
+    },
+    {
+      "id": "bootstrap-application-with-tama",
+      "skill": "tama-kit-cli",
+      "prompt": "Help me bootstrap my application to work with Tama.",
+      "expected_behavior": [
+        "Ask whether the application is an MCP App provider that needs OAuth-protected access to Tama's /mcp/app endpoint or a standard app that only needs a local Tama runtime and Terraform root.",
+        "Do not choose --mcp-app merely because the request mentions Tama or MCP elsewhere.",
+        "Inspect the repository and current Tama Kit help before selecting flags, and ask only for inputs that cannot be established from repository evidence.",
+        "Run a deterministic dry-run plan before writing, with an explicit local or manual skill-installation choice.",
+        "Keep secret values and the private setup URL out of chat, and do not start services, activate an integration, or apply Terraform without the required user intent."
+      ],
+      "expected_result_shape": "A single MCP App routing question followed by the appropriate Tama Kit dry-run command, a reviewed write command, and a concise report separating generated configuration, runtime state, and any provider-owned follow-up.",
+      "fixture_data": "A trusted application repository with its framework and Compose files available for inspection, no stated MCP App status, and permission to plan a local Tama bootstrap."
+    },
+    {
       "id": "bootstrap-global-foundation",
       "skill": "graph-builder",
       "prompt": "Start a new standalone Tama Terraform graph with a messaging surface, model provider, and router in an otherwise empty repository.",

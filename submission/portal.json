@@ -13,6 +13,11 @@
     "supportURL": "https://github.com/kritama/tama-kit/issues"
   },
   "positiveCaseIds": [
+    "provision-mcp-app-oauth-provider",
+    "bootstrap-oauth-ready-mcp-app-provider",
+    "bootstrap-mcp-app-without-oauth",
+    "bootstrap-partial-oauth-mcp-app-provider",
+    "bootstrap-application-with-tama",
     "bootstrap-global-foundation",
     "routed-conversation-artifact",
     "direct-forwarded-action",
@@ -24,5 +29,5 @@
     "unsupported-production-certainty",
     "unsafe-destructive-removal"
   ],
-  "releaseNotes": "Tama Kit combines workspace-specific Tama MCP access with skills for building, changing, and auditing Tama Terraform graph networks. It includes global foundation setup, conversation and action graphs, ingestion and indexing workflows, lifecycle-safe migrations, repository inspection, and read-only graph audits."
+  "releaseNotes": "Tama Kit 0.4.0 adds lifecycle-safe MCP App provider bootstrap, a generated local provider contract, staged live verification, guided CLI and application-integration skills, hardened standalone System OAuth JWK generation, and configurable native Tama development ports. The existing graph skills continue to build and audit global foundations, conversations, actions, ingestion, indexing, migrations, and operational wiring."
 }

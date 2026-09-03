@@ -6,7 +6,7 @@ import { join } from "node:path";
 /** @typedef {import("../types.mjs").FileOperation} FileOperation */
 
 const SKILLS_ROOT = new URL("../../skills/", import.meta.url);
-const SKILL_NAMES = ["graph-audit", "graph-builder"];
+const SKILL_NAMES = ["app-integration", "graph-audit", "graph-builder", "tama-kit-cli"];
 
 /**
  * @param {URL} directory

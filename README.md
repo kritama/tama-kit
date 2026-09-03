@@ -1,10 +1,12 @@
 # Tama Kit
 
-Tama Kit is a domain-neutral ChatGPT and Codex plugin for building, changing,
-and auditing Tama Terraform graph networks. It combines focused graph skills
-with a workspace-specific Tama MCP connection. The skills cover routed
-conversations, direct forwarded actions, shared replies, ingestion, enrichment,
-embeddings, indexing, batch reprocessing, the required global foundation, and
+Tama Kit is a domain-neutral ChatGPT and Codex plugin for bootstrapping
+applications with Tama and building, changing, and auditing Tama Terraform
+graph networks. It combines guided CLI and application-integration skills,
+focused graph skills, and a workspace-specific Tama MCP connection. The skills
+cover standard bootstrap, MCP App OAuth provisioning, routed conversations,
+direct forwarded actions, shared replies, ingestion, enrichment, embeddings,
+indexing, batch reprocessing, the required global foundation, and
 Terraform-safe graph migration.
 
 ## Bootstrap a local Tama runtime
@@ -27,10 +29,11 @@ Bootstrap detects the project and its default Docker Compose file, creates a
 private `.tama.env`, adds managed Tama and PostgreSQL services, and generates a
 `tama/` Terraform root with one version-pinned `module "global"` and focused
 `AGENTS.md` guidance. On the first interactive run, it asks whether to install
-the bundled `graph-builder` and `graph-audit` skills into the repository's
-`.agents/skills/` directory or leave skill installation to the user. It
-preserves an existing global-foundation address and refuses ambiguous ownership
-rather than creating duplicate data-bearing resources.
+the bundled `tama-kit-cli`, `app-integration`, `graph-builder`, and
+`graph-audit` skills into the repository's `.agents/skills/` directory or leave
+skill installation to the user. It preserves an existing global-foundation
+address and refuses ambiguous ownership rather than creating duplicate
+data-bearing resources.
 
 Skip the prompt in scripts by selecting the skill mode explicitly:
 
@@ -238,8 +241,8 @@ so rotating the signing key always uses an explicit new destination.
 
 ### Codex
 
-Tama Kit is distributed as a plugin containing the
-`graph-builder` and `graph-audit` skills. The plugin is downloaded
+Tama Kit is distributed as a plugin containing `tama-kit-cli`,
+`app-integration`, `graph-builder`, and `graph-audit`. The plugin is downloaded
 from npm through the Upmaru marketplace; installing the npm package by itself
 does not enable the plugin in ChatGPT or Codex.
 
@@ -254,14 +257,28 @@ codex plugin add tama-kit@upmaru
 ```
 
 Start a new Codex session after installation so Codex can load the bundled
-skills. You can then invoke either skill explicitly:
+skills. You can then invoke any skill explicitly:
 
 ```text
 $graph-builder
 $graph-audit
+$tama-kit-cli
+$app-integration
 ```
 
 For example:
+
+```text
+Use $tama-kit-cli to help me bootstrap my app to work with Tama.
+```
+
+The skill first asks whether the application is an MCP App provider so it can
+choose between ordinary bootstrap and the contract-aware `--mcp-app` workflow.
+For an MCP App, it then classifies the provider as OAuth-ready, partial, or
+absent. When OAuth is absent, it explains that an application-side OAuth 2.1
+provider integration is a prerequisite and asks before expanding the work;
+Tama Kit configuration alone does not make the application a provider.
+For graph work:
 
 ```text
 Use $graph-builder to add a routed support-search component with plain and
@@ -277,7 +294,7 @@ codex plugin list
 ### OpenCode
 
 OpenCode loads Agent Skills directly; it does not use the Codex plugin
-manifest. Install both Tama Kit skills globally with the Skills CLI:
+manifest. Install all Tama Kit skills globally with the Skills CLI:
 
 ```bash
 npx skills add kritama/tama-kit \
@@ -296,14 +313,27 @@ npx skills add kritama/tama-kit \
 ```
 
 Start a new OpenCode session after installation, then ask it to use
-`graph-builder` or `graph-audit`. You may install just one of the two skills
-by adding `--skill graph-builder` or `--skill graph-audit`. These steps install
-only the skills; configure your workspace-specific Tama MCP server separately
-when runtime inspection is needed. See the [Skills CLI](https://github.com/vercel-labs/skills),
+`tama-kit-cli`, `app-integration`, `graph-builder`, or `graph-audit`. You may
+install an individual skill with `--skill <name>`. These steps install only the
+skills; configure your workspace-specific Tama MCP server separately when
+runtime inspection is needed. See the
+[Skills CLI](https://github.com/vercel-labs/skills),
 OpenCode's official [Agent Skills](https://opencode.ai/docs/skills/), and
 [MCP servers](https://opencode.ai/docs/mcp-servers/) documentation.
 
 ## Included skills
+
+`tama-kit-cli` selects and runs the appropriate CLI workflow for an ordinary
+application, MCP App provider, Tama source checkout, or standalone OAuth key.
+For an ambiguous application bootstrap request, it first asks whether the app
+is an MCP App provider before choosing flags.
+
+`app-integration` implements and provisions the application-owned OAuth
+authorization server for Tama's exact `/mcp/app` protected resource. It consumes
+the generated local contract, first verifies whether existing OAuth is ready,
+partial, or absent, preserves provider/Tama key custody, implements the
+disabled/prepared/enabled lifecycle when authorized, and verifies the staged
+activation handoff.
 
 `graph-builder` designs, implements, extends, migrates, and removes graph
 slices. It models execution edges, control edges, operational policy, terminals,

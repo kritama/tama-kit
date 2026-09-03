@@ -240,7 +240,7 @@ async function selectSkillMode(options, io, tamaDirectory) {
   while (true) {
     const answer = (
       await io.prompt(
-        "Install Tama Kit's graph-builder and graph-audit skills in this repository? " +
+        "Install Tama Kit's agent skills in this repository? " +
           "Choose no to install them yourself later. [Y/n] ",
       )
     )
