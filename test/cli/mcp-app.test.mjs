@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -318,6 +319,52 @@ test("validateMcpAppContract enforces the bootstrap schema", () => {
   );
   assert.throws(() => validateMcpAppContract("nope"), /JSON object/u);
   assert.equal(validContract().schema_version, "1");
+});
+
+test("validateMcpAppContract cross-checks bindings against the declared variables", () => {
+  const base = memoveeContract();
+  const bindings = base.bindings;
+  assert.throws(
+    () =>
+      validateMcpAppContract(
+        memoveeContract({
+          bindings: { ...bindings, issuer: "MEMOVEE_UNDECLARED_ISSUER" },
+        }),
+      ),
+    (error) =>
+      error instanceof CLIError &&
+      /binding "issuer" references undeclared variable MEMOVEE_UNDECLARED_ISSUER/u.test(
+        error.message,
+      ),
+  );
+  const withVariables = (variable) =>
+    validateMcpAppContract(
+      memoveeContract({
+        variables: {
+          ...base.variables,
+          [variable.name]: { ...variable.current, ...variable.next },
+        },
+      }),
+    );
+  assert.throws(
+    () =>
+      withVariables({
+        name: bindings.mode,
+        current: base.variables[bindings.mode],
+        next: { values: ["prepared"] },
+      }),
+    /must include the lifecycle modes/u,
+  );
+  assert.throws(
+    () =>
+      withVariables({
+        name: bindings.access_token_signing_algorithm,
+        current: base.variables[bindings.access_token_signing_algorithm],
+        next: { allowed_values: ["ES256"] },
+      }),
+    /must accept RS256/u,
+  );
+  assert.doesNotThrow(() => validateMcpAppContract(base));
 });
 
 test("validateMcpAppContract rejects malformed v1 contract sections", () => {
@@ -1005,11 +1052,18 @@ test("bootstrap fails closed when the provider identity or contract bindings dri
       /does not match the resolved identity/u.test(error.message),
   );
 
+  // Undeclared variables are rejected by the contract validator itself, so a
+  // drifted binding that still validates must swap two declared variables.
+  const memoveeBindings = memoveeContract().bindings;
   const driftedBindings = preparedFor(root, {
     contractPath,
     contractDocument: validateMcpAppContract(
       memoveeContract({
-        bindings: { ...memoveeContract().bindings, issuer: "OTHER_OAUTH_ISSUER" },
+        bindings: {
+          ...memoveeBindings,
+          issuer: memoveeBindings.resource,
+          resource: memoveeBindings.issuer,
+        },
       }),
     ),
   });
@@ -1255,6 +1309,40 @@ test("bootstrap fails closed on an invalid persisted public JWK overlap set", ()
   );
 });
 
+test("bootstrap rejects a weak RSA key persisted in the public overlap set", () => {
+  const root = project();
+  const contractPath = writeContract(root);
+  const contract = validContract();
+  applyOperations(
+    planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })).operations,
+  );
+
+  // The runtime republishes overlap members as trusted RS256 material, so a
+  // factorable 1024-bit key must fail the re-bootstrap exactly like any other
+  // invalid persisted set.
+  const { publicKey } = generateKeyPairSync("rsa", { modulusLength: 1024 });
+  const weak = publicKey.export({ format: "jwk" });
+  const weakKey = { .../** @type {Record<string, string>} */ (weak), kid: "weak-overlap-key" };
+  const fragmentPath = join(root, ".memovee.integration.env");
+  const fragment = readFileSync(fragmentPath, "utf8")
+    .split("\n")
+    .map((line) =>
+      line.startsWith("MEMOVEE_OAUTH_PUBLIC_SIGNING_KEYS=")
+        ? `MEMOVEE_OAUTH_PUBLIC_SIGNING_KEYS='${JSON.stringify([weakKey])}'`
+        : line,
+    )
+    .join("\n");
+  writeFileSync(fragmentPath, fragment);
+
+  assert.throws(
+    () => planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      /MEMOVEE_OAUTH_PUBLIC_SIGNING_KEYS/u.test(error.message),
+  );
+});
+
 test("bootstrap derives MCP App origins from the persisted Tama port", () => {
   const root = project();
   const contractPath = writeContract(root);
@@ -1379,6 +1467,13 @@ function providerMetadata(plan) {
 const JWT_PATTERN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
 
 /**
+ * Keeps the container-reachability probe out of the deterministic
+ * verification tests: "unknown" skips the probe exactly like a non-Linux
+ * host would.
+ */
+const noContainerInspection = async () => "unknown";
+
+/**
  * Wraps a fake fetch so the provider's introspection endpoint enforces client
  * authentication the way a real provider must: a client assertion that is not
  * a signed JWT is rejected with HTTP 400.
@@ -1455,7 +1550,12 @@ test("verifyMcpApp verifies both JWKS and the inactive introspection probe", asy
       headers: { "content-type": "application/json" },
     });
   };
-  const result = await verifyMcpApp({ root, plan, fetch });
+  const result = await verifyMcpApp({
+    root,
+    plan,
+    fetch,
+    inspectProviderListener: noContainerInspection,
+  });
   assert.equal(result.mode, "prepared");
   assert.equal(result.providerReachable, true);
   assert.equal(result.tamaReachable, true);
@@ -1503,6 +1603,7 @@ test("verifyMcpApp rejects an introspection endpoint that accepts invalid client
       }
       return Response.json({ active: false });
     },
+    inspectProviderListener: noContainerInspection,
   });
   const probe = result.probes.find(({ name }) => name === "inactive_introspection");
   assert.equal(probe?.ok, false);
@@ -1529,6 +1630,7 @@ test("verifyMcpApp reports each failed probe independently", async () => {
         headers: { "content-type": "application/json" },
       });
     }),
+    inspectProviderListener: noContainerInspection,
   });
   assert.equal(wrongProvider.mode, "prepared");
   assert.equal(wrongProvider.providerReachable, false);
@@ -1563,6 +1665,7 @@ test("verifyMcpApp reports each failed probe independently", async () => {
         headers: { "content-type": "application/json" },
       });
     }),
+    inspectProviderListener: noContainerInspection,
   });
   assert.equal(activeToken.verified, false);
 
@@ -1579,6 +1682,7 @@ test("verifyMcpApp reports each failed probe independently", async () => {
       }
       throw new Error("ECONNREFUSED");
     },
+    inspectProviderListener: noContainerInspection,
   });
   assert.equal(unreachable.mode, "prepared");
   assert.equal(unreachable.providerReachable, false);
@@ -1619,6 +1723,7 @@ test("verifyMcpApp gates enabled metadata, route, and exact provider advertiseme
       }
       return Response.json({ active: false });
     }),
+    inspectProviderListener: noContainerInspection,
   });
   assert.equal(result.verified, true);
   assert.deepEqual(
@@ -1655,6 +1760,7 @@ test("verifyMcpApp rejects a JWKS whose key material does not match the persiste
       }
       return Response.json({ active: false });
     }),
+    inspectProviderListener: noContainerInspection,
   });
   assert.equal(staleProvider.verified, false);
   assert.equal(staleProvider.providerReachable, false);
@@ -1680,6 +1786,7 @@ test("verifyMcpApp rejects a JWKS whose key material does not match the persiste
       }
       return Response.json({ active: false });
     }),
+    inspectProviderListener: noContainerInspection,
   });
   assert.equal(staleTama.verified, false);
   assert.equal(staleTama.providerReachable, true);
@@ -1711,6 +1818,7 @@ test("verifyMcpApp rejects a JWKS that exposes private members under the expecte
       }
       return Response.json({ active: false });
     }),
+    inspectProviderListener: noContainerInspection,
   });
   assert.equal(leaked.verified, false);
   assert.equal(leaked.providerReachable, false);
@@ -1739,7 +1847,12 @@ test("verifyMcpApp probes the host-native provider over the loopback transport",
       },
     );
   const calls = [];
-  const result = await verifyMcpApp({ root, plan, fetch: fetchWith(providerMetadata(plan)) });
+  const result = await verifyMcpApp({
+    root,
+    plan,
+    fetch: fetchWith(providerMetadata(plan)),
+    inspectProviderListener: noContainerInspection,
+  });
   assert.equal(plan.providerOrigin, "http://host.docker.internal:4000");
   assert.equal(result.verified, true);
   assert.equal(
@@ -1765,9 +1878,54 @@ test("verifyMcpApp probes the host-native provider over the loopback transport",
     root,
     plan,
     fetch: fetchWith({ ...providerMetadata(plan), issuer: "http://127.0.0.1:4000" }),
+    inspectProviderListener: noContainerInspection,
   });
   assert.equal(mismatched.verified, false);
   assert.equal(mismatched.probes.find(({ name }) => name === "provider_metadata")?.ok, false);
+});
+
+test("verifyMcpApp fails the host-gateway topology when the provider bind is loopback-only", async () => {
+  const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
+  const withListener = (inspection) =>
+    verifyMcpApp({
+      root,
+      plan,
+      fetch: enforcingIntrospection(async (input) => {
+        const url = input.href;
+        if (url.endsWith("/.well-known/oauth-authorization-server")) {
+          return Response.json(providerMetadata(plan));
+        }
+        if (url.endsWith("/.well-known/jwks.json")) {
+          return Response.json(
+            url.startsWith(plan.tamaOrigin)
+              ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+              : jwksDocument(plan.providerSigningKeyId, providerJwk),
+          );
+        }
+        return Response.json({ active: false });
+      }),
+      inspectProviderListener: async () => inspection,
+    });
+
+  const loopbackOnly = await withListener("loopback-only");
+  assert.equal(loopbackOnly.verified, false);
+  const probe = loopbackOnly.probes.find(({ name }) => name === "provider_container_reachability");
+  assert.equal(probe?.ok, false);
+  assert.match(probe?.reason ?? "", /loopback/u);
+
+  const wide = await withListener("wide");
+  assert.equal(wide.verified, true);
+  assert.equal(
+    wide.probes.find(({ name }) => name === "provider_container_reachability")?.ok,
+    true,
+  );
+
+  const unknown = await withListener("unknown");
+  assert.equal(unknown.verified, true);
+  assert.equal(
+    unknown.probes.find(({ name }) => name === "provider_container_reachability"),
+    undefined,
+  );
 });
 
 test("verifyMcpApp requires the protected route to reject anonymous requests", async () => {
@@ -1800,6 +1958,7 @@ test("verifyMcpApp requires the protected route to reject anonymous requests", a
         }
         return Response.json({ active: false });
       }),
+      inspectProviderListener: noContainerInspection,
     });
   for (const status of [200, 400, 404, 503]) {
     const result = await withRouteStatus(status);
@@ -1845,6 +2004,7 @@ test("verifyMcpApp requires an RSA signing member for the expected identifier", 
         }
         return Response.json({ active: false });
       }),
+      inspectProviderListener: noContainerInspection,
     });
     assert.equal(result.providerReachable, false, JSON.stringify(member));
     assert.equal(result.probes.find(({ name }) => name === "provider_jwks")?.ok, false);
@@ -2008,6 +2168,28 @@ test("bootstrap retains the host-gateway mapping on ordinary reruns", () => {
     operation.path.endsWith(join("tama", "compose.yaml")),
   );
   assert.equal(composeOperation?.action, "unchanged");
+});
+
+test("ordinary reruns keep the MCP App documentation rendered from the persisted integration", () => {
+  const root = project();
+  const contractPath = writeContract(root);
+  const contract = validContract();
+  const first = planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract }), {
+    providerOrigin: "http://host.docker.internal:4000",
+  });
+  applyOperations(first.operations);
+  assert.match(readFileSync(join(root, ".tama.env.example"), "utf8"), /host\.docker\.internal/u);
+
+  // An ordinary rerun does not plan the MCP App topology, but the managed
+  // example and README section must still render from the persisted state —
+  // otherwise the re-render drops them and rewrites the files.
+  const rerun = createBootstrapPlan({ cwd: root, targetPath: root, image: PINNED_TAMA_IMAGE });
+  const envExample = rerun.operations.find((operation) =>
+    operation.path.endsWith(".tama.env.example"),
+  );
+  assert.equal(envExample?.action, "unchanged");
+  const readme = rerun.operations.find((operation) => operation.path.endsWith("README.md"));
+  assert.equal(readme?.action, "unchanged");
 });
 
 test("an ordinary rerun keeps the pinned image for a persisted MCP App integration", () => {

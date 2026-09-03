@@ -648,12 +648,56 @@ export function validateMcpAppContract(document) {
   validateStringMap(document.cache_policy, "cache_policy");
   validateModeGateResponses(document.mode_gate_responses, modes);
   if (document.bindings !== undefined) {
-    resolveBindings(
-      document,
-      typeof provider?.environment_prefix === "string" ? provider.environment_prefix : "PROVIDER",
-    );
+    validateBindingsAgainstVariables(document, provider);
   }
   return document;
+}
+
+/**
+ * Cross-checks the resolved role bindings against the declared variables:
+ * every variable the planner writes must be declared, and the declared
+ * constraints must be compatible with the fixed values the planner emits —
+ * the lifecycle modes it writes and the hard-coded RS256 signing algorithm.
+ * A contract that binds a role to an undeclared variable, or declares
+ * constraints the planner cannot satisfy, would be written over only after
+ * secrets already exist.
+ *
+ * @param {Record<string, unknown>} document
+ * @param {Record<string, unknown> | null} provider
+ */
+function validateBindingsAgainstVariables(document, provider) {
+  const roles = resolveBindings(
+    document,
+    typeof provider?.environment_prefix === "string" ? provider.environment_prefix : "PROVIDER",
+  ).roles;
+  const variables = isPlainObject(document.variables) ? document.variables : null;
+  for (const [role, name] of Object.entries(roles)) {
+    const variable = variables === null ? null : variables[name];
+    if (!isPlainObject(variable)) {
+      throw usageError(`MCP App contract binding "${role}" references undeclared variable ${name}`);
+    }
+    const declared = stringList(variable.values) ?? stringList(variable.allowed_values);
+    if (declared === null) {
+      continue;
+    }
+    if (role === "mode") {
+      if (["prepared", "enabled"].some((mode) => !declared.includes(mode))) {
+        throw usageError(
+          `MCP App contract variable ${name} must include the lifecycle modes the planner writes: prepared and enabled`,
+        );
+      }
+    }
+    if (role === "access_token_signing_algorithm" && !declared.includes("RS256")) {
+      throw usageError(
+        `MCP App contract variable ${name} must accept RS256, the algorithm the planner emits`,
+      );
+    }
+  }
+}
+
+/** @param {unknown} value @returns {string[] | null} */
+function stringList(value) {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : null;
 }
 
 /** @param {string} path @returns {Record<string, unknown>} */

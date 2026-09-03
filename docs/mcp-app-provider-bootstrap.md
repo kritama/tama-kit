@@ -15,6 +15,15 @@ validates the lifecycle, every semantic environment binding, public endpoint
 paths, local topology, loader declaration, limits, and supported version ranges
 before generating secrets or planning files.
 
+When a contract declares a `bindings` map, Tama Kit cross-checks it against
+the contract's declared `variables`: every variable a role is bound to must be
+declared, and a declared constraint must be satisfiable by the values the
+planner writes — the lifecycle mode variable must accept both `prepared` and
+`enabled`, and the signing-algorithm variable must accept the hard-coded
+`RS256`. This runs before secrets are generated, so a binding to an undeclared
+variable or an unsatisfiable constraint fails the contract instead of silently
+writing over the provider's configuration.
+
 Providers without a contract use conventional variables derived from
 `--provider-name` and must supply `--provider-origin`. Environment prefixes are
 limited to 24 characters and may not use reserved Tama, database, Docker, or
@@ -38,7 +47,12 @@ also rejected because the gateway name resolves only inside the container, so
 host-side TLS probes could not validate the certificate for that name; use
 `http://host.docker.internal:<port>` for the container-gateway topology. If its
 hostname is `host.docker.internal`, Tama Kit adds the Compose host-gateway
-mapping and keeps it on ordinary reruns.
+mapping and keeps it on ordinary reruns. On Linux hosts the verification also
+inspects the host's listening sockets for the provider port: a provider bound
+to loopback only passes every host-side probe yet is unreachable from the Tama
+container through the gateway, so verification fails with a
+`provider_container_reachability` probe until the provider binds `0.0.0.0` or
+the Docker bridge interface.
 
 `--tama-origin` is the exact public Tama origin. It defaults from an accepted
 contract or to loopback at the selected Tama port. A fresh run without
@@ -68,7 +82,10 @@ well: SemVer orders a prerelease below the stable version it decorates, and the
 range grammar cannot express prerelease bounds, so such a tag cannot be held to
 the range. While an integration is persisted, ordinary reruns without
 `--mcp-app` must pass the same pinned, supported `--image`: the floating
-default tag would otherwise silently replace the pinned runtime.
+default tag would otherwise silently replace the pinned runtime. Ordinary
+reruns also keep the managed MCP App example in `.tama.env.example` and the
+README section in sync with the persisted integration, so the public
+documentation is not dropped by a rerun.
 
 ## Private files
 
@@ -79,7 +96,10 @@ cause bootstrap to stop — including a persisted provider fragment on an
 ordinary rerun, because the fragment holds the provider's private signing key.
 Existing keys and valid public overlap sets are
 preserved. A fresh overlap set is `[]`; the current public key is published by
-the runtime and must not be duplicated in its rotation set.
+the runtime and must not be duplicated in its rotation set. Persisted overlap
+members are republished by the runtime as trusted `RS256` material, so each
+must be an RSA public key at least 2048 bits with a sane public exponent — the
+same strength the private signing key is held to — or the re-bootstrap fails.
 
 Dry-run does not generate keys or write files. Repeated JSON dry-runs with the
 same inputs are deterministic and contain no private material.
@@ -102,11 +122,12 @@ new prepared identity before activating it.
 ## Activation and recovery
 
 Run bootstrap with `--start --activate`. Tama Kit first writes and starts both
-sides as prepared, then verifies provider metadata, both JWKS documents, and
-the inactive-token introspection — first proving the provider rejects a
+sides as prepared, then verifies provider metadata, both JWKS documents, the
+inactive-token introspection — first proving the provider rejects a
 deliberately invalid client assertion (negative control), then requiring the
-authenticated request to answer exactly as an inactive token must. Every probe
-is read-only and runs on the host; when the provider origin is `host.docker.internal` the
+authenticated request to answer exactly as an inactive token must — and, on a
+Linux host-gateway topology, the provider container reachability probe. Every
+probe is read-only and runs on the host; when the provider origin is `host.docker.internal` the
 provider probes travel over the host-resolvable loopback transport, while the
 advertised issuer and JWKS URI are still validated against the exact planned
 origin. Each JWKS must publish an RSA signing member (compatible `RS256`

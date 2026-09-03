@@ -370,7 +370,10 @@ const PUBLIC_JWK_PRIVATE_MEMBERS = Object.freeze(["d", "p", "q", "dp", "dq", "qi
 /**
  * A public overlap member must be a plain object without private members,
  * carrying complete RSA public parameters, compatible optional metadata, and
- * a bounded identifier that is unique within the set.
+ * a bounded identifier that is unique within the set. The runtime republishes
+ * overlap members as trusted RS256 material, so they are held to the same RSA
+ * strength as the private signing key: a factorable modulus or a degenerate
+ * exponent must not enter the rotation set.
  *
  * @param {unknown} member
  * @param {Set<string>} kids Identifiers already present in the set.
@@ -379,21 +382,29 @@ const PUBLIC_JWK_PRIVATE_MEMBERS = Object.freeze(["d", "p", "q", "dp", "dq", "qi
 function isPublicJwkMember(member, kids) {
   const modulus = isPlainObject(member) && typeof member.n === "string" ? member.n : null;
   const exponent = isPlainObject(member) && typeof member.e === "string" ? member.e : null;
+  const modulusValue = modulus === null ? null : base64urlUnsigned(modulus);
+  const exponentValue = exponent === null ? null : base64urlUnsigned(exponent);
   if (
     !isPlainObject(member) ||
     Buffer.byteLength(JSON.stringify(member), "utf8") > OAUTH_JWK_MAX_ENCODED_BYTES ||
     PUBLIC_JWK_PRIVATE_MEMBERS.some((name) => member[name] !== undefined) ||
     member.kty !== "RSA" ||
     modulus === null ||
-    base64urlUnsigned(modulus) === null ||
     exponent === null ||
-    base64urlUnsigned(exponent) === null ||
+    modulusValue === null ||
+    exponentValue === null ||
     !isCompatibleMetadata(member.alg, OAUTH_JWK_ALGORITHM) ||
     !isCompatibleMetadata(member.use, "sig") ||
     typeof member.kid !== "string" ||
     !isBoundedKid(member.kid) ||
     kids.has(member.kid)
   ) {
+    return false;
+  }
+  if (bigintBitLength(modulusValue) < OAUTH_JWK_MIN_MODULUS_BITS) {
+    return false;
+  }
+  if (exponentValue < 3n || exponentValue % 2n === 0n || exponentValue >= modulusValue) {
     return false;
   }
   kids.add(member.kid);

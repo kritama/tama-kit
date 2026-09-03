@@ -6,7 +6,7 @@ import { planRootCompose } from "./compose.mjs";
 import { formatComposePsCommand, formatComposeUpCommand } from "./compose-command.mjs";
 import { BOOTSTRAP_SCHEMA_VERSION, DEFAULTS } from "./constants.mjs";
 import { inspectProject } from "./detect-project.mjs";
-import { planEnvironment, resolveEnvironmentPort } from "./environment.mjs";
+import { planEnvironment, readEnvironmentValues, resolveEnvironmentPort } from "./environment.mjs";
 import { planGitignore, validateSecretFilesUntracked } from "./gitignore.mjs";
 import { createManagedFilePlanner, readMcpAppProvider } from "./manifest.mjs";
 import { persistedTamaOrigin, planMcpApp, resolveMcpAppState } from "./mcp-app.mjs";
@@ -29,6 +29,44 @@ import { planTerraform } from "./terraform.mjs";
 /** @typedef {import("../types.mjs").PublicBootstrapPlan} PublicBootstrapPlan */
 
 const TAMA_EXTRA_HOSTS_BLOCK = "    extra_hosts:\n      - host.docker.internal:host-gateway\n";
+const TAMA_MCP_APP_RESOURCE_PATH = "/mcp/app";
+
+/**
+ * Builds the public MCP documentation view from the persisted integration so
+ * ordinary reruns (which do not re-plan the MCP App) keep the managed example
+ * and README section in sync with the live integration instead of dropping
+ * it. The signing keys are not documentation material and stay empty.
+ *
+ * @param {PersistedMcpAppProvider | null} persisted
+ * @param {string} root
+ * @returns {McpAppPlan | null}
+ */
+function persistedMcpDocView(persisted, root) {
+  if (!persisted?.providerOrigin || !persisted.tamaOrigin) {
+    return null;
+  }
+  const resource = `${persisted.tamaOrigin}${TAMA_MCP_APP_RESOURCE_PATH}`;
+  const mode = readEnvironmentValues(root, ".tama.env").get("TAMA_MCP_APP_MODE");
+  const lifecycle =
+    mode === "disabled" || mode === "prepared" || mode === "enabled" ? mode : "prepared";
+  return {
+    provider: persisted.identity,
+    contractSource: persisted.contractSource,
+    contractPath: persisted.contractPath,
+    bindings: { roles: persisted.bindings, source: persisted.contractSource },
+    lifecycle,
+    providerLifecycle: lifecycle,
+    environmentLoading: persisted.environmentLoading,
+    providerOrigin: persisted.providerOrigin,
+    tamaOrigin: persisted.tamaOrigin,
+    resource,
+    allowedOrigins: persisted.allowedOrigins ?? [],
+    introspectionClientId: `${resource}/introspection`,
+    providerSigningKeyId: "",
+    introspectionSigningKeyId: "",
+    operations: [],
+  };
+}
 
 /** @param {McpAppPlan | null} mcpApp */
 function mcpAppExample(mcpApp) {
@@ -200,6 +238,10 @@ export function createBootstrapPlan(options) {
     mcpApp = result.plan;
     mcpAppEnvironment = result.environmentInput;
   }
+  // Ordinary reruns keep the persisted integration alive, so the managed
+  // public documentation renders from the persisted state when this run does
+  // not plan a new MCP App topology.
+  const mcpAppDoc = mcpApp ?? persistedMcpDocView(persistedMcpApp, inspection.root);
   const environment = planEnvironment(
     inspection.root,
     options.port,
@@ -242,7 +284,7 @@ export function createBootstrapPlan(options) {
       managedFiles.plan,
       join(inspection.root, ".tama.env.example"),
       "tama-env.example",
-      { PORT: environment.port, MCP_APP_EXAMPLE: mcpAppExample(mcpApp) },
+      { PORT: environment.port, MCP_APP_EXAMPLE: mcpAppExample(mcpAppDoc) },
     ),
   );
   operations.push(
@@ -303,7 +345,7 @@ export function createBootstrapPlan(options) {
       PORT: environment.port,
       COMPOSE_UP_COMMAND: formatComposeUpCommand(projectComposePath),
       COMPOSE_PS_COMMAND: formatComposePsCommand(projectComposePath),
-      MCP_APP_GUIDANCE: mcpAppReadmeGuidance(mcpApp),
+      MCP_APP_GUIDANCE: mcpAppReadmeGuidance(mcpAppDoc),
     }),
   );
   operations.push(

@@ -1,10 +1,12 @@
 // @ts-check
 
+import { readFile } from "node:fs/promises";
 import { readEnvironmentValues } from "./environment.mjs";
 
 /** @typedef {import("../types.mjs").McpAppPlan} McpAppPlan */
 /** @typedef {import("../types.mjs").McpAppVerification} McpAppVerification */
 /** @typedef {(input: URL, init?: RequestInit) => Promise<Response>} VerifyFetch */
+/** @typedef {() => Promise<"wide" | "loopback-only" | "unknown">} ProviderListenerInspector */
 
 const CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
 const INACTIVE_PROBE_TOKEN = "tama-kit-bootstrap-inactive-probe";
@@ -60,6 +62,93 @@ function hostTransportOrigin(origin) {
     url.hostname = "127.0.0.1";
   }
   return `${url.protocol}//${url.host}`;
+}
+
+/** @param {string} origin @returns {boolean} */
+function isHostGatewayOrigin(origin) {
+  try {
+    return new URL(origin).hostname === "host.docker.internal";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Classifies one /proc/net/tcp{,6} local address as a wildcard bind (reachable
+ * from the Docker bridge), a loopback bind (never reachable from the
+ * container), or a specific interface bind (ambiguous without knowing the
+ * bridge IP).
+ *
+ * @param {string} addressHex
+ * @param {"v4" | "v6"} family
+ * @returns {"wide" | "loopback" | "specific"}
+ */
+function classifyListenerAddress(addressHex, family) {
+  if (family === "v4") {
+    // Little-endian byte order: 127.0.0.1 is 0100007F, 0.0.0.0 is 00000000.
+    if (addressHex === "00000000") {
+      return "wide";
+    }
+    return Number.parseInt(addressHex.slice(6, 8), 16) === 127 ? "loopback" : "specific";
+  }
+  // Four little-endian 32-bit groups: :: is all zeros, ::1 ends in 01000000.
+  if (/^0{32}$/u.test(addressHex)) {
+    return "wide";
+  }
+  return addressHex.slice(24, 32) === "01000000" ? "loopback" : "specific";
+}
+
+/**
+ * Inspects the host's listening sockets for one port through /proc/net/tcp
+ * and /proc/net/tcp6 (Linux). Reports "wide" when a wildcard bind can answer
+ * the Docker bridge, "loopback-only" when only loopback listeners exist, and
+ * "unknown" when the answer cannot be determined (other platforms, missing
+ * or unreadable sockets, no listener on the port, or only specific-interface
+ * binds).
+ *
+ * @param {number} port
+ * @returns {Promise<"wide" | "loopback-only" | "unknown">}
+ */
+async function defaultProviderListenerInspector(port) {
+  if (process.platform !== "linux") {
+    return "unknown";
+  }
+  const hexPort = port.toString(16).toUpperCase().padStart(4, "0");
+  /** @type {Array<"wide" | "loopback" | "specific">} */
+  const listeners = [];
+  /** @type {Array<[string, "v4" | "v6"]>} */
+  const socketTables = [
+    ["/proc/net/tcp", "v4"],
+    ["/proc/net/tcp6", "v6"],
+  ];
+  for (const [path, family] of socketTables) {
+    let content;
+    try {
+      content = await readFile(path, "utf8");
+    } catch {
+      return "unknown";
+    }
+    for (const line of content.split(/\r?\n/u)) {
+      const columns = line.trim().split(/\s+/u);
+      if (columns.length < 4 || columns[3] !== "0A") {
+        continue;
+      }
+      const [addressHex, portHex] = columns[1].split(":");
+      if (portHex === hexPort) {
+        listeners.push(classifyListenerAddress(addressHex, family));
+      }
+    }
+  }
+  if (listeners.length === 0) {
+    return "unknown";
+  }
+  if (listeners.includes("wide")) {
+    return "wide";
+  }
+  if (!listeners.includes("specific")) {
+    return "loopback-only";
+  }
+  return "unknown";
 }
 
 /** @param {unknown} value @returns {bigint | null} */
@@ -314,14 +403,17 @@ async function routeProbe(fetch, url) {
  * deliberately invalid client assertion (negative control) and then answers
  * Tama's authenticated inactive-token introspection exactly as an inactive
  * token must be, and (in enabled mode) the protected route rejects anonymous
- * requests. Provider probes travel over a host-resolvable
- * transport while the advertised issuer is still validated. All probes are
- * read-only; nothing is activated or mutated here.
+ * requests. In the host-gateway topology, the host's listening sockets are
+ * additionally inspected so a loopback-only provider bind — invisible to the
+ * host-resolvable probes but unreachable from the Tama container — fails
+ * verification. Provider probes travel over a host-resolvable transport while
+ * the advertised issuer is still validated. All probes are read-only; nothing
+ * is activated or mutated here.
  *
- * @param {{root: string, plan: McpAppPlan, fetch: VerifyFetch}} input
+ * @param {{root: string, plan: McpAppPlan, fetch: VerifyFetch, inspectProviderListener?: ProviderListenerInspector}} input
  * @returns {Promise<McpAppVerification>}
  */
-export async function verifyMcpApp({ root, plan, fetch }) {
+export async function verifyMcpApp({ root, plan, fetch, inspectProviderListener }) {
   /** @type {McpAppProbe[]} */
   const probes = [];
   // Provider probes travel over the host-resolvable transport; the metadata
@@ -398,6 +490,28 @@ export async function verifyMcpApp({ root, plan, fetch }) {
     probes.push(
       probe("inactive_introspection", false, "required provider and Tama keys were not verified"),
     );
+  }
+
+  // The host-resolvable probes cannot see the container's view of the
+  // provider: a bind that is loopback-only on the host passes every host
+  // probe yet is unreachable from the Tama container through the
+  // host-gateway address.
+  if (providerReachable && tamaReachable && isHostGatewayOrigin(plan.providerOrigin)) {
+    const providerPort = new URL(plan.providerOrigin).port;
+    const inspection = await (
+      inspectProviderListener ?? (() => defaultProviderListenerInspector(Number(providerPort)))
+    )();
+    if (inspection !== "unknown") {
+      probes.push(
+        probe(
+          "provider_container_reachability",
+          inspection === "wide",
+          "the provider listens only on loopback, so the Tama container cannot reach it " +
+            "through the host.docker.internal gateway; bind the provider to 0.0.0.0 (or the " +
+            "Docker bridge interface) and rerun",
+        ),
+      );
+    }
   }
 
   if (plan.lifecycle === "enabled") {
