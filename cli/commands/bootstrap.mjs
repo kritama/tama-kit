@@ -9,7 +9,7 @@ import { readSetupUrl } from "../bootstrap/environment.mjs";
 import { validateSecretFilesIgnored } from "../bootstrap/gitignore.mjs";
 import { readAgentSkillMode } from "../bootstrap/manifest.mjs";
 import { prepareMcpApp } from "../bootstrap/mcp-app.mjs";
-import { verifyMcpApp } from "../bootstrap/mcp-app-verify.mjs";
+import { createHttpHostMappedFetch, verifyMcpApp } from "../bootstrap/mcp-app-verify.mjs";
 import { createBootstrapPlan, publicPlan } from "../bootstrap/plan.mjs";
 import {
   probeComposeProviderEndpoint,
@@ -602,6 +602,9 @@ async function executeBootstrap(argv, io) {
                 `Transport failure: ${message}`,
             );
           }
+          const providerFetch = providerTransportHost
+            ? createHttpHostMappedFetch(providerTransportHost)
+            : undefined;
           progress.update(5, "Verifying MCP App integration");
           const verification = await verifyMcpApp({
             root: plan.root,
@@ -609,7 +612,7 @@ async function executeBootstrap(argv, io) {
             fetch: globalThis.fetch,
             probeProviderFromContainer: async (endpoint) =>
               probeComposeProviderEndpoint(plan, endpoint),
-            providerTransportHost,
+            providerFetch,
           });
           plan.mcpAppVerification = verification;
           if (!verification.verified) {
@@ -692,7 +695,7 @@ async function executeBootstrap(argv, io) {
               fetch: globalThis.fetch,
               probeProviderFromContainer: async (endpoint) =>
                 probeComposeProviderEndpoint(tamaEnabledPlan, endpoint),
-              providerTransportHost,
+              providerFetch,
             });
             tamaEnabledPlan.mcpAppVerification = enabledVerification;
             if (!enabledVerification.verified) {

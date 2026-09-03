@@ -31,6 +31,7 @@ import {
 } from "../../cli/bootstrap/mcp-app-contract.mjs";
 import {
   classifyListenerAddress,
+  createHttpHostMappedFetch,
   defaultProviderListenerInspector,
   verifyMcpApp as verifyMcpAppImplementation,
 } from "../../cli/bootstrap/mcp-app-verify.mjs";
@@ -2247,28 +2248,29 @@ test("verifyMcpApp probes a bridge-bound provider over Tama's resolved host gate
       plan,
     );
   const calls = [];
+  const gatewayFetch = fetchWith(providerMetadata(plan));
   const result = await verifyMcpApp({
     root,
     plan,
-    fetch: fetchWith(providerMetadata(plan)),
+    fetch: gatewayFetch,
+    providerFetch: gatewayFetch,
     inspectProviderListener: noContainerInspection,
-    providerTransportHost: "172.17.0.1",
   });
   assert.equal(plan.providerOrigin, "http://host.docker.internal:4000");
   assert.equal(result.verified, true);
   assert.equal(
     calls.find((call) => call.url.endsWith("/.well-known/oauth-authorization-server"))?.url,
-    "http://172.17.0.1:4000/.well-known/oauth-authorization-server",
+    "http://host.docker.internal:4000/.well-known/oauth-authorization-server",
   );
   assert.equal(
     calls.find(
       (call) =>
         call.url.endsWith("/.well-known/jwks.json") && !call.url.startsWith(plan.tamaOrigin),
     )?.url,
-    "http://172.17.0.1:4000/.well-known/jwks.json",
+    "http://host.docker.internal:4000/.well-known/jwks.json",
   );
   const authenticated = calls.filter((call) => call.url.endsWith("/auth/introspections")).at(-1);
-  assert.equal(authenticated?.url, "http://172.17.0.1:4000/auth/introspections");
+  assert.equal(authenticated?.url, "http://host.docker.internal:4000/auth/introspections");
   const assertion = new URLSearchParams(String(authenticated?.body)).get("client_assertion");
   const payload = JSON.parse(
     Buffer.from(/** @type {string} */ (assertion).split(".")[1], "base64url").toString("utf8"),
@@ -2278,12 +2280,59 @@ test("verifyMcpApp probes a bridge-bound provider over Tama's resolved host gate
   const mismatched = await verifyMcpApp({
     root,
     plan,
-    fetch: fetchWith({ ...providerMetadata(plan), issuer: "http://127.0.0.1:4000" }),
+    fetch: gatewayFetch,
+    providerFetch: fetchWith({
+      ...providerMetadata(plan),
+      issuer: "http://127.0.0.1:4000",
+    }),
     inspectProviderListener: noContainerInspection,
-    providerTransportHost: "172.17.0.1",
   });
   assert.equal(mismatched.verified, false);
   assert.equal(mismatched.probes.find(({ name }) => name === "provider_metadata")?.ok, false);
+});
+
+test("createHttpHostMappedFetch preserves provider authority on the mapped connection", async () => {
+  const http = await import("node:http");
+  let received = null;
+  const server = http.createServer((request, response) => {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    request.on("end", () => {
+      received = {
+        host: request.headers.host,
+        method: request.method,
+        path: request.url,
+        body: Buffer.concat(chunks).toString("utf8"),
+      };
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ ok: true }));
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const port = /** @type {import("node:net").AddressInfo} */ (server.address()).port;
+    const mappedFetch = createHttpHostMappedFetch("127.0.0.1");
+    const response = await mappedFetch(
+      new URL(`http://host.docker.internal:${port}/probe?ready=1`),
+      {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: "probe-body",
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(received, {
+      host: `host.docker.internal:${port}`,
+      method: "POST",
+      path: "/probe?ready=1",
+      body: "probe-body",
+    });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test("parseComposeHostGatewayAddress reads Docker's exact container mapping", () => {

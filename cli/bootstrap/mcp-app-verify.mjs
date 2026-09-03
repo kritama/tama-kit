@@ -1,6 +1,7 @@
 // @ts-check
 
 import { readFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import { readEnvironmentValues } from "./environment.mjs";
 
 /** @typedef {import("../types.mjs").McpAppPlan} McpAppPlan */
@@ -55,24 +56,68 @@ async function fetchJson(fetch, url) {
 }
 
 /**
- * Verification probes are issued from the host, where the Compose
- * host-gateway name does not resolve on Linux. Maps it to the gateway address
- * read from Tama's running container; the loopback fallback is retained for
- * isolated callers that do not have Compose context. The advertised issuer is
- * still validated against the plan, so a transport serving a different origin
- * cannot pass.
+ * Creates an HTTP fetch implementation that connects to `connectHost` while
+ * preserving the URL's original authority in the Host header. The supported
+ * host-gateway topology is HTTP-only, so this intentionally rejects HTTPS
+ * instead of implementing a TLS transport with mismatched certificate names.
  *
- * @param {string} origin
- * @param {string | undefined} providerTransportHost
- * @returns {string}
+ * @param {string} connectHost
+ * @returns {VerifyFetch}
  */
-function hostTransportOrigin(origin, providerTransportHost) {
-  const url = new URL(origin);
-  if (url.hostname === "host.docker.internal") {
-    const host = providerTransportHost ?? "127.0.0.1";
-    url.hostname = host.includes(":") ? `[${host}]` : host;
-  }
-  return `${url.protocol}//${url.host}`;
+export function createHttpHostMappedFetch(connectHost) {
+  return (input, init = {}) =>
+    new Promise((resolve, reject) => {
+      if (input.protocol !== "http:") {
+        reject(new TypeError("host-mapped provider requests require HTTP"));
+        return;
+      }
+      if (init.body !== undefined && init.body !== null && typeof init.body !== "string") {
+        reject(new TypeError("host-mapped provider request bodies must be strings"));
+        return;
+      }
+      const headers = new Headers(init.headers);
+      headers.set("host", input.host);
+      headers.set("accept-encoding", "identity");
+      const request = httpRequest(
+        {
+          hostname: connectHost,
+          port: input.port === "" ? "80" : input.port,
+          path: `${input.pathname}${input.search}`,
+          method: init.method ?? "GET",
+          headers: Object.fromEntries(headers.entries()),
+          signal: init.signal ?? undefined,
+        },
+        (incoming) => {
+          /** @type {Buffer[]} */
+          const chunks = [];
+          incoming.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+          incoming.once("error", reject);
+          incoming.once("end", () => {
+            const responseHeaders = new Headers();
+            for (const [name, value] of Object.entries(incoming.headers)) {
+              if (Array.isArray(value)) {
+                for (const entry of value) {
+                  responseHeaders.append(name, entry);
+                }
+              } else if (value !== undefined) {
+                responseHeaders.set(name, value);
+              }
+            }
+            const status = incoming.statusCode ?? 500;
+            const body = [101, 204, 205, 304].includes(status) ? null : Buffer.concat(chunks);
+            resolve(
+              new Response(body, {
+                status,
+                statusText: incoming.statusMessage,
+                headers: responseHeaders,
+              }),
+            );
+          });
+        },
+      );
+      request.once("error", reject);
+      request.end(init.body ?? undefined);
+    });
 }
 
 /** @param {string} origin @returns {boolean} */
@@ -530,28 +575,27 @@ async function routeProbe(fetch, url) {
  * network namespace and the host firewall permit provider traffic. In the
  * host-gateway topology, the host's listening sockets are additionally
  * inspected to provide a specific loopback-bind diagnostic. Provider probes
- * travel over a host-resolvable transport while the advertised issuer is still
- * validated. All probes are read-only; nothing is activated or mutated here.
+ * may use a host-mapped fetch transport while retaining the provider's public
+ * authority. All probes are read-only; nothing is activated or mutated here.
  *
- * @param {{root: string, plan: McpAppPlan, fetch: VerifyFetch, probeProviderFromContainer?: ProviderContainerProbe, inspectProviderListener?: ProviderListenerInspector, providerTransportHost?: string}} input
+ * @param {{root: string, plan: McpAppPlan, fetch: VerifyFetch, providerFetch?: VerifyFetch, probeProviderFromContainer?: ProviderContainerProbe, inspectProviderListener?: ProviderListenerInspector}} input
  * @returns {Promise<McpAppVerification>}
  */
 export async function verifyMcpApp({
   root,
   plan,
   fetch,
+  providerFetch = fetch,
   probeProviderFromContainer,
   inspectProviderListener,
-  providerTransportHost,
 }) {
   /** @type {McpAppProbe[]} */
   const probes = [];
-  // Provider probes travel over the host-resolvable transport. For the Linux
-  // host-gateway topology the command layer supplies the address installed in
-  // Tama's container, while metadata still has to advertise the exact origin.
-  const providerTransport = hostTransportOrigin(plan.providerOrigin, providerTransportHost);
+  // A host-mapped provider fetch connects through the resolved Docker gateway
+  // while these URLs retain the advertised provider authority.
+  const providerTransport = plan.providerOrigin;
   const metadataUrl = `${providerTransport}/.well-known/oauth-authorization-server`;
-  const providerMetadata = await fetchJson(fetch, metadataUrl);
+  const providerMetadata = await fetchJson(providerFetch, metadataUrl);
   const metadataValid =
     providerMetadata.body?.issuer === plan.providerOrigin &&
     providerMetadata.body?.jwks_uri === `${plan.providerOrigin}/.well-known/jwks.json`;
@@ -583,7 +627,10 @@ export async function verifyMcpApp({
     plan.provider.environmentFile,
     plan.bindings.roles.access_token_private_signing_key,
   );
-  const providerJwksResult = await fetchJson(fetch, `${providerTransport}/.well-known/jwks.json`);
+  const providerJwksResult = await fetchJson(
+    providerFetch,
+    `${providerTransport}/.well-known/jwks.json`,
+  );
   const providerReachable = jwksPublishesExpectedKey(
     providerJwksResult.body,
     plan.providerSigningKeyId,
@@ -651,7 +698,14 @@ export async function verifyMcpApp({
   );
 
   if (providerReachable && tamaReachable) {
-    probes.push(await introspectInactiveToken({ root, plan, fetch, providerTransport }));
+    probes.push(
+      await introspectInactiveToken({
+        root,
+        plan,
+        fetch: providerFetch,
+        providerTransport,
+      }),
+    );
   } else {
     probes.push(
       probe("inactive_introspection", false, "required provider and Tama keys were not verified"),
