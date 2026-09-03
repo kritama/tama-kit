@@ -408,6 +408,27 @@ function printHuman(io, result, color, setupUrl) {
     io.stdout(`  ${paint(color, "cyan", "codex plugin add tama-kit@upmaru")}`);
   }
 
+  if (result.providerContract) {
+    io.stdout("");
+    io.stdout(paint(color, "bold", "MCP App local contract:"));
+    io.stdout(
+      `  ${paint(color, "dim", "Path:")} ${paint(color, "cyan", result.providerContract.path)} (${result.providerContract.action})`,
+    );
+    io.stdout(
+      `  ${paint(color, "dim", "Source:")} ${result.providerContract.source}` +
+        (result.providerContract.sourcePath
+          ? ` (${paint(color, "cyan", result.providerContract.sourcePath)})`
+          : ""),
+    );
+    io.stdout(`  ${paint(color, "dim", "Bindings:")} ${result.providerContract.bindingSource}`);
+    io.stdout(
+      `  ${paint(color, "dim", "Environment loading:")} ${result.providerContract.environmentLoading}` +
+        (result.providerContract.environmentLoadingEvidencePath
+          ? ` via ${result.providerContract.environmentLoadingMechanism} (${paint(color, "cyan", result.providerContract.environmentLoadingEvidencePath)})`
+          : ""),
+    );
+  }
+
   if (result.provider?.environmentLoading === "unverified") {
     io.stdout("");
     io.stdout(paint(color, "yellow", "Provider environment loading is not verified:"));

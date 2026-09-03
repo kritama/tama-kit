@@ -1,9 +1,9 @@
 # MCP App Local Contract Generation
 
-Status: proposed next step. Implement after the provider-bootstrap contract
-schema, identity resolution, conventional bindings, discovery, loader
-verification, and manifest drift behavior in `mcp-app-provider-bootstrap.md`
-are stable.
+Status: implemented on `feature/mcp-app-contract-scaffolding` after the
+provider-bootstrap contract schema, identity resolution, conventional
+bindings, discovery, loader verification, and manifest drift behavior in
+`mcp-app-provider-bootstrap.md` stabilized.
 
 ## Summary
 

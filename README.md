@@ -95,6 +95,15 @@ host-gateway mapping; Tama Kit does not rewrite OAuth endpoints to a different
 transport origin. Public origins are exact identifiers, so `localhost`,
 `127.0.0.1`, and `::1` are not interchangeable.
 
+The same command also manages
+`tama/contracts/mcp-app-provider-v1.json`, a non-secret local contract that
+normalizes provider identity, exact environment bindings, public endpoint
+paths, source provenance, and environment-loader evidence before either
+owner's environment file is planned. Providers without a committed contract
+use conventional bindings immediately; this local artifact does not claim the
+provider runtime implements the OAuth protocol. Application-owned contracts
+under `priv/contracts/` are only read, never generated or modified.
+
 Activation is deliberately two-step:
 
 ```bash

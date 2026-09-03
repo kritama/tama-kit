@@ -28,7 +28,13 @@ import {
   validateEmittedMcpAppValues,
   validateMcpAppContract,
   verifyEnvironmentLoading,
+  verifyEnvironmentLoadingEvidence,
 } from "../../cli/bootstrap/mcp-app-contract.mjs";
+import {
+  renderMcpAppLocalContract,
+  serializeMcpAppLocalContract,
+  validateMcpAppLocalContract,
+} from "../../cli/bootstrap/mcp-app-local-contract.mjs";
 import {
   classifyListenerAddress,
   createHttpHostMappedFetch,
@@ -625,11 +631,46 @@ test("resolveBindings prefers contract bindings over the conventional table", ()
   assert.throws(() => resolveBindings(missing, "MEMOVEE"), /issuer/u);
 });
 
+test("local MCP App contract render, validation, and serialization are stable", () => {
+  const root = project();
+  const bindings = resolveBindings(null, "ACME").roles;
+  const contract = renderMcpAppLocalContract({
+    root,
+    identity: {
+      name: "acme",
+      environmentPrefix: "ACME",
+      environmentFile: ".acme.integration.env",
+      source: "flags",
+    },
+    bindings,
+    providerContractPath: null,
+    providerContractDocument: null,
+    environmentLoading: { status: "unverified", mechanism: null, evidencePath: null },
+  });
+  const serialized = serializeMcpAppLocalContract(contract);
+  const parsed = validateMcpAppLocalContract(JSON.parse(serialized));
+  assert.deepEqual(parsed, contract);
+  assert.equal(serializeMcpAppLocalContract(parsed), serialized);
+
+  const invalid = structuredClone(contract);
+  invalid.environment_loading = {
+    status: "unverified",
+    mechanism: "direnv",
+    evidence_path: ".envrc",
+  };
+  assert.throws(() => validateMcpAppLocalContract(invalid), /cannot claim evidence/u);
+});
+
 test("verifyEnvironmentLoading confirms application-owned loaders", () => {
   const root = project();
   assert.equal(verifyEnvironmentLoading(root, ".acme.integration.env", null), "unverified");
   writeFileSync(join(root, ".envrc"), 'dotenv_load ".acme.integration.env"\n');
   assert.equal(verifyEnvironmentLoading(root, ".acme.integration.env", null), "verified");
+  assert.deepEqual(verifyEnvironmentLoadingEvidence(root, ".acme.integration.env", null), {
+    status: "verified",
+    mechanism: "direnv",
+    evidencePath: ".envrc",
+  });
 
   const composeRoot = project();
   writeFileSync(
@@ -709,6 +750,15 @@ test("verifyEnvironmentLoading confirms application-owned loaders", () => {
     verifyEnvironmentLoading(selectedComposeRoot, ".acme.integration.env", null, selectedCompose),
     "verified",
   );
+  assert.deepEqual(
+    verifyEnvironmentLoadingEvidence(
+      selectedComposeRoot,
+      ".acme.integration.env",
+      null,
+      selectedCompose,
+    ),
+    { status: "verified", mechanism: "compose-env-file", evidencePath: "ops/dev.yaml" },
+  );
 
   const selectedPlan = createBootstrapPlan({
     cwd: selectedComposeRoot,
@@ -725,6 +775,11 @@ test("verifyEnvironmentLoading confirms application-owned loaders", () => {
     mcpAppPrepared: preparedFor(selectedComposeRoot),
   });
   assert.equal(selectedPlan.mcpApp?.environmentLoading, "verified");
+  assert.deepEqual(selectedPlan.mcpApp?.localContract?.environment_loading, {
+    status: "verified",
+    mechanism: "compose-env-file",
+    evidence_path: "ops/dev.yaml",
+  });
 });
 
 test("contractLocalOrigin reads the provider-keyed local development origin", () => {
@@ -993,7 +1048,7 @@ test("bootstrap plans a complete MCP App provider integration from a discovered 
   assert.deepEqual(mcp.allowedOrigins, ["http://127.0.0.1:3000"]);
   assert.equal(mcp.contractSource, "contract");
   assert.equal(mcp.bindings.source, "contract");
-  assert.equal(mcp.environmentLoading, "verified");
+  assert.equal(mcp.environmentLoading, "unverified");
   assert.ok(mcp.providerSigningKeyId.startsWith("mcp-app-provider-"));
   assert.ok(mcp.introspectionSigningKeyId.startsWith("mcp-app-tama-"));
 
@@ -1051,11 +1106,33 @@ test("bootstrap plans a complete MCP App provider integration from a discovered 
   const manifest = JSON.parse(readFileSync(join(root, "tama", ".tama-kit.json"), "utf8"));
   assert.equal(manifest.mcpAppProvider.name, "memovee");
   assert.equal(manifest.mcpAppProvider.contractSource, "contract");
-  assert.equal(manifest.mcpAppProvider.environmentLoading, "verified");
+  assert.equal(manifest.mcpAppProvider.environmentLoading, "unverified");
   assert.equal(manifest.mcpAppProvider.bindings.mode, "MEMOVEE_TAMA_MCP_APP_MODE");
   assert.equal(manifest.mcpAppProvider.providerOrigin, "http://host.docker.internal:4000");
   assert.equal(manifest.mcpAppProvider.tamaOrigin, "http://127.0.0.1:4001");
   assert.deepEqual(manifest.mcpAppProvider.allowedOrigins, ["http://127.0.0.1:3000"]);
+  const localContractPath = join(root, "tama", "contracts", "mcp-app-provider-v1.json");
+  const localContract = validateMcpAppLocalContract(
+    JSON.parse(readFileSync(localContractPath, "utf8")),
+  );
+  assert.equal(localContract.source.type, "provider-contract");
+  assert.equal(
+    localContract.source.provider_contract_path,
+    "priv/contracts/tama-mcp-app-bootstrap-v1.json",
+  );
+  assert.match(localContract.source.provider_contract_digest ?? "", /^sha256:[0-9a-f]{64}$/u);
+  assert.deepEqual(localContract.provider, {
+    name: "memovee",
+    environment_prefix: "MEMOVEE",
+    environment_file: ".memovee.integration.env",
+  });
+  assert.equal(localContract.bindings.issuer, "MEMOVEE_OAUTH_ISSUER");
+  assert.deepEqual(localContract.environment_loading, {
+    status: "unverified",
+    mechanism: null,
+    evidence_path: null,
+  });
+  assert.doesNotMatch(readFileSync(localContractPath, "utf8"), /PRIVATE KEY|"d"\s*:/u);
   const example = readFileSync(join(root, ".tama.env.example"), "utf8");
   assert.match(example, /TAMA_MCP_APP_RESOURCE=http:\/\/127\.0\.0\.1:4001\/mcp\/app/u);
   assert.doesNotMatch(example, /TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY=/u);
@@ -1212,6 +1289,84 @@ test("bootstrap derives conventional bindings for providers without a contract",
   const manifest = JSON.parse(readFileSync(join(root, "tama", ".tama-kit.json"), "utf8"));
   assert.equal(manifest.mcpAppProvider.contractSource, "conventional");
   assert.equal(manifest.mcpAppProvider.contractPath, null);
+  const localContract = validateMcpAppLocalContract(
+    JSON.parse(readFileSync(join(root, "tama", "contracts", "mcp-app-provider-v1.json"), "utf8")),
+  );
+  assert.equal(localContract.source.type, "generated");
+  assert.equal(localContract.source.provider_contract_path, null);
+  assert.equal(localContract.source.provider_contract_digest, null);
+  assert.equal(localContract.bindings.issuer, "ACME_OAUTH_ISSUER");
+});
+
+test("a matching provider contract updates provenance without rotating provider keys", async () => {
+  const root = project();
+  const firstPrepared = await prepareFor(root, {
+    providerName: "acme",
+    providerOrigin: "http://host.docker.internal:4000",
+  });
+  const first = planWithMcp(root, firstPrepared, {
+    providerOrigin: "http://host.docker.internal:4000",
+  });
+  applyOperations(first.operations);
+  const fragmentPath = join(root, ".acme.integration.env");
+  const originalFragment = readFileSync(fragmentPath, "utf8");
+
+  const acmeContract = JSON.parse(
+    JSON.stringify(memoveeContract()).replaceAll("MEMOVEE", "ACME").replaceAll("memovee", "acme"),
+  );
+  writeContract(root, acmeContract);
+  const prepared = await prepareFor(root, {}, { nonInteractive: true });
+  const second = planWithMcp(root, prepared);
+  assert.equal(second.mcpApp?.localContract?.source.type, "provider-contract");
+  assert.equal(second.mcpApp?.localContractOperation?.action, "update");
+  const fragmentOperation = second.operations.find(({ path }) => path === fragmentPath);
+  assert.equal(fragmentOperation?.action, "unchanged");
+  applyOperations(second.operations);
+  assert.equal(readFileSync(fragmentPath, "utf8"), originalFragment);
+  assert.equal(
+    readMcpAppProvider(join(root, "tama"))?.contractPath,
+    "priv/contracts/tama-mcp-app-bootstrap-v1.json",
+  );
+});
+
+test("bootstrap refuses a user-modified managed local contract", () => {
+  const root = project();
+  const first = planWithMcp(root, preparedFor(root), {
+    providerOrigin: "http://host.docker.internal:5000",
+  });
+  applyOperations(first.operations);
+  const localPath = join(root, "tama", "contracts", "mcp-app-provider-v1.json");
+  writeFileSync(
+    localPath,
+    readFileSync(localPath, "utf8").replace('"scope": "local-development"', '"scope": "edited"'),
+  );
+  assert.throws(
+    () =>
+      planWithMcp(root, preparedFor(root), {
+        providerOrigin: "http://host.docker.internal:5000",
+      }),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      /user-modified content/u.test(error.message),
+  );
+});
+
+test("a failed managed transaction removes a newly generated local contract", async () => {
+  const root = project();
+  const plan = planWithMcp(root, preparedFor(root), {
+    providerOrigin: "http://host.docker.internal:5000",
+  });
+  await assert.rejects(
+    () =>
+      applyOperationsTransactionally(plan.operations, () => {
+        throw new Error("forced validation failure");
+      }),
+    /forced validation failure/u,
+  );
+  assert.equal(existsSync(join(root, "tama", "contracts", "mcp-app-provider-v1.json")), false);
+  assert.equal(existsSync(join(root, ".acme.integration.env")), false);
+  assert.equal(existsSync(join(root, ".tama.env")), false);
 });
 
 test("bootstrap rejects Tama image tags outside the supported contract range", () => {
@@ -1304,17 +1459,19 @@ test("bootstrap fails closed when the provider identity or contract bindings dri
   // Undeclared variables are rejected by the contract validator itself, so a
   // drifted binding that still validates must swap two declared variables.
   const memoveeBindings = memoveeContract().bindings;
+  const driftedContract = validateMcpAppContract(
+    memoveeContract({
+      bindings: {
+        ...memoveeBindings,
+        issuer: memoveeBindings.resource,
+        resource: memoveeBindings.issuer,
+      },
+    }),
+  );
+  writeContract(root, driftedContract);
   const driftedBindings = preparedFor(root, {
     contractPath,
-    contractDocument: validateMcpAppContract(
-      memoveeContract({
-        bindings: {
-          ...memoveeBindings,
-          issuer: memoveeBindings.resource,
-          resource: memoveeBindings.issuer,
-        },
-      }),
-    ),
+    contractDocument: driftedContract,
   });
   assert.throws(
     () => planWithMcp(root, driftedBindings),
@@ -1637,6 +1794,50 @@ test("bootstrap derives MCP App origins from the persisted Tama port", () => {
   assert.equal(second.port, 4567);
   assert.equal(second.mcpApp?.tamaOrigin, "http://127.0.0.1:4567");
   assert.ok(second.operations.every((operation) => operation.action === "unchanged"));
+});
+
+test("MCP App reruns update the port and allowed origins without changing stable contract semantics", () => {
+  const root = project();
+  const contractPath = writeContract(root);
+  const contract = validContract();
+  const first = planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract }));
+  applyOperations(first.operations);
+  const fragmentPath = join(root, ".memovee.integration.env");
+  const firstFragment = parseEnv(readFileSync(fragmentPath, "utf8"));
+  const localPath = join(root, "tama", "contracts", "mcp-app-provider-v1.json");
+  const firstLocalContract = readFileSync(localPath, "utf8");
+
+  const second = createBootstrapPlan({
+    cwd: root,
+    targetPath: root,
+    image: PINNED_TAMA_IMAGE,
+    port: 4020,
+    mcpApp: {
+      requested: true,
+      activate: false,
+      allowedOrigins: ["http://127.0.0.1:3001"],
+    },
+    mcpAppPrepared: preparedFor(root, { contractPath, contractDocument: contract }),
+  });
+  assert.equal(second.mcpApp?.tamaOrigin, "http://127.0.0.1:4020");
+  assert.deepEqual(second.mcpApp?.allowedOrigins, ["http://127.0.0.1:3001"]);
+  assert.equal(second.mcpApp?.localContractOperation?.action, "unchanged");
+  applyOperations(second.operations);
+
+  const secondFragment = parseEnv(readFileSync(fragmentPath, "utf8"));
+  assert.equal(
+    secondFragment.MEMOVEE_OAUTH_PRIVATE_SIGNING_KEY,
+    firstFragment.MEMOVEE_OAUTH_PRIVATE_SIGNING_KEY,
+  );
+  assert.equal(
+    secondFragment.MEMOVEE_OAUTH_SIGNING_KEY_ID,
+    firstFragment.MEMOVEE_OAUTH_SIGNING_KEY_ID,
+  );
+  assert.equal(secondFragment.MEMOVEE_TAMA_MCP_APP_RESOURCE, "http://127.0.0.1:4020/mcp/app");
+  assert.equal(readFileSync(localPath, "utf8"), firstLocalContract);
+  const tama = parseEnv(readFileSync(join(root, ".tama.env"), "utf8"));
+  assert.equal(tama.TAMA_MCP_APP_RESOURCE, "http://127.0.0.1:4020/mcp/app");
+  assert.equal(tama.TAMA_MCP_APP_ALLOWED_ORIGINS, "http://127.0.0.1:3001");
 });
 
 test("bootstrap preserves exact public origins and never infers allowed origins", () => {
@@ -3356,6 +3557,17 @@ test("the bootstrap command plans the provider integration from explicit flags",
   assert.equal(result.mcpApp.tamaOrigin, "http://127.0.0.1:4001");
   assert.equal(result.mcpApp.resource, "http://127.0.0.1:4001/mcp/app");
   assert.equal(result.mcpApp.introspectionClientId, "http://127.0.0.1:4001/mcp/app/introspection");
+  assert.deepEqual(result.providerContract, {
+    path: "tama/contracts/mcp-app-provider-v1.json",
+    source: "generated",
+    sourcePath: null,
+    bindingSource: "conventional",
+    compatibilityIdentifier: "tama-mcp-app-bootstrap-v1",
+    environmentLoading: "unverified",
+    environmentLoadingMechanism: null,
+    environmentLoadingEvidencePath: null,
+    action: "create",
+  });
   assert.ok(
     result.changes.some((change) => change.path.endsWith(".acme.integration.env")),
     "the provider fragment should be part of the planned changes",
@@ -3384,6 +3596,10 @@ test("the human bootstrap result warns when provider environment loading is unve
   ]);
 
   assert.equal(exitCode, EXIT_CODES.SUCCESS);
+  assert.match(stdout, /MCP App local contract:/u);
+  assert.match(stdout, /tama\/contracts\/mcp-app-provider-v1\.json \(create\)/u);
+  assert.match(stdout, /Source:\s+generated/u);
+  assert.match(stdout, /Bindings:\s+conventional/u);
   assert.match(stdout, /Provider environment loading is not verified:/u);
   assert.match(stdout, /load \.acme\.integration\.env before starting or restarting it/u);
 });
@@ -3491,6 +3707,7 @@ test("MCP App JSON dry-runs are byte-for-byte deterministic and write no secrets
   assert.equal(second.stdout, first.stdout);
   assert.equal(existsSync(join(root, ".tama.env")), false);
   assert.equal(existsSync(join(root, ".acme.integration.env")), false);
+  assert.equal(existsSync(join(root, "tama", "contracts", "mcp-app-provider-v1.json")), false);
   assert.doesNotMatch(first.stdout, /"d"\s*:|PRIVATE KEY|pending-secret-material/u);
 });
 
@@ -3522,8 +3739,10 @@ test("the bootstrap command discovers the contract identity for --mcp-app", asyn
     contractPath,
     mode: "prepared",
     modeVariable: "MEMOVEE_TAMA_MCP_APP_MODE",
-    environmentLoading: "verified",
+    environmentLoading: "unverified",
   });
+  assert.equal(result.providerContract.source, "provider-contract");
+  assert.equal(result.providerContract.sourcePath, "priv/contracts/tama-mcp-app-bootstrap-v1.json");
   assert.equal(result.mcpApp.providerOrigin, "http://host.docker.internal:4000");
   assert.ok(result.changes.some((change) => change.path.endsWith(".memovee.integration.env")));
 });
