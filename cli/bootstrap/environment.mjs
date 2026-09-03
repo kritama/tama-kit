@@ -8,11 +8,18 @@ import { parseEnv } from "node:util";
 import { ownershipError } from "../errors.mjs";
 import { DEFAULTS } from "./constants.mjs";
 import { hasManagedMarker, operationForContent } from "./files.mjs";
-import { generateOAuthPrivateJwk, validateOAuthPrivateJwk } from "./oauth-key.mjs";
+import {
+  generateOAuthPrivateJwk,
+  validateOAuthPrivateJwk,
+  validatePublicJwkSet,
+} from "./oauth-key.mjs";
 
 const RETIRED_OAUTH_VARIABLES = ["TAMA_OAUTH_SIGNING_KEY", "TAMA_OAUTH_SIGNING_KEY_ID"];
+export const PENDING_SECRET_VALUE = "__tama-kit-pending-secret-material__";
 
 /** @typedef {import("../types.mjs").EnvironmentPlan} EnvironmentPlan */
+/** @typedef {import("../types.mjs").McpAppEnvironmentInput} McpAppEnvironmentInput */
+/** @typedef {import("../types.mjs").McpAppMode} McpAppMode */
 
 const REQUIRED_ENVIRONMENT_VARIABLES = [
   "POSTGRES_USER",
@@ -73,6 +80,97 @@ function parseEnvironment(content, filename) {
     );
   }
   return values;
+}
+
+/**
+ * Reads the variable values from an environment file without planning or
+ * validating them. A missing file yields an empty map; malformed or
+ * duplicate variables fail closed with an ownership error.
+ *
+ * @param {string} root
+ * @param {string} filename
+ * @returns {Map<string, string>}
+ */
+export function readEnvironmentValues(root, filename) {
+  const path = join(root, filename);
+  if (!existsSync(path)) {
+    return new Map();
+  }
+  return parseEnvironment(readFileSync(path, "utf8"), filename);
+}
+
+/**
+ * Reads the raw line for a variable from an environment file so managed
+ * content can re-emit it byte-for-byte, preserving quoting and whitespace.
+ * A missing file or variable yields null.
+ *
+ * @param {string} root
+ * @param {string} filename
+ * @param {string} variable
+ * @returns {string | null}
+ */
+export function readRawEnvironmentLine(root, filename, variable) {
+  const path = join(root, filename);
+  if (!existsSync(path)) {
+    return null;
+  }
+  const prefix = `${variable}=`;
+  for (const line of readFileSync(path, "utf8").split(/\r?\n/u)) {
+    if (line.startsWith(prefix)) {
+      return line;
+    }
+  }
+  return null;
+}
+
+/**
+ * Reads the configured public Tama port from an existing `.tama.env`.
+ * Returns null when the file is absent or the port is not a valid TCP port;
+ * the caller falls back to the default or an explicit flag.
+ *
+ * @param {string} root
+ * @returns {number | null}
+ */
+export function configuredPort(root) {
+  try {
+    const values = readEnvironmentValues(root, ".tama.env");
+    const raw = values.get("TAMA_PORT");
+    if (raw === undefined || !/^\d+$/u.test(raw)) {
+      return null;
+    }
+    const port = Number.parseInt(raw, 10);
+    return Number.isInteger(port) && port >= 1 && port <= 65_535 ? port : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolves the public Tama port the way the environment file will reflect it:
+ * an explicit request wins, otherwise an existing `TAMA_PORT` is preserved
+ * (failing closed when it is invalid), otherwise a fresh-run default (when
+ * supplied), otherwise the default. Exposed so the MCP App planner can derive
+ * origins for the same port the environment file will carry.
+ *
+ * @param {string} root
+ * @param {number | undefined} [requestedPort]
+ * @param {number | undefined} [freshDefaultPort] Default for a project
+ *   without `.tama.env`, derived from the accepted MCP App contract.
+ * @returns {number}
+ */
+export function resolveEnvironmentPort(root, requestedPort, freshDefaultPort) {
+  const filename = join(root, ".tama.env");
+  if (!existsSync(filename)) {
+    return requestedPort ?? freshDefaultPort ?? DEFAULTS.port;
+  }
+  const raw =
+    parseEnvironment(readFileSync(filename, "utf8"), filename).get("TAMA_PORT") ??
+    String(DEFAULTS.port);
+  const existingPort = /^\d+$/u.test(raw) ? Number.parseInt(raw, 10) : Number.NaN;
+  if (!Number.isInteger(existingPort) || existingPort < 1 || existingPort > 65_535) {
+    throw ownershipError(`.tama.env has an invalid TAMA_PORT: ${raw}`);
+  }
+  return requestedPort ?? existingPort;
 }
 
 /** @param {string} root */
@@ -230,11 +328,14 @@ function validateEnvironment(values, filename, port) {
       { path: filename, variables: missing },
     );
   }
-  validateRuntimeSecrets(values, filename);
-  validateOAuthPrivateJwk(
-    values.get("TAMA_OAUTH_PRIVATE_JWK") ?? "",
-    values.get("TAMA_OAUTH_PRIVATE_JWK_ID") ?? "",
-  );
+  const pending = values.get("TAMA_OAUTH_PRIVATE_JWK") === PENDING_SECRET_VALUE;
+  if (!pending) {
+    validateRuntimeSecrets(values, filename);
+    validateOAuthPrivateJwk(
+      values.get("TAMA_OAUTH_PRIVATE_JWK") ?? "",
+      values.get("TAMA_OAUTH_PRIVATE_JWK_ID") ?? "",
+    );
+  }
   validateDatabaseUrl(values, filename);
   const internalPort = values.get("PORT");
   if (internalPort !== String(DEFAULTS.containerPort)) {
@@ -273,10 +374,12 @@ function validateEnvironment(values, filename, port) {
   }
 }
 
-/** @param {number} port */
-function newEnvironment(port) {
-  const postgresPassword = token(24);
-  const oauth = generateOAuthPrivateJwk();
+/** @param {number} port @param {boolean} materializeSecrets */
+function newEnvironment(port, materializeSecrets) {
+  const postgresPassword = materializeSecrets ? token(24) : PENDING_SECRET_VALUE;
+  const oauth = materializeSecrets
+    ? generateOAuthPrivateJwk()
+    : { jwk: PENDING_SECRET_VALUE, kid: "tama-oauth-pending" };
   return [
     "# Generated by Tama Kit. Keep this file private and do not commit it.",
     "",
@@ -288,12 +391,12 @@ function newEnvironment(port) {
     "PHX_HOST=localhost",
     `PORT=${DEFAULTS.containerPort}`,
     `TAMA_PORT=${port}`,
-    `SECRET_KEY_BASE=${token(48)}`,
-    `TAMA_VAULT_KEY=${randomBytes(32).toString("base64")}`,
-    `TAMA_JWT_SECRET=${token(32)}`,
+    `SECRET_KEY_BASE=${materializeSecrets ? token(48) : PENDING_SECRET_VALUE}`,
+    `TAMA_VAULT_KEY=${materializeSecrets ? randomBytes(32).toString("base64") : PENDING_SECRET_VALUE}`,
+    `TAMA_JWT_SECRET=${materializeSecrets ? token(32) : PENDING_SECRET_VALUE}`,
     `TAMA_OAUTH_PRIVATE_JWK='${oauth.jwk}'`,
     `TAMA_OAUTH_PRIVATE_JWK_ID=${oauth.kid}`,
-    `TAMA_SETUP_TOKEN=${token(24)}`,
+    `TAMA_SETUP_TOKEN=${materializeSecrets ? token(24) : PENDING_SECRET_VALUE}`,
     "",
     "TAMA_DISABLE_CLUSTERING=true",
     `TAMA_OAUTH_ISSUER=http://localhost:${port}`,
@@ -304,6 +407,144 @@ function newEnvironment(port) {
     "TAMA_CLIENT_SECRET=",
     "",
   ].join("\n");
+}
+
+/** @param {McpAppMode} mode @returns {string} */
+function mcpAppHeader(mode) {
+  return `# MCP App integration (${mode}). Managed by Tama Kit for local development.`;
+}
+
+/** @param {Record<string, string>} variables @returns {string[]} */
+function mcpAppLines(variables) {
+  return Object.entries(variables).map(([name, value]) => `${name}=${value}`);
+}
+
+/**
+ * @param {Map<string, string>} values
+ * @param {string} filename
+ * @param {McpAppEnvironmentInput["validation"]} validation
+ */
+function validateMcpAppVariables(values, filename, validation) {
+  const mode = values.get("TAMA_MCP_APP_MODE");
+  if (mode !== "prepared" && mode !== "enabled") {
+    throw ownershipError(`${filename} must set TAMA_MCP_APP_MODE to prepared or enabled`, {
+      path: filename,
+      variable: "TAMA_MCP_APP_MODE",
+    });
+  }
+
+  if (values.get("TAMA_MCP_APP_RESOURCE") !== validation.resource) {
+    throw ownershipError(
+      `${filename} TAMA_MCP_APP_RESOURCE must be exactly ${validation.resource}`,
+      { path: filename, variable: "TAMA_MCP_APP_RESOURCE" },
+    );
+  }
+
+  const authServer = values.get("TAMA_MCP_APP_AUTHORIZATION_SERVER");
+  if (authServer !== validation.authorizationServerOrigin) {
+    throw ownershipError(
+      `${filename} TAMA_MCP_APP_AUTHORIZATION_SERVER must be the provider origin ${validation.authorizationServerOrigin}`,
+      { path: filename, variable: "TAMA_MCP_APP_AUTHORIZATION_SERVER" },
+    );
+  }
+
+  // The JWKS and introspection endpoints follow the transport origin when a
+  // container runtime rewrite is configured; issuer validation always uses
+  // the public authorization server origin above.
+  const expectedJwks = `${validation.serviceOrigin}/.well-known/jwks.json`;
+  if (values.get("TAMA_MCP_APP_JWKS_URI") !== expectedJwks) {
+    throw ownershipError(`${filename} TAMA_MCP_APP_JWKS_URI must be exactly ${expectedJwks}`, {
+      path: filename,
+      variable: "TAMA_MCP_APP_JWKS_URI",
+    });
+  }
+
+  const expectedIntrospection = `${validation.serviceOrigin}/auth/introspections`;
+  if (values.get("TAMA_MCP_APP_INTROSPECTION_ENDPOINT") !== expectedIntrospection) {
+    throw ownershipError(
+      `${filename} TAMA_MCP_APP_INTROSPECTION_ENDPOINT must be exactly ${expectedIntrospection}`,
+      { path: filename, variable: "TAMA_MCP_APP_INTROSPECTION_ENDPOINT" },
+    );
+  }
+
+  if (values.get("TAMA_MCP_APP_SIGNING_ALGORITHMS") !== "RS256") {
+    throw ownershipError(`${filename} TAMA_MCP_APP_SIGNING_ALGORITHMS must be exactly RS256`, {
+      path: filename,
+      variable: "TAMA_MCP_APP_SIGNING_ALGORITHMS",
+    });
+  }
+
+  const allowed = (values.get("TAMA_MCP_APP_ALLOWED_ORIGINS") ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (
+    allowed.length !== validation.allowedOrigins.length ||
+    allowed.some((entry, index) => entry !== validation.allowedOrigins[index])
+  ) {
+    throw ownershipError(
+      `${filename} TAMA_MCP_APP_ALLOWED_ORIGINS must exactly match the persisted integration`,
+      { path: filename, variable: "TAMA_MCP_APP_ALLOWED_ORIGINS" },
+    );
+  }
+
+  if (values.get("TAMA_MCP_APP_INTROSPECTION_CLIENT_ID") !== validation.introspectionClientId) {
+    throw ownershipError(
+      `${filename} TAMA_MCP_APP_INTROSPECTION_CLIENT_ID must be ${validation.introspectionClientId}`,
+      { path: filename, variable: "TAMA_MCP_APP_INTROSPECTION_CLIENT_ID" },
+    );
+  }
+
+  if (values.get("TAMA_MCP_APP_INTROSPECTION_SIGNING_ALGORITHM") !== "RS256") {
+    throw ownershipError(
+      `${filename} TAMA_MCP_APP_INTROSPECTION_SIGNING_ALGORITHM must be exactly RS256`,
+      { path: filename, variable: "TAMA_MCP_APP_INTROSPECTION_SIGNING_ALGORITHM" },
+    );
+  }
+
+  const publicKeys = values.get("TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS");
+  if (publicKeys === undefined) {
+    throw ownershipError(
+      `${filename} must define TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS for overlap rotation state`,
+      { path: filename, variable: "TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS" },
+    );
+  }
+  validatePublicJwkSet(
+    publicKeys,
+    "TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS",
+    values.get("TAMA_MCP_APP_INTROSPECTION_SIGNING_KEY_ID"),
+  );
+
+  const privateJwk = values.get("TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY");
+  const kid = values.get("TAMA_MCP_APP_INTROSPECTION_SIGNING_KEY_ID");
+  if (!privateJwk || !kid) {
+    throw ownershipError(
+      `${filename} must define TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY and TAMA_MCP_APP_INTROSPECTION_SIGNING_KEY_ID`,
+      {
+        path: filename,
+        variables: [
+          "TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY",
+          "TAMA_MCP_APP_INTROSPECTION_SIGNING_KEY_ID",
+        ],
+      },
+    );
+  }
+  try {
+    if (privateJwk !== PENDING_SECRET_VALUE) {
+      validateOAuthPrivateJwk(privateJwk, kid);
+    }
+  } catch {
+    throw ownershipError(
+      `${filename} TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY is not a valid RSA private JWK for RS256 signing`,
+      {
+        path: filename,
+        variables: [
+          "TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY",
+          "TAMA_MCP_APP_INTROSPECTION_SIGNING_KEY_ID",
+        ],
+      },
+    );
+  }
 }
 
 /**
@@ -352,14 +593,35 @@ function postgresEnvironment(values, filename) {
   ].join("\n");
 }
 
-/** @param {string} root @param {number} [requestedPort] @returns {EnvironmentPlan} */
-export function planEnvironment(root, requestedPort) {
+/**
+ * @param {string} root
+ * @param {number} [requestedPort]
+ * @param {McpAppEnvironmentInput | undefined} [mcpApp]
+ * @param {boolean} [materializeSecrets]
+ * @param {number} [freshDefaultPort]
+ * @returns {EnvironmentPlan}
+ */
+export function planEnvironment(
+  root,
+  requestedPort,
+  mcpApp,
+  materializeSecrets = true,
+  freshDefaultPort,
+) {
   const filename = join(root, ".tama.env");
   if (!existsSync(filename)) {
-    const port = requestedPort ?? DEFAULTS.port;
-    const content = newEnvironment(port);
+    const port = requestedPort ?? freshDefaultPort ?? DEFAULTS.port;
+    let content = newEnvironment(port, materializeSecrets);
+    if (mcpApp) {
+      content =
+        content +
+        `\n${mcpAppHeader(mcpApp.validation.mode)}\n${mcpAppLines(mcpApp.variables).join("\n")}\n`;
+    }
     const values = parseEnvironment(content, filename);
     validateEnvironment(values, filename, port);
+    if (mcpApp) {
+      validateMcpAppVariables(values, filename, mcpApp.validation);
+    }
     return {
       port,
       operation: operationForContent(filename, content, {
@@ -376,14 +638,11 @@ export function planEnvironment(root, requestedPort) {
 
   const original = readFileSync(filename, "utf8");
   const values = parseEnvironment(original, filename);
+  const port = resolveEnvironmentPort(root, requestedPort, freshDefaultPort);
   const rawExistingPort = values.get("TAMA_PORT") ?? String(DEFAULTS.port);
   const existingPort = /^\d+$/u.test(rawExistingPort)
     ? Number.parseInt(rawExistingPort, 10)
     : Number.NaN;
-  if (!Number.isInteger(existingPort) || existingPort < 1 || existingPort > 65_535) {
-    throw ownershipError(`.tama.env has an invalid TAMA_PORT: ${rawExistingPort}`);
-  }
-  const port = requestedPort ?? existingPort;
   let content = original;
   if (!values.get("TAMA_OAUTH_PRIVATE_JWK") && !values.get("TAMA_OAUTH_PRIVATE_JWK_ID")) {
     const retiredKey = values.get("TAMA_OAUTH_SIGNING_KEY");
@@ -421,8 +680,14 @@ export function planEnvironment(root, requestedPort) {
       TAMA_BASE_URL: `http://localhost:${port}`,
     });
   }
+  if (mcpApp) {
+    content = updateEnvironment(content, mcpApp.variables);
+  }
   const updatedValues = parseEnvironment(content, filename);
   validateEnvironment(updatedValues, filename, port);
+  if (mcpApp) {
+    validateMcpAppVariables(updatedValues, filename, mcpApp.validation);
+  }
   return {
     port,
     operation: operationForContent(filename, content, {

@@ -70,6 +70,71 @@ Generate and start the local services:
 npx @kritama/tama-kit bootstrap --start
 ```
 
+### Bootstrap an MCP App provider integration
+
+Use `--mcp-app` from the provider application's repository. Contract-aware
+providers can commit `priv/contracts/tama-mcp-app-bootstrap-v1.json`; other
+providers must supply an explicit name and origin. Non-interactive runs also
+require the exact browser/MCP client origins. The integration requires a Tama
+image pinned to a stable release inside the supported range (the floating
+default tag is rejected):
+
+```bash
+npx @kritama/tama-kit bootstrap --mcp-app \
+  --provider-name acme \
+  --provider-origin http://host.docker.internal:4000 \
+  --tama-origin http://127.0.0.1:4001 \
+  --allowed-origin http://127.0.0.1:3000 \
+  --port 4001 \
+  --image ghcr.io/upmaru/tama:0.13.1
+```
+
+The provider origin must be one origin reachable from both the host-native
+provider and the Tama container. `host.docker.internal` adds the managed
+host-gateway mapping; Tama Kit does not rewrite OAuth endpoints to a different
+transport origin. Public origins are exact identifiers, so `localhost`,
+`127.0.0.1`, and `::1` are not interchangeable.
+
+Activation is deliberately two-step:
+
+```bash
+npx @kritama/tama-kit bootstrap --mcp-app \
+  --provider-name acme \
+  --provider-origin http://host.docker.internal:4000 \
+  --tama-origin http://127.0.0.1:4001 \
+  --allowed-origin http://127.0.0.1:3000 \
+  --port 4001 \
+  --image ghcr.io/upmaru/tama:0.13.1 --start --activate
+```
+
+The first run verifies prepared state and enables/restarts Tama, then reports
+the provider-owned mode change. Set the reported provider mode variable to
+`enabled`, restart the provider, and rerun the same command. Tama Kit records
+an enabled checkpoint only after both live services pass metadata, JWKS,
+introspection, protected-resource, route, and direct Tama-container
+reachability probes. It never executes provider lifecycle commands. See
+[MCP App provider bootstrap](docs/mcp-app-provider-bootstrap.md)
+for the contract, secret ownership, rerun, and recovery rules.
+
+Provider identity is immutable during a normal rerun. To migrate it, first
+update the provider-owned loader (and contract, when present) for the new
+fragment, keep the current provider mode prepared, then run with an explicit
+new name:
+
+```bash
+npx @kritama/tama-kit bootstrap --mcp-app \
+  --migrate-provider-identity --provider-name new-name \
+  --provider-origin http://host.docker.internal:4000 \
+  --tama-origin http://127.0.0.1:4001 \
+  --allowed-origin http://127.0.0.1:3000 \
+  --port 4001 \
+  --image ghcr.io/upmaru/tama:0.13.1
+```
+
+The migration moves preserved provider-owned entries to the new fragment,
+renames the managed bindings, preserves signing material and overlap keys,
+removes the old managed fragment transactionally, and records the new identity.
+
 The first release uses Tama's supported interactive setup flow to create root
 and provisioner credentials. Bootstrap does not use the test-only provisioner
 path and never runs `terraform apply`.

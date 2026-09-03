@@ -1,0 +1,127 @@
+{
+  "schema_version": "1",
+  "compatibility_identifier": "tama-mcp-app-bootstrap-v1",
+  "supported_tama_versions": ">= 0.13.1 and < 0.14.0",
+  "lifecycle": {
+    "default_production_mode": "disabled",
+    "modes": ["disabled", "prepared", "enabled"],
+    "configured_modes": ["prepared", "enabled"],
+    "enabled_modes": ["enabled"]
+  },
+  "variables": {
+    "TAMA_MCP_APP_MODE": {
+      "required": false,
+      "values": ["disabled", "prepared", "enabled"],
+      "x-sensitive": false
+    },
+    "TAMA_MCP_APP_RESOURCE": {
+      "required_in": ["prepared", "enabled"],
+      "format": "absolute-uri",
+      "exact_path": "/mcp/app",
+      "max_bytes": 2048,
+      "x-sensitive": false
+    },
+    "TAMA_MCP_APP_ALLOWED_ORIGINS": {
+      "required_in": ["prepared", "enabled"],
+      "format": "comma-separated-absolute-origins",
+      "max_items": 32,
+      "x-sensitive": false
+    },
+    "TAMA_MCP_APP_AUTHORIZATION_SERVER": {
+      "required_in": ["prepared", "enabled"],
+      "format": "absolute-origin",
+      "max_bytes": 2048,
+      "x-sensitive": false
+    },
+    "TAMA_MCP_APP_JWKS_URI": {
+      "required_in": ["prepared", "enabled"],
+      "format": "absolute-uri",
+      "exact_path": "/.well-known/jwks.json",
+      "same_origin_as": "TAMA_MCP_APP_AUTHORIZATION_SERVER",
+      "max_bytes": 2048,
+      "x-sensitive": false
+    },
+    "TAMA_MCP_APP_INTROSPECTION_ENDPOINT": {
+      "required_in": ["prepared", "enabled"],
+      "format": "absolute-uri",
+      "exact_path": "/auth/introspections",
+      "same_origin_as": "TAMA_MCP_APP_AUTHORIZATION_SERVER",
+      "max_bytes": 2048,
+      "x-sensitive": false
+    },
+    "TAMA_MCP_APP_SIGNING_ALGORITHMS": {
+      "required_in": ["prepared", "enabled"],
+      "format": "comma-separated-list",
+      "initial_value": ["RS256"],
+      "x-sensitive": false
+    },
+    "TAMA_MCP_APP_INTROSPECTION_CLIENT_ID": {
+      "required_in": ["prepared", "enabled"],
+      "format": "bounded-identifier",
+      "max_bytes": 2048,
+      "x-sensitive": false
+    },
+    "TAMA_MCP_APP_INTROSPECTION_SIGNING_ALGORITHM": {
+      "required_in": ["prepared", "enabled"],
+      "initial_value": "RS256",
+      "x-sensitive": false
+    },
+    "TAMA_MCP_APP_INTROSPECTION_SIGNING_KEY_ID": {
+      "required_in": ["prepared", "enabled"],
+      "format": "bounded-identifier",
+      "max_bytes": 2048,
+      "x-sensitive": false
+    },
+    "TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY": {
+      "required_in": ["prepared", "enabled"],
+      "format": "private-json-jwk",
+      "x-owner": "tama-deployment",
+      "x-sensitive": true
+    },
+    "TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS": {
+      "required": false,
+      "default": "[]",
+      "format": "public-json-jwk-array",
+      "max_items": 30,
+      "x-sensitive": false
+    }
+  },
+  "public_endpoints": {
+    "protected_resource_metadata": "/.well-known/oauth-protected-resource/mcp/app",
+    "resource": "/mcp/app",
+    "tama_jwks": "/.well-known/jwks.json"
+  },
+  "availability": {
+    "disabled": {
+      "app_key_in_jwks": false,
+      "metadata": false,
+      "resource": false,
+      "server_child": false
+    },
+    "prepared": {
+      "app_key_in_jwks": true,
+      "metadata": false,
+      "resource": false,
+      "server_child": false
+    },
+    "enabled": {
+      "app_key_in_jwks": true,
+      "metadata": true,
+      "resource": true,
+      "server_child": true
+    }
+  },
+  "local_development": {
+    "memovee_origin": "http://host.docker.internal:4000",
+    "tama_origin": "http://127.0.0.1:4001",
+    "resource": "http://127.0.0.1:4001/mcp/app",
+    "introspection_client_id": "http://127.0.0.1:4001/mcp/app/introspection",
+    "memovee_jwks_uri": "http://host.docker.internal:4000/.well-known/jwks.json",
+    "memovee_introspection_endpoint": "http://host.docker.internal:4000/auth/introspections",
+    "tama_jwks_uri": "http://127.0.0.1:4001/.well-known/jwks.json"
+  },
+  "local_loopback": {
+    "allowed_environments": ["dev", "test"],
+    "hosts": ["127.0.0.1", "localhost", "::1"]
+  }
+}

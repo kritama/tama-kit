@@ -22,7 +22,6 @@ import { EXIT_CODES, ownershipError, usageError } from "../errors.mjs";
 /** @typedef {import("../types.mjs").CommandIO} CommandIO */
 /** @typedef {import("../types.mjs").ExitCode} ExitCode */
 
-const DOTENV_SAFE_KID = /^[A-Za-z0-9._~-]+$/u;
 const CURRENT_UID = typeof process.geteuid === "function" ? process.geteuid() : -1;
 
 /**
@@ -384,10 +383,7 @@ export async function runOAuth(argv, io) {
   if (hasStdout === hasOutput) {
     throw usageError(`choose exactly one of --stdout or --output\n\n${generateKeyUsage()}`);
   }
-  if (
-    options.kid !== undefined &&
-    (!isValidOAuthKid(options.kid) || !DOTENV_SAFE_KID.test(options.kid))
-  ) {
+  if (options.kid !== undefined && !isValidOAuthKid(options.kid)) {
     throw usageError(
       "invalid oauth key identifier: use 1-128 ASCII letters, digits, dots, underscores, tildes, or hyphens",
     );
