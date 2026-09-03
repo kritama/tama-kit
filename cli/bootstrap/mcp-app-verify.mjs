@@ -44,6 +44,23 @@ async function fetchJson(fetch, url) {
   }
 }
 
+/**
+ * Verification probes are issued from the host, where the Compose
+ * host-gateway name does not resolve. Maps it to the loopback transport the
+ * host-native provider listens on. The advertised issuer is still validated
+ * against the plan, so a transport serving a different origin cannot pass.
+ *
+ * @param {string} origin
+ * @returns {string}
+ */
+function hostTransportOrigin(origin) {
+  const url = new URL(origin);
+  if (url.hostname === "host.docker.internal") {
+    url.hostname = "127.0.0.1";
+  }
+  return `${url.protocol}//${url.host}`;
+}
+
 /** @param {unknown} value @returns {bigint | null} */
 function base64urlUnsigned(value) {
   if (typeof value !== "string" || value.length === 0 || !/^[A-Za-z0-9_-]+$/u.test(value)) {
@@ -102,11 +119,12 @@ function jwksHasKid(jwks, kid) {
 
 /**
  * Reports whether a JWKS publishes the exact public key the integration
- * plans from the persisted private JWK: a member with the expected
- * identifier whose modulus and exponent match the expected key material and
- * that carries no private members. Key material is compared, not only
- * metadata, so a stale or misloaded key published under the expected
- * identifier cannot pass verification.
+ * plans from the persisted private JWK: an RSA signing member with the
+ * expected identifier whose modulus and exponent match the expected key
+ * material, whose compatible RS256 metadata is not contradicted, and that
+ * carries no private members. Key material is compared, not only metadata,
+ * so a stale or misloaded key published under the expected identifier cannot
+ * pass verification.
  *
  * @param {Record<string, unknown> | null} jwks
  * @param {string} kid
@@ -127,6 +145,15 @@ function jwksPublishesExpectedKey(jwks, kid, expected) {
       return false;
     }
     if (JWK_PRIVATE_MEMBERS.some((name) => key[name] !== undefined)) {
+      return false;
+    }
+    if (key.kty !== "RSA") {
+      return false;
+    }
+    if (key.alg !== undefined && key.alg !== "RS256") {
+      return false;
+    }
+    if (key.use !== undefined && key.use !== "sig") {
       return false;
     }
     const modulus = typeof key.n === "string" ? base64urlUnsigned(key.n) : null;
@@ -192,12 +219,14 @@ async function signClientAssertion({ privateJwk, kid, clientId, audience }) {
  * @returns {Promise<McpAppProbe>}
  */
 async function introspectInactiveToken({ root, plan, fetch }) {
-  const endpoint = `${plan.providerOrigin}/auth/introspections`;
+  // The request travels over the host-resolvable transport, but the client
+  // assertion names the advertised endpoint the provider validates.
+  const endpoint = `${hostTransportOrigin(plan.providerOrigin)}/auth/introspections`;
   const assertion = await signClientAssertion({
     privateJwk: readEnvironmentValues(root, ".tama.env").get(TAMA_INTROSPECTION_KEY_VARIABLE) ?? "",
     kid: plan.introspectionSigningKeyId,
     clientId: plan.introspectionClientId,
-    audience: endpoint,
+    audience: `${plan.providerOrigin}/auth/introspections`,
   });
   if (assertion === null) {
     return probe("inactive_introspection", false, "could not sign the client assertion");
@@ -230,15 +259,26 @@ async function introspectInactiveToken({ root, plan, fetch }) {
   }
 }
 
-/** @param {VerifyFetch} fetch @param {string} url @returns {Promise<McpAppProbe>} */
+/**
+ * The protected route must reject this deliberately anonymous request: a 200
+ * means /mcp/app is publicly accessible and its OAuth enforcement is missing.
+ *
+ * @param {VerifyFetch} fetch
+ * @param {string} url
+ * @returns {Promise<McpAppProbe>}
+ */
 async function routeProbe(fetch, url) {
   try {
     const response = await fetch(new URL(url), {
       headers: { accept: "application/json" },
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
-    const available = response.status !== 404 && response.status !== 503 && response.status < 500;
-    return probe("tama_resource_route", available, `Tama returned HTTP ${response.status}`);
+    const rejectsAnonymous = response.status === 401 || response.status === 403;
+    return probe(
+      "tama_resource_route",
+      rejectsAnonymous,
+      `Tama returned HTTP ${response.status}; the protected route must reject anonymous requests with 401 or 403`,
+    );
   } catch {
     return probe("tama_resource_route", false, "Tama MCP App route was unreachable");
   }
@@ -247,10 +287,12 @@ async function routeProbe(fetch, url) {
 /**
  * Verifies a running MCP App integration: the provider publishes the exact
  * access-token key the bootstrap planned from the persisted private JWK,
- * Tama publishes the exact introspection key, and Tama's authenticated
+ * Tama publishes the exact introspection key, Tama's authenticated
  * inactive-token introspection is rejected by the provider exactly as an
- * inactive token must be. All probes are read-only; nothing is activated or
- * mutated here.
+ * inactive token must be, and (in enabled mode) the protected route rejects
+ * anonymous requests. Provider probes travel over a host-resolvable
+ * transport while the advertised issuer is still validated. All probes are
+ * read-only; nothing is activated or mutated here.
  *
  * @param {{root: string, plan: McpAppPlan, fetch: VerifyFetch}} input
  * @returns {Promise<McpAppVerification>}
@@ -258,7 +300,10 @@ async function routeProbe(fetch, url) {
 export async function verifyMcpApp({ root, plan, fetch }) {
   /** @type {McpAppProbe[]} */
   const probes = [];
-  const metadataUrl = `${plan.providerOrigin}/.well-known/oauth-authorization-server`;
+  // Provider probes travel over the host-resolvable transport; the metadata
+  // check still requires the advertised issuer to match the plan exactly.
+  const providerTransport = hostTransportOrigin(plan.providerOrigin);
+  const metadataUrl = `${providerTransport}/.well-known/oauth-authorization-server`;
   const providerMetadata = await fetchJson(fetch, metadataUrl);
   const metadataValid =
     providerMetadata.body?.issuer === plan.providerOrigin &&
@@ -278,7 +323,7 @@ export async function verifyMcpApp({ root, plan, fetch }) {
     plan.provider.environmentFile,
     plan.bindings.roles.access_token_private_signing_key,
   );
-  const providerJwksResult = await fetchJson(fetch, `${plan.providerOrigin}/.well-known/jwks.json`);
+  const providerJwksResult = await fetchJson(fetch, `${providerTransport}/.well-known/jwks.json`);
   const providerReachable = jwksPublishesExpectedKey(
     providerJwksResult.body,
     plan.providerSigningKeyId,

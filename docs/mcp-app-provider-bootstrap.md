@@ -37,7 +37,12 @@ contract or to loopback at the selected Tama port. A fresh run without
 provider origin is rejected because both host-native services would share the
 same host port. Origins are persisted and compared on reruns. Changing
 `localhost` to `127.0.0.1`, changing to `::1`, or changing any accepted origin
-is a topology migration, not a normal rerun.
+is a topology migration, not a normal rerun. Planning a Tama port that
+differs from the persisted integration's Tama origin is rejected: the MCP
+resource, the introspection client id, and the provider fragment are bound to
+that origin, so the integration must be reset (remove the `TAMA_MCP_APP_*`
+variables from `.tama.env`, the provider fragment, and the `mcpAppProvider`
+manifest block) before bootstrapping the new port with `--mcp-app`.
 
 Pass at least one repeatable `--allowed-origin` for the actual browser or MCP
 client. Tama Kit never infers client origins from either service origin.
@@ -72,11 +77,18 @@ new prepared identity before activating it.
 ## Activation and recovery
 
 Run bootstrap with `--start --activate`. Tama Kit first writes and starts both
-sides as prepared, then verifies provider metadata, both JWKS documents
-(against the exact public keys planned from the persisted private JWKs, so a
-stale or misloaded key under the expected identifier fails the probe), and an
-authenticated inactive-token introspection. Only after that checkpoint does it
-enable and restart Tama and verify protected-resource metadata and `/mcp/app`.
+sides as prepared, then verifies provider metadata, both JWKS documents, and
+an authenticated inactive-token introspection. Every probe is read-only and
+runs on the host; when the provider origin is `host.docker.internal` the
+provider probes travel over the host-resolvable loopback transport, while the
+advertised issuer and JWKS URI are still validated against the exact planned
+origin. Each JWKS must publish an RSA signing member (compatible `RS256`
+metadata, no private members) whose modulus and exponent match the persisted
+private JWK, so a stale or misloaded key under the expected identifier fails
+the probe. Only after that checkpoint does it enable and restart Tama and
+verify protected-resource metadata and `/mcp/app`; the protected route must
+reject the deliberately anonymous probe with `401` or `403`, so a publicly
+accessible `/mcp/app` fails verification.
 
 Tama Kit cannot control a host-native provider process. It leaves the provider
 prepared and reports the exact provider mode variable to set to `enabled`.

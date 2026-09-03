@@ -1,7 +1,7 @@
 // @ts-check
 
 import { join, relative } from "node:path";
-import { usageError } from "../errors.mjs";
+import { ownershipError, usageError } from "../errors.mjs";
 import { planRootCompose } from "./compose.mjs";
 import { formatComposePsCommand, formatComposeUpCommand } from "./compose-command.mjs";
 import { BOOTSTRAP_SCHEMA_VERSION, DEFAULTS } from "./constants.mjs";
@@ -9,7 +9,7 @@ import { inspectProject } from "./detect-project.mjs";
 import { planEnvironment, resolveEnvironmentPort } from "./environment.mjs";
 import { planGitignore, validateSecretFilesUntracked } from "./gitignore.mjs";
 import { createManagedFilePlanner, readMcpAppProvider } from "./manifest.mjs";
-import { planMcpApp, resolveMcpAppState } from "./mcp-app.mjs";
+import { persistedTamaOrigin, planMcpApp, resolveMcpAppState } from "./mcp-app.mjs";
 import {
   contractTamaPort,
   loadTamaContract,
@@ -109,6 +109,40 @@ export function createBootstrapPlan(options) {
     ? (contractTamaPort(mcpAppPrepared.contractDocument, loadTamaContract()) ?? undefined)
     : undefined;
   const port = resolveEnvironmentPort(inspection.root, options.port, mcpAppFreshPort);
+  // A persisted MCP App integration binds the resource, the introspection
+  // client id, and the provider fragment to the persisted Tama origin.
+  // Planning a different port without --mcp-app would leave all of them on
+  // the old origin, so the port change is rejected instead.
+  const persistedMcpApp = readMcpAppProvider(inspection.tamaDirectory);
+  const persistedTamaOriginValue =
+    persistedMcpApp?.tamaOrigin ?? persistedTamaOrigin(inspection.root);
+  if (persistedTamaOriginValue !== null) {
+    let persistedPort;
+    try {
+      const persistedUrl = new URL(persistedTamaOriginValue);
+      persistedPort =
+        persistedUrl.port === ""
+          ? persistedUrl.protocol === "https:"
+            ? 443
+            : 80
+          : Number(persistedUrl.port);
+    } catch {
+      throw ownershipError(
+        `the persisted MCP App Tama origin ${persistedTamaOriginValue} is not a valid origin`,
+        { path: join(inspection.tamaDirectory, ".tama-kit.json") },
+      );
+    }
+    if (persistedPort !== port) {
+      throw usageError(
+        `the persisted MCP App integration advertises Tama at ${persistedTamaOriginValue}; ` +
+          `planning port ${port} would leave the MCP resource, introspection client id, and provider fragment ` +
+          `on the old port. Rerun without changing the Tama port, or remove the persisted MCP App state ` +
+          `(the TAMA_MCP_APP_* variables in .tama.env, ` +
+          `${persistedMcpApp?.identity.environmentFile ?? "the provider fragment"}, and the mcpAppProvider block in .tama/.tama-kit.json) ` +
+          `before bootstrapping the new port with --mcp-app`,
+      );
+    }
+  }
   const managedFiles = createManagedFilePlanner(
     inspection.root,
     inspection.tamaDirectory,
@@ -146,7 +180,6 @@ export function createBootstrapPlan(options) {
   // The host-gateway mapping must survive ordinary reruns without --mcp-app:
   // the persisted integration (and .tama.env) outlives the current plan, so
   // the mapping is derived from the persisted provider origin as well.
-  const persistedMcpApp = readMcpAppProvider(inspection.tamaDirectory);
   const providerUsesHostGateway = [
     ...(mcpApp ? [mcpApp.providerOrigin] : []),
     ...(persistedMcpApp?.providerOrigin ? [persistedMcpApp.providerOrigin] : []),
@@ -167,7 +200,10 @@ export function createBootstrapPlan(options) {
 
   /** @type {FileOperation[]} */
   const operations = [
-    ...planGitignore(inspection.root, mcpApp?.provider.environmentFile ?? null),
+    ...planGitignore(inspection.root, {
+      current: mcpApp?.provider.environmentFile ?? null,
+      persisted: mcpApp ? (persistedMcpApp?.identity.environmentFile ?? null) : null,
+    }),
     environment.operation,
     environment.postgresOperation,
   ];

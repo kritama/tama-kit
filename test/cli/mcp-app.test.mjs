@@ -1539,6 +1539,200 @@ test("verifyMcpApp rejects a JWKS that exposes private members under the expecte
   assert.match(leakedProbe?.reason ?? "", /different key under the expected identifier/u);
 });
 
+test("verifyMcpApp probes the host-native provider over the loopback transport", async () => {
+  const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
+  const fetchWith =
+    (metadata) => async (/** @type {URL} */ input, /** @type {RequestInit | undefined} */ init) => {
+      const url = input.href;
+      calls.push({ url, method: init?.method ?? "GET", body: init?.body });
+      if (url.endsWith("/.well-known/oauth-authorization-server")) {
+        return Response.json(metadata);
+      }
+      if (url.endsWith("/.well-known/jwks.json")) {
+        const body = url.startsWith(plan.tamaOrigin)
+          ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+          : jwksDocument(plan.providerSigningKeyId, providerJwk);
+        return Response.json(body);
+      }
+      return Response.json({ active: false });
+    };
+  const calls = [];
+  const result = await verifyMcpApp({ root, plan, fetch: fetchWith(providerMetadata(plan)) });
+  assert.equal(plan.providerOrigin, "http://host.docker.internal:4000");
+  assert.equal(result.verified, true);
+  assert.equal(
+    calls.find((call) => call.url.endsWith("/.well-known/oauth-authorization-server"))?.url,
+    "http://127.0.0.1:4000/.well-known/oauth-authorization-server",
+  );
+  assert.equal(
+    calls.find(
+      (call) =>
+        call.url.endsWith("/.well-known/jwks.json") && !call.url.startsWith(plan.tamaOrigin),
+    )?.url,
+    "http://127.0.0.1:4000/.well-known/jwks.json",
+  );
+  const introspection = calls.find((call) => call.url.endsWith("/auth/introspections"));
+  assert.equal(introspection?.url, "http://127.0.0.1:4000/auth/introspections");
+  const assertion = new URLSearchParams(String(introspection?.body)).get("client_assertion");
+  const payload = JSON.parse(
+    Buffer.from(/** @type {string} */ (assertion).split(".")[1], "base64url").toString("utf8"),
+  );
+  assert.equal(payload.aud, "http://host.docker.internal:4000/auth/introspections");
+
+  const mismatched = await verifyMcpApp({
+    root,
+    plan,
+    fetch: fetchWith({ ...providerMetadata(plan), issuer: "http://127.0.0.1:4000" }),
+  });
+  assert.equal(mismatched.verified, false);
+  assert.equal(mismatched.probes.find(({ name }) => name === "provider_metadata")?.ok, false);
+});
+
+test("verifyMcpApp requires the protected route to reject anonymous requests", async () => {
+  const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
+  const enabledPlan = { ...plan, lifecycle: "enabled", providerLifecycle: "prepared" };
+  const withRouteStatus = (status) =>
+    verifyMcpApp({
+      root,
+      plan: enabledPlan,
+      fetch: async (input) => {
+        const url = input.href;
+        if (url.endsWith("/.well-known/oauth-authorization-server")) {
+          return Response.json(providerMetadata(plan));
+        }
+        if (url.endsWith("/.well-known/oauth-protected-resource/mcp/app")) {
+          return Response.json({
+            resource: plan.resource,
+            authorization_servers: [plan.providerOrigin],
+          });
+        }
+        if (url.endsWith("/.well-known/jwks.json")) {
+          return Response.json(
+            url.startsWith(plan.tamaOrigin)
+              ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+              : jwksDocument(plan.providerSigningKeyId, providerJwk),
+          );
+        }
+        if (url === plan.resource) {
+          return new Response(null, { status });
+        }
+        return Response.json({ active: false });
+      },
+    });
+  for (const status of [200, 400, 404, 503]) {
+    const result = await withRouteStatus(status);
+    const routeProbe = result.probes.find(({ name }) => name === "tama_resource_route");
+    assert.equal(routeProbe?.ok, false, `HTTP ${status} must not count as a protected route`);
+    assert.match(routeProbe?.reason ?? "", /401 or 403/u);
+  }
+  for (const status of [401, 403]) {
+    const result = await withRouteStatus(status);
+    assert.equal(result.probes.find(({ name }) => name === "tama_resource_route")?.ok, true);
+  }
+});
+
+test("verifyMcpApp requires an RSA signing member for the expected identifier", async () => {
+  const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
+  const providerKey = JSON.parse(providerJwk);
+  const variants = [
+    { kid: plan.providerSigningKeyId, n: providerKey.n, e: providerKey.e },
+    { kid: plan.providerSigningKeyId, kty: "EC", n: providerKey.n, e: providerKey.e },
+    {
+      kid: plan.providerSigningKeyId,
+      kty: "RSA",
+      alg: "HS256",
+      n: providerKey.n,
+      e: providerKey.e,
+    },
+    { kid: plan.providerSigningKeyId, kty: "RSA", use: "enc", n: providerKey.n, e: providerKey.e },
+  ];
+  for (const member of variants) {
+    const result = await verifyMcpApp({
+      root,
+      plan,
+      fetch: async (input) => {
+        const url = input.href;
+        if (url.endsWith("/.well-known/oauth-authorization-server")) {
+          return Response.json(providerMetadata(plan));
+        }
+        if (url.endsWith("/.well-known/jwks.json")) {
+          const body = url.startsWith(plan.tamaOrigin)
+            ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+            : { keys: [member] };
+          return Response.json(body);
+        }
+        return Response.json({ active: false });
+      },
+    });
+    assert.equal(result.providerReachable, false, JSON.stringify(member));
+    assert.equal(result.probes.find(({ name }) => name === "provider_jwks")?.ok, false);
+  }
+});
+
+test("bootstrap preserves unrelated .integration.env ignore entries on MCP App reruns", async () => {
+  const root = project();
+  const originalPrepared = await prepareFor(root, {
+    providerName: "acme",
+    providerOrigin: "http://host.docker.internal:5000",
+  });
+  applyOperations(
+    planWithMcp(root, originalPrepared, { providerOrigin: "http://host.docker.internal:5000" })
+      .operations,
+  );
+  const gitignorePath = join(root, ".gitignore");
+  writeFileSync(gitignorePath, `${readFileSync(gitignorePath, "utf8")}.other.integration.env\n`);
+
+  applyOperations(
+    planWithMcp(
+      root,
+      await prepareFor(root, { providerOrigin: "http://host.docker.internal:5000" }),
+      { providerOrigin: "http://host.docker.internal:5000" },
+    ).operations,
+  );
+  let gitignore = readFileSync(gitignorePath, "utf8");
+  assert.match(gitignore, /^\/?\.other\.integration\.env$/mu);
+  assert.match(gitignore, /^\/\.acme\.integration\.env$/mu);
+
+  writeFileSync(join(root, ".envrc"), 'dotenv_load ".beta.integration.env"\n');
+  const migratedPrepared = await prepareFor(root, {
+    providerName: "beta",
+    providerPrefix: "BETA",
+    providerOrigin: "http://host.docker.internal:5000",
+    migrateProviderIdentity: true,
+  });
+  applyOperations(
+    planWithMcp(root, migratedPrepared, {
+      providerOrigin: "http://host.docker.internal:5000",
+      migrateProviderIdentity: true,
+    }).operations,
+  );
+  gitignore = readFileSync(gitignorePath, "utf8");
+  assert.doesNotMatch(gitignore, /acme\.integration\.env/u);
+  assert.match(gitignore, /^\/?\.other\.integration\.env$/mu);
+  assert.match(gitignore, /^\/\.beta\.integration\.env$/mu);
+  assert.equal(gitignore.split("# Tama Kit local runtime").length - 1, 1);
+  assert.equal(gitignore.split("# Tama Kit MCP App integration").length - 1, 1);
+});
+
+test("bootstrap rejects a Tama port change while an MCP App integration is persisted", () => {
+  const root = project();
+  const contractPath = writeContract(root);
+  const contract = validContract();
+  applyOperations(
+    planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })).operations,
+  );
+  assert.throws(
+    () => createBootstrapPlan({ cwd: root, targetPath: root, port: 4020 }),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.USAGE &&
+      /persisted MCP App integration advertises Tama at http:\/\/127\.0\.0\.1:4001/u.test(
+        error.message,
+      ),
+  );
+  assert.doesNotThrow(() => createBootstrapPlan({ cwd: root, targetPath: root }));
+});
+
 test("contractTamaPort derives the fresh Tama port from the accepted contract", () => {
   const contract = validContract();
   assert.equal(contractTamaPort(contract, null), 4001);

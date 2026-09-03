@@ -135,8 +135,14 @@ function originForPort(origin, port, flag) {
   return normalized;
 }
 
-/** @param {string} root @returns {string | null} */
-function persistedTamaOrigin(root) {
+/**
+ * Reads the Tama origin the persisted `.tama.env` MCP App resource advertises,
+ * or null when no MCP App state is persisted there.
+ *
+ * @param {string} root
+ * @returns {string | null}
+ */
+export function persistedTamaOrigin(root) {
   const resource = readEnvironmentValues(root, ".tama.env").get("TAMA_MCP_APP_RESOURCE");
   if (!resource) {
     return null;
