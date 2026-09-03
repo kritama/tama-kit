@@ -647,7 +647,12 @@ export function validateMcpAppContract(document) {
   validateEnvironmentLoading(document.environment_loading, provider);
   validateStringMap(document.cache_policy, "cache_policy");
   validateModeGateResponses(document.mode_gate_responses, modes);
-  if (document.bindings !== undefined) {
+  // Any contract that declares a provider identity names the variables the
+  // planner will write — explicitly through bindings or conventionally from
+  // the declared prefix — so every such contract is cross-checked. Contracts
+  // without a provider identity (such as the Tama runtime contract) declare
+  // only their own variables and are not role-bound.
+  if (provider !== null) {
     validateBindingsAgainstVariables(document, provider);
   }
   return document;
@@ -660,16 +665,19 @@ export function validateMcpAppContract(document) {
  * the lifecycle modes it writes and the hard-coded RS256 signing algorithm.
  * A contract that binds a role to an undeclared variable, or declares
  * constraints the planner cannot satisfy, would be written over only after
- * secrets already exist.
+ * secrets already exist. Both the explicit bindings map and the conventional
+ * fallback derived from the declared prefix are checked.
  *
  * @param {Record<string, unknown>} document
- * @param {Record<string, unknown> | null} provider
+ * @param {Record<string, unknown>} provider Validated provider section.
  */
 function validateBindingsAgainstVariables(document, provider) {
-  const roles = resolveBindings(
-    document,
-    typeof provider?.environment_prefix === "string" ? provider.environment_prefix : "PROVIDER",
-  ).roles;
+  const prefix =
+    typeof provider.environment_prefix === "string" ? provider.environment_prefix : null;
+  if (prefix === null) {
+    throw usageError("MCP App contract provider.environment_prefix is invalid");
+  }
+  const roles = resolveBindings(document, prefix).roles;
   const variables = isPlainObject(document.variables) ? document.variables : null;
   for (const [role, name] of Object.entries(roles)) {
     const variable = variables === null ? null : variables[name];

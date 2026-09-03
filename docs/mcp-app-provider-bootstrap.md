@@ -15,8 +15,10 @@ validates the lifecycle, every semantic environment binding, public endpoint
 paths, local topology, loader declaration, limits, and supported version ranges
 before generating secrets or planning files.
 
-When a contract declares a `bindings` map, Tama Kit cross-checks it against
-the contract's declared `variables`: every variable a role is bound to must be
+Every contract that declares a provider identity is cross-checked against its
+declared `variables`: each role is bound either by the contract's `bindings`
+map or, when that map is omitted, by the conventional names derived from the
+declared environment prefix. Every variable a role resolves to must be
 declared, and a declared constraint must be satisfiable by the values the
 planner writes — the lifecycle mode variable must accept both `prepared` and
 `enabled`, and the signing-algorithm variable must accept the hard-coded

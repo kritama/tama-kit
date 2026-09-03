@@ -6,7 +6,13 @@ import { readEnvironmentValues } from "./environment.mjs";
 /** @typedef {import("../types.mjs").McpAppPlan} McpAppPlan */
 /** @typedef {import("../types.mjs").McpAppVerification} McpAppVerification */
 /** @typedef {(input: URL, init?: RequestInit) => Promise<Response>} VerifyFetch */
-/** @typedef {() => Promise<"wide" | "loopback-only" | "unknown">} ProviderListenerInspector */
+/**
+ * Inspects the host's listening sockets for one port and reports whether a
+ * wide bind can answer the Docker bridge, only loopback binds exist, or the
+ * answer cannot be determined.
+ *
+ * @typedef {(port: number) => Promise<"wide" | "loopback-only" | "unknown">} ProviderListenerInspector
+ */
 
 const CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
 const INACTIVE_PROBE_TOKEN = "tama-kit-bootstrap-inactive-probe";
@@ -109,7 +115,7 @@ function classifyListenerAddress(addressHex, family) {
  * @param {number} port
  * @returns {Promise<"wide" | "loopback-only" | "unknown">}
  */
-async function defaultProviderListenerInspector(port) {
+export async function defaultProviderListenerInspector(port) {
   if (process.platform !== "linux") {
     return "unknown";
   }
@@ -497,10 +503,17 @@ export async function verifyMcpApp({ root, plan, fetch, inspectProviderListener 
   // probe yet is unreachable from the Tama container through the
   // host-gateway address.
   if (providerReachable && tamaReachable && isHostGatewayOrigin(plan.providerOrigin)) {
-    const providerPort = new URL(plan.providerOrigin).port;
-    const inspection = await (
-      inspectProviderListener ?? (() => defaultProviderListenerInspector(Number(providerPort)))
-    )();
+    const providerUrl = new URL(plan.providerOrigin);
+    // A portless origin still names a concrete endpoint: HTTP defaults to 80,
+    // HTTPS to 443 — the same ports the probes above just succeeded against.
+    const providerPort =
+      providerUrl.port === ""
+        ? providerUrl.protocol === "https:"
+          ? 443
+          : 80
+        : Number(providerUrl.port);
+    const inspect = inspectProviderListener ?? defaultProviderListenerInspector;
+    const inspection = await inspect(providerPort);
     if (inspection !== "unknown") {
       probes.push(
         probe(

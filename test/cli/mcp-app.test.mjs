@@ -19,7 +19,10 @@ import {
   validateMcpAppContract,
   verifyEnvironmentLoading,
 } from "../../cli/bootstrap/mcp-app-contract.mjs";
-import { verifyMcpApp } from "../../cli/bootstrap/mcp-app-verify.mjs";
+import {
+  defaultProviderListenerInspector,
+  verifyMcpApp,
+} from "../../cli/bootstrap/mcp-app-verify.mjs";
 import { generateOAuthKeyPair } from "../../cli/bootstrap/oauth-key.mjs";
 import { createBootstrapPlan } from "../../cli/bootstrap/plan.mjs";
 import {
@@ -365,6 +368,20 @@ test("validateMcpAppContract cross-checks bindings against the declared variable
     /must accept RS256/u,
   );
   assert.doesNotThrow(() => validateMcpAppContract(base));
+
+  // Conventional fallback: a contract that declares a provider identity but
+  // no bindings map derives the role names from the declared prefix, and
+  // those derived names are cross-checked the same way.
+  const withoutBindings = /** @type {Record<string, unknown>} */ (structuredClone(base));
+  delete withoutBindings.bindings;
+  assert.doesNotThrow(() => validateMcpAppContract(withoutBindings));
+  const missing = /** @type {Record<string, unknown>} */ (structuredClone(withoutBindings));
+  const missingVariables = /** @type {Record<string, unknown>} */ (missing.variables);
+  delete missingVariables.MEMOVEE_OAUTH_ISSUER;
+  assert.throws(
+    () => validateMcpAppContract(missing),
+    /binding "issuer" references undeclared variable MEMOVEE_OAUTH_ISSUER/u,
+  );
 });
 
 test("validateMcpAppContract rejects malformed v1 contract sections", () => {
@@ -1926,6 +1943,68 @@ test("verifyMcpApp fails the host-gateway topology when the provider bind is loo
     unknown.probes.find(({ name }) => name === "provider_container_reachability"),
     undefined,
   );
+});
+
+test("verifyMcpApp inspects the effective default port for a portless host-gateway origin", async () => {
+  const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
+  const portlessPlan = { ...plan, providerOrigin: "http://host.docker.internal" };
+  /** @type {number[]} */
+  const inspectedPorts = [];
+  const result = await verifyMcpApp({
+    root,
+    plan: portlessPlan,
+    fetch: enforcingIntrospection(async (input) => {
+      const url = input.href;
+      if (url.endsWith("/.well-known/oauth-authorization-server")) {
+        return Response.json(providerMetadata(portlessPlan));
+      }
+      if (url.endsWith("/.well-known/jwks.json")) {
+        return Response.json(
+          url.startsWith(portlessPlan.tamaOrigin)
+            ? jwksDocument(portlessPlan.introspectionSigningKeyId, tamaJwk)
+            : jwksDocument(portlessPlan.providerSigningKeyId, providerJwk),
+        );
+      }
+      return Response.json({ active: false });
+    }),
+    inspectProviderListener: async (port) => {
+      inspectedPorts.push(port);
+      return "wide";
+    },
+  });
+  assert.equal(result.verified, true);
+  assert.deepEqual(inspectedPorts, [80]);
+});
+
+test("defaultProviderListenerInspector classifies host listening sockets", async () => {
+  if (process.platform !== "linux") {
+    return;
+  }
+  const net = await import("node:net");
+  const listen = (host) =>
+    new Promise((resolve, reject) => {
+      const server = net.createServer();
+      server.once("error", reject);
+      server.listen(0, host, () => resolve(server));
+    });
+  const close = (server) => new Promise((resolve) => server.close(resolve));
+  const portOf = (server) => /** @type {import("node:net").AddressInfo} */ (server.address()).port;
+
+  const loopbackServer = await listen("127.0.0.1");
+  try {
+    assert.equal(await defaultProviderListenerInspector(portOf(loopbackServer)), "loopback-only");
+
+    const wideServer = await listen("0.0.0.0");
+    const widePort = portOf(wideServer);
+    try {
+      assert.equal(await defaultProviderListenerInspector(widePort), "wide");
+    } finally {
+      await close(wideServer);
+    }
+    assert.equal(await defaultProviderListenerInspector(widePort), "unknown");
+  } finally {
+    await close(loopbackServer);
+  }
 });
 
 test("verifyMcpApp requires the protected route to reject anonymous requests", async () => {
