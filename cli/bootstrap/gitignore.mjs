@@ -93,6 +93,68 @@ export function validateSecretFilesUntracked(root, secretFiles = SECRET_FILES) {
 }
 
 /**
+ * Confirms that every private environment file is effectively ignored after
+ * the managed `.gitignore` operations have been written. Git evaluates the
+ * nearest matching rule last, so a nested `.gitignore` can negate an anchored
+ * rule in the project root; checking the final rules prevents the transaction
+ * from leaving a generated secret exposed.
+ *
+ * @param {string} root
+ * @param {string[]} [secretFiles]
+ */
+export function validateSecretFilesIgnored(root, secretFiles = SECRET_FILES) {
+  const environment = { ...process.env, LC_ALL: "C" };
+  const worktree = spawnSync("git", ["-C", root, "rev-parse", "--is-inside-work-tree"], {
+    encoding: "utf8",
+    env: environment,
+  });
+  const gitMissing = worktree.error && "code" in worktree.error && worktree.error.code === "ENOENT";
+  const notRepository =
+    typeof worktree.stderr === "string" && worktree.stderr.includes("not a git repository");
+  if (gitMissing) {
+    throw prerequisiteError(
+      "Git is required to verify ignore rules for private environment files",
+      {
+        root,
+      },
+    );
+  }
+  if (notRepository) {
+    return;
+  }
+  if (worktree.error || worktree.status !== 0 || worktree.stdout.trim() !== "true") {
+    throw prerequisiteError("Unable to inspect Git ignore rules for private environment files", {
+      root,
+    });
+  }
+
+  const notIgnored = [];
+  for (const file of secretFiles) {
+    const literalPath = `./${file}`;
+    const ignored = spawnSync(
+      "git",
+      ["-C", root, "check-ignore", "--no-index", "--quiet", "--", literalPath],
+      { encoding: "utf8", env: environment },
+    );
+    if (ignored.error || (ignored.status !== 0 && ignored.status !== 1)) {
+      throw prerequisiteError("Unable to inspect Git ignore rules for private environment files", {
+        root,
+        file,
+      });
+    }
+    if (ignored.status === 1) {
+      notIgnored.push(file);
+    }
+  }
+  if (notIgnored.length > 0) {
+    throw ownershipError(
+      `Refusing to continue because private environment files are not effectively ignored by Git: ${notIgnored.join(", ")}. A nested .gitignore may override the managed root rule.`,
+      { paths: notIgnored },
+    );
+  }
+}
+
+/**
  * Validates that a new secret file may be created at `filename` without
  * touching Git-managed content. A path outside any Git worktree is accepted
  * as-is. Inside a worktree, the path must be absent from the index and must

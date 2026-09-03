@@ -6,6 +6,7 @@ import { formatAgentSetupPrompt } from "../bootstrap/agent-prompt.mjs";
 import { formatComposeUpCommand } from "../bootstrap/compose-command.mjs";
 import { inspectProject } from "../bootstrap/detect-project.mjs";
 import { readSetupUrl } from "../bootstrap/environment.mjs";
+import { validateSecretFilesIgnored } from "../bootstrap/gitignore.mjs";
 import { readAgentSkillMode } from "../bootstrap/manifest.mjs";
 import { prepareMcpApp } from "../bootstrap/mcp-app.mjs";
 import { verifyMcpApp } from "../bootstrap/mcp-app-verify.mjs";
@@ -272,6 +273,15 @@ function resultEnvelope(plan, { dryRun, started, healthUrl }) {
   };
 }
 
+/** @param {BootstrapPlan} plan */
+function validateWrittenSecretsIgnored(plan) {
+  const files = [".tama.env", ".tama.postgres.env"];
+  if (plan.mcpApp) {
+    files.push(plan.mcpApp.provider.environmentFile);
+  }
+  validateSecretFilesIgnored(plan.root, files);
+}
+
 /**
  * Re-plans the bootstrap with activation withdrawn and rewrites the managed
  * files, returning both sides to prepared after a failed verification.
@@ -300,6 +310,7 @@ async function rollbackActivation({ options, io, skillMode, mcpAppPrepared }) {
     mcpAppPrepared,
   });
   await applyOperationsTransactionally(plan.operations, () => {
+    validateWrittenSecretsIgnored(plan);
     return validateCompose(plan, { checkPrerequisite: false });
   });
   return plan;
@@ -538,6 +549,7 @@ async function executeBootstrap(argv, io) {
       validateComposePrerequisite();
       progress.update(2, "Writing managed files");
       await applyOperationsTransactionally(plan.operations, () => {
+        validateWrittenSecretsIgnored(plan);
         progress.update(3, "Validating Compose configuration");
         return validateCompose(plan, { checkPrerequisite: false });
       });
@@ -651,6 +663,7 @@ async function executeBootstrap(argv, io) {
               throw startupError("MCP App activation plan was unexpectedly empty");
             }
             await applyOperationsTransactionally(tamaEnabledPlan.operations, () => {
+              validateWrittenSecretsIgnored(tamaEnabledPlan);
               progress.update(7, "Validating enabled Tama configuration");
               return validateCompose(tamaEnabledPlan, { checkPrerequisite: false });
             });

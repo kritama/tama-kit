@@ -290,11 +290,24 @@ function validateLifecycle(lifecycle) {
   if (!normalized.includes(defaultMode)) {
     throw usageError("MCP App contract lifecycle.default_production_mode must be a declared mode");
   }
-  for (const field of ["configured_modes", "enabled_modes"]) {
-    const values = uniqueStringArray(lifecycle[field], `lifecycle.${field}`);
-    if (values.some((mode) => !normalized.includes(mode))) {
-      throw usageError(`MCP App contract lifecycle.${field} must contain declared modes`);
-    }
+  const configuredModes = uniqueStringArray(
+    lifecycle.configured_modes,
+    "lifecycle.configured_modes",
+  );
+  if (configuredModes.some((mode) => !normalized.includes(mode))) {
+    throw usageError("MCP App contract lifecycle.configured_modes must contain declared modes");
+  }
+  if (!["prepared", "enabled"].every((mode) => configuredModes.includes(mode))) {
+    throw usageError(
+      "MCP App contract lifecycle.configured_modes must include prepared and enabled",
+    );
+  }
+  const enabledModes = uniqueStringArray(lifecycle.enabled_modes, "lifecycle.enabled_modes");
+  if (enabledModes.some((mode) => !normalized.includes(mode))) {
+    throw usageError("MCP App contract lifecycle.enabled_modes must contain declared modes");
+  }
+  if (enabledModes.length !== 1 || enabledModes[0] !== "enabled") {
+    throw usageError("MCP App contract lifecycle.enabled_modes must contain only enabled");
   }
   return normalized;
 }

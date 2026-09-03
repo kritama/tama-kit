@@ -231,6 +231,76 @@ function assertFragmentPath(value, label) {
 }
 
 /**
+ * @param {Record<string, unknown> | null} contractDocument
+ * @param {ProviderIdentity["source"] | undefined} identitySource
+ * @returns {ProviderIdentity | null}
+ */
+function contractProviderIdentity(contractDocument, identitySource) {
+  const contractIdentity =
+    contractDocument !== null && isIdentityDocument(contractDocument.provider)
+      ? /** @type {Record<string, unknown>} */ (contractDocument.provider)
+      : null;
+  const contractName =
+    typeof contractIdentity?.name === "string" ? contractIdentity.name : undefined;
+  if (contractName === undefined) {
+    return null;
+  }
+  const resolvedName = normalizeProviderName(contractName);
+  return {
+    name: resolvedName,
+    environmentPrefix:
+      typeof contractIdentity?.environment_prefix === "string"
+        ? normalizeEnvironmentPrefix(contractIdentity.environment_prefix)
+        : prefixFromName(resolvedName),
+    environmentFile:
+      typeof contractIdentity?.environment_file === "string"
+        ? assertFragmentPath(
+            contractIdentity.environment_file,
+            "the provider MCP App contract environment file",
+          )
+        : environmentFileForName(resolvedName),
+    source: identitySource ?? "contract",
+  };
+}
+
+/**
+ * @param {string | undefined} name
+ * @param {string | undefined} prefix
+ * @param {string | undefined} environmentFile
+ * @param {ProviderIdentity["source"] | undefined} identitySource
+ * @returns {ProviderIdentity | null}
+ */
+function flagProviderIdentity(name, prefix, environmentFile, identitySource) {
+  if (!name && !prefix && !environmentFile) {
+    return null;
+  }
+  if (!name) {
+    throw usageError(
+      "--provider-name is required when --provider-prefix or --provider-env-file is supplied",
+    );
+  }
+  const resolvedName = normalizeProviderName(name);
+  return {
+    name: resolvedName,
+    environmentPrefix: prefix ? normalizeEnvironmentPrefix(prefix) : prefixFromName(resolvedName),
+    environmentFile:
+      environmentFile === undefined
+        ? environmentFileForName(resolvedName)
+        : assertFragmentPath(environmentFile, "--provider-env-file"),
+    source: identitySource ?? "flags",
+  };
+}
+
+/** @param {ProviderIdentity} left @param {ProviderIdentity} right */
+function identitiesMatch(left, right) {
+  return (
+    left.name === right.name &&
+    left.environmentPrefix === right.environmentPrefix &&
+    left.environmentFile === right.environmentFile
+  );
+}
+
+/**
  * Resolves the accepted provider identity using the documented precedence:
  * managed manifest, then explicit contract identity, then explicit flags, then
  * safe static detection. The directory name is only ever a suggestion and is
@@ -253,63 +323,44 @@ export function resolveProviderIdentity(input) {
     identitySource,
   } = input;
 
+  const contractIdentity = contractProviderIdentity(contractDocument, identitySource);
+  const flagIdentity =
+    manifestProvider || contractIdentity === null
+      ? flagProviderIdentity(name, prefix, environmentFile, identitySource)
+      : null;
+
   if (manifestProvider) {
     // The manifest is trusted state, but it is disk-resident: re-validate the
     // fragment path so a tampered or stale entry cannot point the fragment at
     // a bootstrap-managed file.
-    return {
+    const persistedIdentity = {
       name: manifestProvider.name,
       environmentPrefix: manifestProvider.environmentPrefix,
       environmentFile: assertFragmentPath(
         manifestProvider.environmentFile,
         "the persisted MCP App provider environment file",
       ),
-      source: "manifest",
+      source: /** @type {const} */ ("manifest"),
     };
-  }
-
-  const contractIdentity =
-    contractDocument !== null && isIdentityDocument(contractDocument.provider)
-      ? /** @type {Record<string, unknown>} */ (contractDocument.provider)
-      : null;
-  const contractName =
-    typeof contractIdentity?.name === "string" ? contractIdentity.name : undefined;
-
-  if (contractName !== undefined) {
-    const resolvedName = normalizeProviderName(contractName);
-    return {
-      name: resolvedName,
-      environmentPrefix:
-        typeof contractIdentity?.environment_prefix === "string"
-          ? normalizeEnvironmentPrefix(contractIdentity.environment_prefix)
-          : prefixFromName(resolvedName),
-      environmentFile:
-        typeof contractIdentity?.environment_file === "string"
-          ? assertFragmentPath(
-              contractIdentity.environment_file,
-              "the provider MCP App contract environment file",
-            )
-          : environmentFileForName(resolvedName),
-      source: identitySource ?? "contract",
-    };
-  }
-
-  if (name || prefix || environmentFile) {
-    if (!name) {
+    if (contractIdentity !== null && !identitiesMatch(persistedIdentity, contractIdentity)) {
       throw usageError(
-        "--provider-name is required when --provider-prefix or --provider-env-file is supplied",
+        "the provider contract resolves a different identity than the persisted MCP App provider; use --migrate-provider-identity for an intentional identity change",
       );
     }
-    const resolvedName = normalizeProviderName(name);
-    return {
-      name: resolvedName,
-      environmentPrefix: prefix ? normalizeEnvironmentPrefix(prefix) : prefixFromName(resolvedName),
-      environmentFile:
-        environmentFile === undefined
-          ? environmentFileForName(resolvedName)
-          : assertFragmentPath(environmentFile, "--provider-env-file"),
-      source: identitySource ?? "flags",
-    };
+    if (flagIdentity !== null && !identitiesMatch(persistedIdentity, flagIdentity)) {
+      throw usageError(
+        "the provider flags resolve a different identity than the persisted MCP App provider; use --migrate-provider-identity for an intentional identity change",
+      );
+    }
+    return persistedIdentity;
+  }
+
+  if (contractIdentity !== null) {
+    return contractIdentity;
+  }
+
+  if (flagIdentity !== null) {
+    return flagIdentity;
   }
 
   const detection = detectProviderIdentity(root, framework);

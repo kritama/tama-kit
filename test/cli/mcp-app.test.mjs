@@ -15,6 +15,7 @@ import { basename, join } from "node:path";
 import test from "node:test";
 import { parseEnv } from "node:util";
 import { resolveEnvironmentPort } from "../../cli/bootstrap/environment.mjs";
+import { validateSecretFilesIgnored } from "../../cli/bootstrap/gitignore.mjs";
 import { readMcpAppProvider } from "../../cli/bootstrap/manifest.mjs";
 import { prepareMcpApp } from "../../cli/bootstrap/mcp-app.mjs";
 import {
@@ -533,6 +534,12 @@ test("validateMcpAppContract rejects malformed v1 contract sections", () => {
     (contract) => {
       contract.lifecycle.enabled_modes = ["unknown"];
     },
+    (contract) => {
+      contract.lifecycle.configured_modes = ["disabled"];
+    },
+    (contract) => {
+      contract.lifecycle.enabled_modes = ["prepared", "enabled"];
+    },
     (contract) => delete contract.variables,
     (contract) => {
       contract.variables.MEMOVEE_OAUTH_ISSUER.required = true;
@@ -757,13 +764,13 @@ test("provider environment prefixes are conservatively bounded and avoid reserve
   }
 });
 
-test("resolveProviderIdentity applies manifest, contract, flag, and detection precedence", () => {
+test("resolveProviderIdentity applies precedence when explicit identity signals agree", () => {
   const root = project();
   const contract = validContract();
   const manifest = {
-    name: "kept",
-    environmentPrefix: "KEPT",
-    environmentFile: ".kept.integration.env",
+    name: "memovee",
+    environmentPrefix: "MEMOVEE",
+    environmentFile: ".memovee.integration.env",
     source: "manifest",
   };
   const fromManifest = resolveProviderIdentity({
@@ -771,14 +778,14 @@ test("resolveProviderIdentity applies manifest, contract, flag, and detection pr
     framework: "generic",
     manifestProvider: manifest,
     contractDocument: contract,
-    name: "flagged",
-    prefix: "FLAGGED",
-    environmentFile: ".flagged.integration.env",
+    name: "memovee",
+    prefix: "MEMOVEE",
+    environmentFile: ".memovee.integration.env",
   });
   assert.deepEqual(fromManifest, {
-    name: "kept",
-    environmentPrefix: "KEPT",
-    environmentFile: ".kept.integration.env",
+    name: "memovee",
+    environmentPrefix: "MEMOVEE",
+    environmentFile: ".memovee.integration.env",
     source: "manifest",
   });
 
@@ -928,7 +935,7 @@ test("prepareMcpApp resolves contract and flag identities without prompting", as
   assert.equal(prompted, false);
 });
 
-test("prepareMcpApp trusts the manifest over later flags", async () => {
+test("prepareMcpApp rejects identity drift from flags or a contract", async () => {
   const root = project();
   const contractPath = writeContract(root);
   const contract = validContract();
@@ -936,10 +943,28 @@ test("prepareMcpApp trusts the manifest over later flags", async () => {
     planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })).operations,
   );
 
-  const prepared = await prepareFor(root, { providerName: "acme" }, { nonInteractive: true });
+  const prepared = await prepareFor(root, { providerName: "memovee" }, { nonInteractive: true });
   assert.equal(prepared.identity.name, "memovee");
   assert.equal(prepared.identity.source, "manifest");
   assert.equal(prepared.persisted?.identity.name, "memovee");
+
+  await assert.rejects(
+    () => prepareFor(root, { providerName: "acme" }, { nonInteractive: true }),
+    /provider flags resolve a different identity.*--migrate-provider-identity/u,
+  );
+
+  const driftedContract = memoveeContract();
+  driftedContract.provider = {
+    name: "acme",
+    environment_prefix: "ACME",
+    environment_file: ".acme.integration.env",
+  };
+  driftedContract.environment_loading.loads = ".acme.integration.env";
+  writeContract(root, driftedContract);
+  await assert.rejects(
+    () => prepareFor(root, {}, { nonInteractive: true }),
+    /provider contract resolves a different identity.*--migrate-provider-identity/u,
+  );
 });
 
 test("bootstrap plans a complete MCP App provider integration from a discovered contract", () => {
@@ -2726,6 +2751,51 @@ test("bootstrap preserves unrelated .integration.env ignore entries on MCP App r
   assert.match(gitignore, /^\/\.beta\.integration\.env$/mu);
   assert.equal(gitignore.split("# Tama Kit local runtime").length - 1, 1);
   assert.equal(gitignore.split("# Tama Kit MCP App integration").length - 1, 1);
+});
+
+test("bootstrap rejects nested Git ignore overrides and rolls generated secrets back", async () => {
+  const root = project();
+  execFileSync("git", ["init", "--quiet"], { cwd: root });
+  mkdirSync(join(root, "config"), { recursive: true });
+  writeFileSync(join(root, "config", ".gitignore"), "!provider.env\n");
+
+  const contract = memoveeContract();
+  contract.provider = {
+    name: "memovee",
+    environment_prefix: "MEMOVEE",
+    environment_file: "config/provider.env",
+  };
+  contract.environment_loading.loads = "config/provider.env";
+  const contractDocument = validateMcpAppContract(contract);
+  const contractPath = writeContract(root, contract);
+  const plan = planWithMcp(
+    root,
+    preparedFor(root, {
+      contractPath,
+      contractDocument,
+      identity: {
+        name: "memovee",
+        environmentPrefix: "MEMOVEE",
+        environmentFile: "config/provider.env",
+        source: "contract",
+      },
+    }),
+  );
+
+  await assert.rejects(
+    () =>
+      applyOperationsTransactionally(plan.operations, () => {
+        validateSecretFilesIgnored(root, [
+          ".tama.env",
+          ".tama.postgres.env",
+          "config/provider.env",
+        ]);
+      }),
+    /not effectively ignored by Git.*nested \.gitignore/u,
+  );
+  assert.equal(existsSync(join(root, ".tama.env")), false);
+  assert.equal(existsSync(join(root, ".tama.postgres.env")), false);
+  assert.equal(existsSync(join(root, "config", "provider.env")), false);
 });
 
 test("bootstrap rejects a Tama port change while an MCP App integration is persisted", () => {
