@@ -27,12 +27,15 @@ for provider metadata, JWKS, and introspection. It must be reachable from the
 host and the Tama container. Any loopback provider origin is rejected —
 `localhost`, the full `127.0.0.0/8` range, `::1`, and IPv4-mapped loopback
 forms: every verification probe runs on the host, so a loopback provider would
-pass them while the Tama container can never reach it. An
-`https://host.docker.internal` origin is also rejected because the gateway name
-resolves only inside the container, so host-side TLS probes could not validate
-the certificate for that name; use `http://host.docker.internal:<port>` for the
-container-gateway topology. If its hostname is `host.docker.internal`, Tama Kit
-adds the Compose host-gateway mapping and keeps it on ordinary reruns.
+pass them while the Tama container can never reach it. Unspecified addresses
+(`0.0.0.0`, `::`) are rejected for the same reason: the host can reach a
+locally bound provider through those names, but from inside the container they
+name the container's own interface. An `https://host.docker.internal` origin is
+also rejected because the gateway name resolves only inside the container, so
+host-side TLS probes could not validate the certificate for that name; use
+`http://host.docker.internal:<port>` for the container-gateway topology. If its
+hostname is `host.docker.internal`, Tama Kit adds the Compose host-gateway
+mapping and keeps it on ordinary reruns.
 
 `--tama-origin` is the exact public Tama origin. It defaults from an accepted
 contract or to loopback at the selected Tama port. A fresh run without
@@ -54,10 +57,13 @@ client. Tama Kit never infers client origins from either service origin.
 ## Tama image
 
 The MCP App integration writes trust material before the runtime starts, so
-`--mcp-app` requires a Tama image pinned to a version inside the bundled
+`--mcp-app` requires a Tama image pinned to a stable release inside the bundled
 contract's supported range. Floating tags such as `latest` are rejected: they
 can move outside the range after secrets are written, leaving a runtime Tama
-Kit cannot hold to the contract.
+Kit cannot hold to the contract. Prerelease and build tags are rejected as
+well: SemVer orders a prerelease below the stable version it decorates, and the
+range grammar cannot express prerelease bounds, so such a tag cannot be held to
+the range.
 
 ## Private files
 

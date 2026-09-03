@@ -126,6 +126,22 @@ function isLoopbackHostname(hostname) {
 }
 
 /**
+ * Reports whether a URL hostname names an unspecified address: 0.0.0.0 or ::
+ * (including the dotted IPv4-mapped spelling). Like loopback, the host can
+ * reach a locally bound provider through these names, but from inside the
+ * Tama container they name the container's own interface, so the same origin
+ * is never a working provider address.
+ *
+ * @param {string} hostname
+ * @returns {boolean}
+ */
+function isUnspecifiedHostname(hostname) {
+  const bare =
+    hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+  return bare === "0.0.0.0" || bare === "::" || bare.toLowerCase() === "::ffff:0.0.0.0";
+}
+
+/**
  * Normalizes an optional allowed origin the same way required origins are,
  * reporting the repeating flag in diagnostics.
  *
@@ -502,18 +518,24 @@ export function planMcpApp(input) {
       null,
     "--provider-origin",
   );
-  // Every verification probe is issued from the host, so a loopback provider
-  // origin would pass them while the Tama container can never reach the
-  // host-native provider. Reject it before any state is persisted.
-  if (isLoopbackHostname(new URL(providerOrigin).hostname)) {
+  // Every verification probe is issued from the host, so a loopback or
+  // unspecified provider origin would pass them while the Tama container can
+  // never reach the host-native provider: from the inside, both address
+  // spaces name the container itself. Reject before any state is persisted.
+  const providerUrl = new URL(providerOrigin);
+  const unreachableKind = isLoopbackHostname(providerUrl.hostname)
+    ? "loopback"
+    : isUnspecifiedHostname(providerUrl.hostname)
+      ? "an unspecified address (0.0.0.0 or ::)"
+      : null;
+  if (unreachableKind !== null) {
     throw usageError(
-      `the provider origin ${providerOrigin} is loopback and cannot be reached from the Tama container; ` +
-        `pass --provider-origin with a container-reachable origin such as ` +
-        `http://host.docker.internal:${new URL(providerOrigin).port || "80"} ` +
+      `the provider origin ${providerOrigin} is ${unreachableKind} and cannot be reached from ` +
+        `the Tama container; pass --provider-origin with a container-reachable origin such as ` +
+        `http://host.docker.internal:${providerUrl.port || "80"} ` +
         `(Tama Kit adds the Compose host-gateway mapping for host.docker.internal)`,
     );
   }
-  const providerUrl = new URL(providerOrigin);
   const providerHostPort =
     providerUrl.port === ""
       ? providerUrl.protocol === "https:"

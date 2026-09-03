@@ -412,6 +412,30 @@ test("verifyEnvironmentLoading confirms application-owned loaders", () => {
     }),
     "verified",
   );
+
+  const unquotedRoot = project();
+  writeFileSync(join(unquotedRoot, ".envrc"), "dotenv .acme.integration.env\n");
+  assert.equal(verifyEnvironmentLoading(unquotedRoot, ".acme.integration.env", null), "verified");
+
+  // A bare textual occurrence is not an active loader: a comment or an
+  // unrelated command naming the fragment must not verify it, because
+  // migration deletes the fragment this check exists to protect.
+  const commentRoot = project();
+  writeFileSync(
+    join(commentRoot, ".envrc"),
+    ['# dotenv_load ".acme.integration.env"', 'echo ".acme.integration.env"', ""].join("\n"),
+  );
+  assert.equal(verifyEnvironmentLoading(commentRoot, ".acme.integration.env", null), "unverified");
+
+  const composeCommentRoot = project();
+  writeFileSync(
+    join(composeCommentRoot, "compose.yaml"),
+    ["services:", "  app:", "    # env_file:", "    #   - .acme.integration.env", ""].join("\n"),
+  );
+  assert.equal(
+    verifyEnvironmentLoading(composeCommentRoot, ".acme.integration.env", null),
+    "unverified",
+  );
 });
 
 test("contractLocalOrigin reads the provider-keyed local development origin", () => {
@@ -429,6 +453,14 @@ test("unsupportedTamaImage checks semver tags against the contract range", () =>
   assert.match(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.0", range) ?? "", /0\.13\.0/u);
   assert.match(unsupportedTamaImage("ghcr.io/upmaru/tama:0.12.0", range) ?? "", /0\.12\.0/u);
   assert.match(unsupportedTamaImage("ghcr.io/upmaru/tama:0.14.0", range) ?? "", /0\.14\.0/u);
+  assert.match(
+    unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1-rc.1", range) ?? "",
+    /prerelease or build tag/u,
+  );
+  assert.match(
+    unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1+build.5", range) ?? "",
+    /prerelease or build tag/u,
+  );
   assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1", null), null);
 });
 
@@ -797,6 +829,25 @@ test("bootstrap keeps provider endpoints on one shared origin and rejects loopba
         error.exitCode === EXIT_CODES.USAGE &&
         /loopback and cannot be reached from the Tama container/u.test(error.message) &&
         /host\.docker\.internal/u.test(error.message),
+    );
+  }
+});
+
+test("bootstrap rejects unspecified provider bind addresses", () => {
+  for (const providerOrigin of ["http://0.0.0.0:4000", "http://[::]:4000"]) {
+    const root = project();
+    const contractPath = writeContract(root);
+    const contract = validContract();
+    assert.throws(
+      () =>
+        planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract }), {
+          providerOrigin,
+        }),
+      (error) =>
+        error instanceof CLIError &&
+        error.exitCode === EXIT_CODES.USAGE &&
+        /unspecified address/u.test(error.message) &&
+        /cannot be reached from the Tama container/u.test(error.message),
     );
   }
 });

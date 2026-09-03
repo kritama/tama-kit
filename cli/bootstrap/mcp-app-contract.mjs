@@ -483,7 +483,10 @@ export function loadTamaContract() {
 /**
  * Checks a Tama image tag against the contract's `supported_tama_versions`
  * range. The check is best-effort by design: non-semver tags such as
- * `latest` cannot be resolved offline, so they pass with no warning.
+ * `latest` cannot be resolved offline, so they pass with no warning. Prerelease
+ * and build tags do resolve, but SemVer orders them below the stable version
+ * they decorate and the range grammar cannot express prerelease bounds, so
+ * they are reported as outside the range.
  *
  * @param {string} image
  * @param {unknown} supportedRange
@@ -498,6 +501,12 @@ export function unsupportedTamaImage(image, supportedRange) {
   const version = parseSemver(tag);
   if (!version) {
     return null;
+  }
+  // A prerelease or build suffix orders the tag below the stable version it
+  // decorates (0.13.1-rc.1 < 0.13.1), and the range grammar cannot express
+  // prerelease bounds, so such a tag cannot be held to the range.
+  if (!/^v?\d+\.\d+\.\d+$/u.test(tag)) {
+    return `Tama image tag ${tag} is a prerelease or build tag; the supported Tama range ${supportedRange} admits stable release tags only`;
   }
   const constraints = supportedRange.matchAll(
     /(>=|<=|>|<|=)\s*v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)/gu,
@@ -769,10 +778,13 @@ export function resolveBindings(contractDocument, environmentPrefix) {
 /**
  * Determines whether the provider fragment is loaded by an application-owned
  * mechanism that Tama Kit can safely confirm. A contract that declares
- * `environment_loading` is authoritative; otherwise a direnv fragment or a
- * Compose `env_file` entry that references the fragment verifies it. When no
- * loader can be confirmed the integration is reported unverified rather than
- * failing, because the application owns its loader.
+ * `environment_loading` is authoritative; otherwise an active direnv
+ * `dotenv`/`dotenv_load` directive or a Compose `env_file` entry that
+ * references the fragment verifies it. A bare textual occurrence — a comment
+ * or an unrelated command naming the file — does not count: migration deletes
+ * the fragment this check exists to protect. When no loader can be confirmed
+ * the integration is reported unverified rather than failing, because the
+ * application owns its loader.
  *
  * @param {string} root
  * @param {string} environmentFile
@@ -788,7 +800,7 @@ export function verifyEnvironmentLoading(root, environmentFile, contractDocument
     }
   }
   const envrc = safeRead(join(root, ".envrc"));
-  if (envrc?.includes(environmentFile)) {
+  if (envrc !== null && envrcLoadsFragment(envrc, environmentFile)) {
     return "verified";
   }
   for (const composeName of [
@@ -798,11 +810,83 @@ export function verifyEnvironmentLoading(root, environmentFile, contractDocument
     "docker-compose.yml",
   ]) {
     const compose = safeRead(join(root, composeName));
-    if (compose?.includes(environmentFile)) {
+    if (compose !== null && composeReferencesFragment(compose, environmentFile)) {
       return "verified";
     }
   }
   return "unverified";
+}
+
+/** @param {string} value */
+function unquote(value) {
+  return value.length >= 2 &&
+    ((value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'")))
+    ? value.slice(1, -1)
+    : value;
+}
+
+/**
+ * Reports whether a direnv `.envrc` actively loads the fragment: a top-level
+ * `dotenv` or `dotenv_load` directive whose path argument is the fragment.
+ *
+ * @param {string} envrc
+ * @param {string} environmentFile
+ * @returns {boolean}
+ */
+function envrcLoadsFragment(envrc, environmentFile) {
+  for (const rawLine of envrc.split(/\r?\n/u)) {
+    const tokens = rawLine
+      .trim()
+      .split(/\s+/u)
+      .filter((token) => token !== "");
+    if (tokens.length === 0) {
+      continue;
+    }
+    const command = unquote(tokens[0]);
+    if (command !== "dotenv" && command !== "dotenv_load") {
+      continue;
+    }
+    let path = null;
+    for (let index = 1; index < tokens.length; index += 1) {
+      const token = tokens[index];
+      if (token.startsWith("-")) {
+        continue;
+      }
+      if (path === null && token === "load") {
+        continue;
+      }
+      path = unquote(token);
+      break;
+    }
+    if (path === environmentFile || path === `./${environmentFile}`) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Reports whether a Compose file references the fragment on an active (non
+ * comment) line, with the name standing alone rather than embedded in a
+ * longer token.
+ *
+ * @param {string} compose
+ * @param {string} environmentFile
+ * @returns {boolean}
+ */
+function composeReferencesFragment(compose, environmentFile) {
+  const escaped = environmentFile.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const reference = new RegExp(`(^|[^A-Za-z0-9._-])${escaped}(?=$|[^A-Za-z0-9._-])`, "u");
+  for (const line of compose.split(/\r?\n/u)) {
+    if (line.trim().startsWith("#")) {
+      continue;
+    }
+    if (reference.test(line)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
