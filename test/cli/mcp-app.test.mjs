@@ -563,6 +563,12 @@ test("validateMcpAppContract rejects malformed v1 contract sections", () => {
     },
     (contract) => delete contract.availability.prepared,
     (contract) => {
+      contract.availability.prepared.jwks = false;
+    },
+    (contract) => {
+      contract.availability.enabled.introspection = false;
+    },
+    (contract) => {
       contract.local_development.memovee_origin = "ftp://127.0.0.1:4000";
     },
     (contract) => {
@@ -3354,6 +3360,32 @@ test("the bootstrap command plans the provider integration from explicit flags",
     result.changes.some((change) => change.path.endsWith(".acme.integration.env")),
     "the provider fragment should be part of the planned changes",
   );
+});
+
+test("the human bootstrap result warns when provider environment loading is unverified", async () => {
+  const root = project();
+  const { exitCode, stdout } = await command(root, [
+    "bootstrap",
+    root,
+    "--dry-run",
+    "--skills",
+    "manual",
+    "--mcp-app",
+    "--port",
+    "4001",
+    "--image",
+    "ghcr.io/upmaru/tama:0.13.1",
+    "--provider-name",
+    "acme",
+    "--provider-origin",
+    "http://host.docker.internal:5000",
+    "--allowed-origin",
+    "http://127.0.0.1:3000",
+  ]);
+
+  assert.equal(exitCode, EXIT_CODES.SUCCESS);
+  assert.match(stdout, /Provider environment loading is not verified:/u);
+  assert.match(stdout, /load \.acme\.integration\.env before starting or restarting it/u);
 });
 
 test("the bootstrap command accepts --provider-env-file for the provider fragment", async () => {

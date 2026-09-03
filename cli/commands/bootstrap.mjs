@@ -408,6 +408,14 @@ function printHuman(io, result, color, setupUrl) {
     io.stdout(`  ${paint(color, "cyan", "codex plugin add tama-kit@upmaru")}`);
   }
 
+  if (result.provider?.environmentLoading === "unverified") {
+    io.stdout("");
+    io.stdout(paint(color, "yellow", "Provider environment loading is not verified:"));
+    io.stdout(
+      `  Configure the provider process to load ${paint(color, "cyan", result.provider.environmentFile)} before starting or restarting it.`,
+    );
+  }
+
   /** @param {{title?: string, lines: string[], style?: import("../terminal.mjs").PaintStyle}} box */
   function printBox(box) {
     const maxWidth = io.columns === undefined ? undefined : io.columns - 4;

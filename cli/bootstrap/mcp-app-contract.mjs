@@ -420,6 +420,20 @@ function validateAvailability(value, modes) {
 }
 
 /** @param {unknown} value */
+function validateProviderAvailability(value) {
+  const availability = /** @type {Record<string, Record<string, unknown>>} */ (value);
+  for (const mode of ["prepared", "enabled"]) {
+    for (const probe of ["metadata", "jwks", "introspection"]) {
+      if (availability[mode][probe] !== true) {
+        throw usageError(
+          `MCP App provider contract availability.${mode}.${probe} must be true; Tama Kit verifies this endpoint in ${mode} mode`,
+        );
+      }
+    }
+  }
+}
+
+/** @param {unknown} value */
 function validateLocalDevelopment(value) {
   if (!isPlainObject(value) || Object.keys(value).length === 0) {
     throw usageError("MCP App contract local_development must be a non-empty object");
@@ -708,6 +722,7 @@ export function validateMcpAppContract(document) {
   const provider = validateProvider(document.provider);
   if (provider !== null) {
     validateProviderPublicEndpoints(document.public_endpoints);
+    validateProviderAvailability(document.availability);
   }
   validateEnvironmentLoading(document.environment_loading, provider);
   validateStringMap(document.cache_policy, "cache_policy");

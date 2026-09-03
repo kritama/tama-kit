@@ -60,12 +60,17 @@ The implementation now includes:
   the provider origin as the HTTP authority for virtual-host routing;
 - ordinary reruns re-check the persisted provider fragment against effective
   Git ignore rules, and Tama origins are limited to the HTTP loopback topology
-  the generated Compose service actually exposes.
+  the generated Compose service actually exposes;
+- provider contracts must declare the metadata, JWKS, and introspection probes
+  available in both prepared and enabled modes, matching the verification
+  workflow Tama Kit actually runs;
+- human bootstrap output explicitly warns when the provider fragment loader
+  cannot be verified and identifies the fragment the provider must load.
 
 Verification completed on the final local tree with Node 24:
 
 - focused identity, lifecycle, and nested-ignore regressions: 4 passed;
-- `npm test` outside the filesystem sandbox: 229 passed, 1 skipped, 0 failed;
+- `npm test` outside the filesystem sandbox: 230 passed, 1 skipped, 0 failed;
 - `npm run typecheck`: passed;
 - `npm run check`: passed;
 - `git diff --check`: passed;
