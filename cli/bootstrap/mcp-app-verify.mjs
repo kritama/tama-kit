@@ -6,6 +6,7 @@ import { readEnvironmentValues } from "./environment.mjs";
 /** @typedef {import("../types.mjs").McpAppPlan} McpAppPlan */
 /** @typedef {import("../types.mjs").McpAppVerification} McpAppVerification */
 /** @typedef {(input: URL, init?: RequestInit) => Promise<Response>} VerifyFetch */
+/** @typedef {(endpoint: string) => Promise<boolean>} ProviderContainerProbe */
 /**
  * Inspects the host's listening sockets for one port and reports whether a
  * wide bind can answer the Docker bridge, only loopback binds exist, or the
@@ -525,20 +526,21 @@ async function routeProbe(fetch, url) {
  * (negative control) and then answers
  * Tama's authenticated inactive-token introspection exactly as an inactive
  * token must be, and (in enabled mode) the protected route rejects anonymous
- * requests. In the host-gateway topology, the host's listening sockets are
- * additionally inspected so a loopback-only provider bind — invisible to the
- * host-resolvable probes but unreachable from the Tama container — fails
- * verification. Provider probes travel over a host-resolvable transport while
- * the advertised issuer is still validated. All probes are read-only; nothing
- * is activated or mutated here.
+ * requests. A direct request from the running Tama container proves that its
+ * network namespace and the host firewall permit provider traffic. In the
+ * host-gateway topology, the host's listening sockets are additionally
+ * inspected to provide a specific loopback-bind diagnostic. Provider probes
+ * travel over a host-resolvable transport while the advertised issuer is still
+ * validated. All probes are read-only; nothing is activated or mutated here.
  *
- * @param {{root: string, plan: McpAppPlan, fetch: VerifyFetch, inspectProviderListener?: ProviderListenerInspector, providerTransportHost?: string}} input
+ * @param {{root: string, plan: McpAppPlan, fetch: VerifyFetch, probeProviderFromContainer?: ProviderContainerProbe, inspectProviderListener?: ProviderListenerInspector, providerTransportHost?: string}} input
  * @returns {Promise<McpAppVerification>}
  */
 export async function verifyMcpApp({
   root,
   plan,
   fetch,
+  probeProviderFromContainer,
   inspectProviderListener,
   providerTransportHost,
 }) {
@@ -590,6 +592,28 @@ export async function verifyMcpApp({
     ),
   );
 
+  if (providerReachable) {
+    let containerReachable = false;
+    if (probeProviderFromContainer) {
+      try {
+        containerReachable = await probeProviderFromContainer(
+          `${plan.providerOrigin}/.well-known/oauth-authorization-server`,
+        );
+      } catch {
+        containerReachable = false;
+      }
+    }
+    probes.push(
+      probe(
+        "provider_container_reachability",
+        containerReachable,
+        probeProviderFromContainer
+          ? "the running Tama container could not reach the provider metadata endpoint; check the provider bind address, Docker routing, DNS, and host firewall policy"
+          : "provider reachability from the running Tama container was not probed",
+      ),
+    );
+  }
+
   const tamaKey = expectedPublicMembers(root, ".tama.env", TAMA_INTROSPECTION_KEY_VARIABLE);
   const tamaJwksResult = await fetchJson(fetch, `${plan.tamaOrigin}/.well-known/jwks.json`);
   const tamaReachable = jwksPublishesExpectedKey(
@@ -640,7 +664,7 @@ export async function verifyMcpApp({
     if (inspection !== "unknown") {
       probes.push(
         probe(
-          "provider_container_reachability",
+          "provider_host_listener",
           inspection === "wide",
           "the provider listens only on loopback, so the Tama container cannot reach it " +
             "through the host.docker.internal gateway; bind the provider to 0.0.0.0 (or the " +

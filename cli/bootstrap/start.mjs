@@ -143,6 +143,65 @@ export function resolveComposeHostGatewayAddress(plan) {
 }
 
 /**
+ * Probes the provider from the running Tama container. This is the only
+ * reliable way to include Docker namespace routing and host firewall policy
+ * in the activation decision; a successful host-side request or a wide host
+ * socket bind cannot establish container reachability.
+ *
+ * The managed Tama image already uses curl for its health check. Curl does
+ * not follow redirects unless explicitly requested, so success belongs to the
+ * configured provider endpoint itself.
+ *
+ * @param {{root: string, composeFile: string}} plan
+ * @param {string} endpoint
+ * @returns {boolean}
+ */
+export function probeComposeProviderEndpoint(plan, endpoint) {
+  let url;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return false;
+  }
+  try {
+    const status = execFileSync(
+      "docker",
+      [
+        "compose",
+        "-f",
+        plan.composeFile,
+        "exec",
+        "-T",
+        "tama",
+        "curl",
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--max-time",
+        "10",
+        "--write-out",
+        "%{http_code}",
+        "--output",
+        "/dev/null",
+        url.href,
+      ],
+      {
+        cwd: plan.root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        maxBuffer: 1024,
+      },
+    );
+    return status.trim() === "200";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * @param {{root: string, composeFile: string}} plan
  * @param {{quiet?: boolean, checkPrerequisite?: boolean, env?: NodeJS.ProcessEnv}} [options]
  */

@@ -111,8 +111,9 @@ The first run verifies prepared state and enables/restarts Tama, then reports
 the provider-owned mode change. Set the reported provider mode variable to
 `enabled`, restart the provider, and rerun the same command. Tama Kit records
 an enabled checkpoint only after both live services pass metadata, JWKS,
-introspection, protected-resource, and route probes. It never executes provider
-lifecycle commands. See [MCP App provider bootstrap](docs/mcp-app-provider-bootstrap.md)
+introspection, protected-resource, route, and direct Tama-container
+reachability probes. It never executes provider lifecycle commands. See
+[MCP App provider bootstrap](docs/mcp-app-provider-bootstrap.md)
 for the contract, secret ownership, rerun, and recovery rules.
 
 Provider identity is immutable during a normal rerun. To migrate it, first

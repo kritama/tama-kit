@@ -45,8 +45,8 @@ the fragment write would overwrite that content.
 for provider metadata, JWKS, and introspection. It must be reachable from the
 host and the Tama container. Any loopback provider origin is rejected —
 `localhost`, the full `127.0.0.0/8` range, `::1`, and IPv4-mapped loopback
-forms: every verification probe runs on the host, so a loopback provider would
-pass them while the Tama container can never reach it. Unspecified addresses
+forms — because those names resolve inside the Tama container rather than to
+the host-native provider. Unspecified addresses
 (`0.0.0.0`, `::`) are rejected for the same reason: the host can reach a
 locally bound provider through those names, but from inside the container they
 name the container's own interface. An `https://host.docker.internal` origin is
@@ -59,11 +59,16 @@ inspects the host's listening sockets for the effective provider port (80 or
 443 when the origin names none): a provider bound to loopback only — including
 IPv4-mapped binds such as `::ffff:127.0.0.1` — passes every host-side probe
 yet is unreachable from the Tama container through the gateway, so
-verification fails with a `provider_container_reachability` probe until the
+verification fails with a `provider_host_listener` probe until the
 provider binds `0.0.0.0` or the Docker bridge interface. Provider metadata,
 JWKS, and introspection probes use the exact host-gateway address installed in
 the running Tama container rather than assuming loopback, so a provider bound
-only to the Docker bridge can still pass verification.
+only to the Docker bridge can still pass verification. Independently of the
+host bind diagnostic, Tama Kit also requests the provider metadata endpoint
+from inside the running Tama container. The required
+`provider_container_reachability` probe therefore covers container DNS,
+network-namespace routing, and host firewall policy rather than inferring
+reachability from host state.
 
 `--tama-origin` is the exact public Tama origin. It defaults from an accepted
 contract or to loopback at the selected Tama port. A fresh run without
@@ -139,12 +144,12 @@ sides as prepared, then verifies provider metadata, both JWKS documents, the
 inactive-token introspection — first proving the provider rejects a
 structurally valid client assertion signed by an unrelated key (negative
 control), then requiring the authenticated request to answer exactly as an
-inactive token must — and, on a Linux host-gateway topology, the provider
-container reachability probe. Every
-probe is read-only and runs on the host; when the provider origin is `host.docker.internal` the
-provider probes travel over the host-resolvable loopback transport, while the
-advertised issuer and JWKS URI are still validated against the exact planned
-origin. Each JWKS must publish an RSA signing member (compatible `RS256`
+inactive token must — plus a provider-metadata request issued inside the
+running Tama container. Every probe is read-only. On Linux, host-side provider
+probes use the exact gateway address installed in the container while the
+container probe uses the configured origin itself; the advertised issuer and
+JWKS URI remain bound to the exact planned origin. Each JWKS must publish an
+RSA signing member (compatible `RS256`
 metadata, no private members) whose modulus and exponent match the persisted
 private JWK, so a stale or misloaded key under the expected identifier fails
 the probe. Only after that checkpoint does it enable and restart Tama and

@@ -153,6 +153,7 @@ export function createBootstrapPlan(options) {
         identity: mcpAppPrepared.identity,
         contractPath: mcpAppPrepared.contractPath,
         contractDocument: mcpAppPrepared.contractDocument,
+        selectedCompose: inspection.selectedCompose,
       })
     : null;
   // A fresh MCP App run adopts the Tama port the accepted contract documents

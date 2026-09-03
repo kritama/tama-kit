@@ -411,6 +411,7 @@ export async function prepareMcpApp({
  * @property {ProviderIdentity} identity
  * @property {string | null} contractPath
  * @property {Record<string, unknown> | null} contractDocument
+ * @property {string} [selectedCompose]
  */
 
 /**
@@ -420,13 +421,24 @@ export async function prepareMcpApp({
  * @param {ResolveMcpAppStateInput} input
  * @returns {PersistedMcpAppProvider}
  */
-export function resolveMcpAppState({ root, identity, contractPath, contractDocument }) {
+export function resolveMcpAppState({
+  root,
+  identity,
+  contractPath,
+  contractDocument,
+  selectedCompose,
+}) {
   return {
     identity,
     contractSource: contractPath === null ? "conventional" : "contract",
     contractPath,
     bindings: resolveBindings(contractDocument, identity.environmentPrefix).roles,
-    environmentLoading: verifyEnvironmentLoading(root, identity.environmentFile, contractDocument),
+    environmentLoading: verifyEnvironmentLoading(
+      root,
+      identity.environmentFile,
+      contractDocument,
+      selectedCompose,
+    ),
   };
 }
 

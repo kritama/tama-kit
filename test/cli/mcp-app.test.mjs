@@ -31,7 +31,7 @@ import {
 import {
   classifyListenerAddress,
   defaultProviderListenerInspector,
-  verifyMcpApp,
+  verifyMcpApp as verifyMcpAppImplementation,
 } from "../../cli/bootstrap/mcp-app-verify.mjs";
 import { generateOAuthKeyPair } from "../../cli/bootstrap/oauth-key.mjs";
 import { createBootstrapPlan } from "../../cli/bootstrap/plan.mjs";
@@ -46,6 +46,14 @@ import { parseComposeHostGatewayAddress } from "../../cli/bootstrap/start.mjs";
 import { applyOperations, applyOperationsTransactionally } from "../../cli/bootstrap/write.mjs";
 import { CLIError, EXIT_CODES } from "../../cli/errors.mjs";
 import { run } from "../../cli/index.mjs";
+
+/** @param {Parameters<typeof verifyMcpAppImplementation>[0]} input */
+function verifyMcpApp(input) {
+  return verifyMcpAppImplementation({
+    probeProviderFromContainer: async () => true,
+    ...input,
+  });
+}
 
 /**
  * @param {string} root
@@ -541,6 +549,9 @@ test("validateMcpAppContract rejects malformed v1 contract sections", () => {
     (contract) => {
       contract.public_endpoints.jwks = "https://example.test/jwks";
     },
+    (contract) => {
+      contract.public_endpoints.introspection = "/oauth/introspect";
+    },
     (contract) => delete contract.availability.prepared,
     (contract) => {
       contract.local_development.memovee_origin = "ftp://127.0.0.1:4000";
@@ -671,6 +682,34 @@ test("verifyEnvironmentLoading confirms application-owned loaders", () => {
     verifyEnvironmentLoading(inlineEnvFileRoot, ".acme.integration.env", null),
     "verified",
   );
+
+  const selectedComposeRoot = project();
+  mkdirSync(join(selectedComposeRoot, "ops"));
+  const selectedCompose = join(selectedComposeRoot, "ops", "dev.yaml");
+  writeFileSync(
+    selectedCompose,
+    "services:\n  app:\n    env_file:\n      - ../.acme.integration.env\n      - ../.memovee.integration.env\n",
+  );
+  assert.equal(
+    verifyEnvironmentLoading(selectedComposeRoot, ".acme.integration.env", null, selectedCompose),
+    "verified",
+  );
+
+  const selectedPlan = createBootstrapPlan({
+    cwd: selectedComposeRoot,
+    targetPath: selectedComposeRoot,
+    composePath: selectedCompose,
+    image: PINNED_TAMA_IMAGE,
+    port: 4001,
+    mcpApp: {
+      requested: true,
+      activate: false,
+      providerOrigin: "http://host.docker.internal:4000",
+      allowedOrigins: ["http://127.0.0.1:3000"],
+    },
+    mcpAppPrepared: preparedFor(selectedComposeRoot),
+  });
+  assert.equal(selectedPlan.mcpApp?.environmentLoading, "verified");
 });
 
 test("contractLocalOrigin reads the provider-keyed local development origin", () => {
@@ -1830,6 +1869,7 @@ test("verifyMcpApp verifies both JWKS and the inactive introspection probe", asy
     [
       { name: "provider_metadata", ok: true },
       { name: "provider_jwks", ok: true },
+      { name: "provider_container_reachability", ok: true },
       { name: "tama_jwks", ok: true },
       { name: "inactive_introspection", ok: true },
     ],
@@ -2018,6 +2058,7 @@ test("verifyMcpApp gates enabled metadata, route, and exact provider advertiseme
     [
       "provider_metadata",
       "provider_jwks",
+      "provider_container_reachability",
       "tama_jwks",
       "inactive_introspection",
       "tama_protected_resource_metadata",
@@ -2198,6 +2239,46 @@ test("parseComposeHostGatewayAddress reads Docker's exact container mapping", ()
   assert.equal(parseComposeHostGatewayAddress("127.0.0.1 localhost\n"), null);
 });
 
+test("verifyMcpApp requires provider reachability from the running Tama container", async () => {
+  const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
+  const containerEndpoints = [];
+  const result = await verifyMcpApp({
+    root,
+    plan,
+    fetch: enforcingIntrospection(
+      async (input) => {
+        const url = input.href;
+        if (url.endsWith("/.well-known/oauth-authorization-server")) {
+          return Response.json(providerMetadata(plan));
+        }
+        if (url.endsWith("/.well-known/jwks.json")) {
+          return Response.json(
+            url.startsWith(plan.tamaOrigin)
+              ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+              : jwksDocument(plan.providerSigningKeyId, providerJwk),
+          );
+        }
+        return Response.json({ active: false });
+      },
+      root,
+      plan,
+    ),
+    probeProviderFromContainer: async (endpoint) => {
+      containerEndpoints.push(endpoint);
+      return false;
+    },
+    inspectProviderListener: noContainerInspection,
+  });
+  assert.deepEqual(containerEndpoints, [
+    "http://host.docker.internal:4000/.well-known/oauth-authorization-server",
+  ]);
+  assert.equal(result.verified, false);
+  assert.equal(
+    result.probes.find(({ name }) => name === "provider_container_reachability")?.ok,
+    false,
+  );
+});
+
 test("verifyMcpApp fails the host-gateway topology when the provider bind is loopback-only", async () => {
   const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
   const withListener = (inspection) =>
@@ -2227,21 +2308,18 @@ test("verifyMcpApp fails the host-gateway topology when the provider bind is loo
 
   const loopbackOnly = await withListener("loopback-only");
   assert.equal(loopbackOnly.verified, false);
-  const probe = loopbackOnly.probes.find(({ name }) => name === "provider_container_reachability");
+  const probe = loopbackOnly.probes.find(({ name }) => name === "provider_host_listener");
   assert.equal(probe?.ok, false);
   assert.match(probe?.reason ?? "", /loopback/u);
 
   const wide = await withListener("wide");
   assert.equal(wide.verified, true);
-  assert.equal(
-    wide.probes.find(({ name }) => name === "provider_container_reachability")?.ok,
-    true,
-  );
+  assert.equal(wide.probes.find(({ name }) => name === "provider_host_listener")?.ok, true);
 
   const unknown = await withListener("unknown");
   assert.equal(unknown.verified, true);
   assert.equal(
-    unknown.probes.find(({ name }) => name === "provider_container_reachability"),
+    unknown.probes.find(({ name }) => name === "provider_host_listener"),
     undefined,
   );
 });

@@ -11,6 +11,7 @@ import { prepareMcpApp } from "../bootstrap/mcp-app.mjs";
 import { verifyMcpApp } from "../bootstrap/mcp-app-verify.mjs";
 import { createBootstrapPlan, publicPlan } from "../bootstrap/plan.mjs";
 import {
+  probeComposeProviderEndpoint,
   resolveComposeHostGatewayAddress,
   startCompose,
   validateCompose,
@@ -594,6 +595,8 @@ async function executeBootstrap(argv, io) {
             root: plan.root,
             plan: plan.mcpApp,
             fetch: globalThis.fetch,
+            probeProviderFromContainer: async (endpoint) =>
+              probeComposeProviderEndpoint(plan, endpoint),
             providerTransportHost,
           });
           plan.mcpAppVerification = verification;
@@ -674,6 +677,8 @@ async function executeBootstrap(argv, io) {
               root: tamaEnabledPlan.root,
               plan: tamaEnabledPlan.mcpApp,
               fetch: globalThis.fetch,
+              probeProviderFromContainer: async (endpoint) =>
+                probeComposeProviderEndpoint(tamaEnabledPlan, endpoint),
               providerTransportHost,
             });
             tamaEnabledPlan.mcpAppVerification = enabledVerification;

@@ -1,7 +1,7 @@
 // @ts-check
 
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseDocument } from "yaml";
 import { usageError } from "../errors.mjs";
@@ -51,6 +51,11 @@ const PROVIDER_NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const SAFE_PATH_SEGMENT_PATTERN = /^[A-Za-z0-9._-]+$/u;
 const ENDPOINT_PATH_PATTERN = /^\/[A-Za-z0-9._~-]+(?:\/[A-Za-z0-9._~-]+)*$/u;
 const LOCAL_KEY_PATTERN = /^[a-z][a-z0-9_.-]*$/u;
+const PROVIDER_PUBLIC_ENDPOINTS = Object.freeze({
+  authorization_server_metadata: "/.well-known/oauth-authorization-server",
+  jwks: "/.well-known/jwks.json",
+  introspection: "/auth/introspections",
+});
 const VERSION_CONSTRAINT_SOURCE = "(?:>=|<=|>|<|=)\\s*v?\\d+\\.\\d+\\.\\d+";
 const VERSION_RANGE_PATTERN = new RegExp(
   `^${VERSION_CONSTRAINT_SOURCE}(?:\\s+and\\s+${VERSION_CONSTRAINT_SOURCE})*$`,
@@ -370,6 +375,18 @@ function validatePublicEndpoints(value) {
   }
 }
 
+/** @param {unknown} value */
+function validateProviderPublicEndpoints(value) {
+  const endpoints = /** @type {Record<string, unknown>} */ (value);
+  for (const [name, path] of Object.entries(PROVIDER_PUBLIC_ENDPOINTS)) {
+    if (endpoints[name] !== path) {
+      throw usageError(
+        `MCP App contract public_endpoints.${name} must be ${path}; Tama Kit cannot plan a different provider endpoint`,
+      );
+    }
+  }
+}
+
 /** @param {unknown} value @param {string[]} modes */
 function validateAvailability(value, modes) {
   if (!isPlainObject(value)) {
@@ -676,6 +693,9 @@ export function validateMcpAppContract(document) {
   validateLocalDevelopment(document.local_development);
   validateLocalLoopback(document.local_loopback);
   const provider = validateProvider(document.provider);
+  if (provider !== null) {
+    validateProviderPublicEndpoints(document.public_endpoints);
+  }
   validateEnvironmentLoading(document.environment_loading, provider);
   validateStringMap(document.cache_policy, "cache_policy");
   validateModeGateResponses(document.mode_gate_responses, modes);
@@ -1061,9 +1081,10 @@ export function resolveBindings(contractDocument, environmentPrefix) {
  * @param {string} root
  * @param {string} environmentFile
  * @param {Record<string, unknown> | null} contractDocument
+ * @param {string} [selectedCompose]
  * @returns {"verified" | "unverified"}
  */
-export function verifyEnvironmentLoading(root, environmentFile, contractDocument) {
+export function verifyEnvironmentLoading(root, environmentFile, contractDocument, selectedCompose) {
   if (contractDocument && isPlainObject(contractDocument.environment_loading)) {
     if (typeof contractDocument.environment_loading.loads === "string") {
       return contractDocument.environment_loading.loads === environmentFile
@@ -1075,14 +1096,18 @@ export function verifyEnvironmentLoading(root, environmentFile, contractDocument
   if (envrc !== null && envrcLoadsFragment(envrc, environmentFile)) {
     return "verified";
   }
-  for (const composeName of [
-    "compose.yaml",
-    "compose.yml",
-    "docker-compose.yaml",
-    "docker-compose.yml",
-  ]) {
-    const compose = safeRead(join(root, composeName));
-    if (compose !== null && composeReferencesFragment(compose, environmentFile)) {
+  const composePaths = [
+    ...(selectedCompose ? [resolve(root, selectedCompose)] : []),
+    ...["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"].map((name) =>
+      join(root, name),
+    ),
+  ];
+  for (const composePath of new Set(composePaths)) {
+    const compose = safeRead(composePath);
+    if (
+      compose !== null &&
+      composeReferencesFragment(compose, resolve(root, environmentFile), composePath)
+    ) {
       return "verified";
     }
   }
@@ -1145,10 +1170,11 @@ function envrcLoadsFragment(envrc, environmentFile) {
  * it does not count.
  *
  * @param {string} compose
- * @param {string} environmentFile
+ * @param {string} environmentFilePath
+ * @param {string} composePath
  * @returns {boolean}
  */
-function composeReferencesFragment(compose, environmentFile) {
+function composeReferencesFragment(compose, environmentFilePath, composePath) {
   const document = parseDocument(compose);
   if (document.errors.length > 0) {
     return false;
@@ -1165,12 +1191,12 @@ function composeReferencesFragment(compose, environmentFile) {
     const envFile = service.env_file;
     const entries = Array.isArray(envFile) ? envFile : envFile === undefined ? [] : [envFile];
     if (
-      entries.some(
-        (entry) =>
-          entry === environmentFile ||
-          entry === `./${environmentFile}` ||
-          (isPlainObject(entry) && entry.path === environmentFile),
-      )
+      entries.some((entry) => {
+        const path = typeof entry === "string" ? entry : isPlainObject(entry) ? entry.path : null;
+        return (
+          typeof path === "string" && resolve(dirname(composePath), path) === environmentFilePath
+        );
+      })
     ) {
       return true;
     }
