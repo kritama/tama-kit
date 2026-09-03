@@ -1,13 +1,13 @@
 // @ts-check
 
-import { relative } from "node:path";
+import { join, relative } from "node:path";
 import { parseArgs } from "node:util";
 import { formatAgentSetupPrompt } from "../bootstrap/agent-prompt.mjs";
 import { formatComposeUpCommand } from "../bootstrap/compose-command.mjs";
 import { inspectProject } from "../bootstrap/detect-project.mjs";
 import { readSetupUrl } from "../bootstrap/environment.mjs";
 import { validateSecretFilesIgnored } from "../bootstrap/gitignore.mjs";
-import { readAgentSkillMode } from "../bootstrap/manifest.mjs";
+import { readAgentSkillMode, readMcpAppProvider } from "../bootstrap/manifest.mjs";
 import { prepareMcpApp } from "../bootstrap/mcp-app.mjs";
 import { createHttpHostMappedFetch, verifyMcpApp } from "../bootstrap/mcp-app-verify.mjs";
 import { createBootstrapPlan, publicPlan } from "../bootstrap/plan.mjs";
@@ -274,12 +274,16 @@ function resultEnvelope(plan, { dryRun, started, healthUrl }) {
 }
 
 /** @param {BootstrapPlan} plan */
-function validateWrittenSecretsIgnored(plan) {
-  const files = [".tama.env", ".tama.postgres.env"];
+export function validateWrittenSecretsIgnored(plan) {
+  const files = new Set([".tama.env", ".tama.postgres.env"]);
   if (plan.mcpApp) {
-    files.push(plan.mcpApp.provider.environmentFile);
+    files.add(plan.mcpApp.provider.environmentFile);
   }
-  validateSecretFilesIgnored(plan.root, files);
+  const persistedProvider = readMcpAppProvider(join(plan.root, "tama"));
+  if (persistedProvider) {
+    files.add(persistedProvider.identity.environmentFile);
+  }
+  validateSecretFilesIgnored(plan.root, [...files]);
 }
 
 /**

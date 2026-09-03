@@ -188,8 +188,10 @@ function originForPort(origin, port, flag) {
   if (effectivePort !== port) {
     throw usageError(`${flag} must use the selected Tama port ${port}: ${origin}`);
   }
-  if (url.protocol === "http:" && !isLoopbackHostname(url.hostname)) {
-    throw usageError(`${flag} must use https unless it is loopback: ${origin}`);
+  if (url.protocol !== "http:" || !isLoopbackHostname(url.hostname)) {
+    throw usageError(
+      `${flag} must use an http loopback origin because the generated Tama Compose service does not terminate TLS: ${origin}`,
+    );
   }
   return normalized;
 }

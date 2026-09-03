@@ -46,6 +46,7 @@ import {
 } from "../../cli/bootstrap/provider-identity.mjs";
 import { parseComposeHostGatewayAddress } from "../../cli/bootstrap/start.mjs";
 import { applyOperations, applyOperationsTransactionally } from "../../cli/bootstrap/write.mjs";
+import { validateWrittenSecretsIgnored } from "../../cli/commands/bootstrap.mjs";
 import { CLIError, EXIT_CODES } from "../../cli/errors.mjs";
 import { run } from "../../cli/index.mjs";
 
@@ -2847,6 +2848,50 @@ test("bootstrap rejects nested Git ignore overrides and rolls generated secrets 
   assert.equal(existsSync(join(root, "config", "provider.env")), false);
 });
 
+test("ordinary reruns validate effective ignores for the persisted provider fragment", async () => {
+  const root = project();
+  execFileSync("git", ["init", "--quiet"], { cwd: root });
+  mkdirSync(join(root, "config"), { recursive: true });
+
+  const contract = memoveeContract();
+  contract.provider = {
+    name: "memovee",
+    environment_prefix: "MEMOVEE",
+    environment_file: "config/provider.env",
+  };
+  contract.environment_loading.loads = "config/provider.env";
+  const contractDocument = validateMcpAppContract(contract);
+  const contractPath = writeContract(root, contract);
+  const initial = planWithMcp(
+    root,
+    preparedFor(root, {
+      contractPath,
+      contractDocument,
+      identity: {
+        name: "memovee",
+        environmentPrefix: "MEMOVEE",
+        environmentFile: "config/provider.env",
+        source: "contract",
+      },
+    }),
+  );
+  applyOperations(initial.operations);
+  writeFileSync(join(root, "config", ".gitignore"), "!provider.env\n");
+
+  const ordinary = createBootstrapPlan({
+    cwd: root,
+    targetPath: root,
+    image: PINNED_TAMA_IMAGE,
+  });
+  await assert.rejects(
+    () =>
+      applyOperationsTransactionally(ordinary.operations, () => {
+        validateWrittenSecretsIgnored(ordinary);
+      }),
+    /not effectively ignored by Git: config\/provider\.env/u,
+  );
+});
+
 test("bootstrap rejects a Tama port change while an MCP App integration is persisted", () => {
   const root = project();
   const contractPath = writeContract(root);
@@ -2939,6 +2984,20 @@ test("bootstrap rejects an https container-gateway provider origin", () => {
       error.exitCode === EXIT_CODES.USAGE &&
       /cannot be verified from the host/u.test(error.message) &&
       /http:\/\/host\.docker\.internal:5000/u.test(error.message),
+  );
+});
+
+test("bootstrap rejects an HTTPS Tama origin without TLS termination", () => {
+  const root = project();
+  assert.throws(
+    () =>
+      planWithMcp(root, preparedFor(root), {
+        tamaOrigin: "https://127.0.0.1:4001",
+      }),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.USAGE &&
+      /must use an http loopback origin.*does not terminate TLS/u.test(error.message),
   );
 });
 

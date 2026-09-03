@@ -57,12 +57,15 @@ The implementation now includes:
   and effective Git ignore rules are verified transactionally so nested
   negations cannot leave generated secrets exposed;
 - Linux gateway probes connect to the resolved Docker gateway while retaining
-  the provider origin as the HTTP authority for virtual-host routing.
+  the provider origin as the HTTP authority for virtual-host routing;
+- ordinary reruns re-check the persisted provider fragment against effective
+  Git ignore rules, and Tama origins are limited to the HTTP loopback topology
+  the generated Compose service actually exposes.
 
 Verification completed on the final local tree with Node 24:
 
 - focused identity, lifecycle, and nested-ignore regressions: 4 passed;
-- `npm test` outside the filesystem sandbox: 227 passed, 1 skipped, 0 failed;
+- `npm test` outside the filesystem sandbox: 229 passed, 1 skipped, 0 failed;
 - `npm run typecheck`: passed;
 - `npm run check`: passed;
 - `git diff --check`: passed;
