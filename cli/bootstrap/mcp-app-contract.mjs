@@ -688,18 +688,25 @@ function validateBindingsAgainstVariables(document, provider) {
     if (!isPlainObject(variable)) {
       throw usageError(`MCP App contract binding "${role}" references undeclared variable ${name}`);
     }
-    const declared = stringList(variable.values) ?? stringList(variable.allowed_values);
-    if (declared === null) {
+    const enumerations = declaredEnumerations(variable);
+    if (enumerations.length === 0) {
       continue;
     }
     if (role === "mode") {
-      if (["prepared", "enabled"].some((mode) => !declared.includes(mode))) {
+      if (
+        enumerations.some((declared) =>
+          ["prepared", "enabled"].some((mode) => !declared.includes(mode)),
+        )
+      ) {
         throw usageError(
           `MCP App contract variable ${name} must include the lifecycle modes the planner writes: prepared and enabled`,
         );
       }
     }
-    if (role === "access_token_signing_algorithm" && !declared.includes("RS256")) {
+    if (
+      role === "access_token_signing_algorithm" &&
+      enumerations.some((declared) => !declared.includes("RS256"))
+    ) {
       throw usageError(
         `MCP App contract variable ${name} must accept RS256, the algorithm the planner emits`,
       );
@@ -709,7 +716,17 @@ function validateBindingsAgainstVariables(document, provider) {
 
 /** @param {unknown} value @returns {string[] | null} */
 function stringList(value) {
+  if (typeof value === "string") {
+    return [value];
+  }
   return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : null;
+}
+
+/** @param {Record<string, unknown>} variable @returns {string[][]} */
+function declaredEnumerations(variable) {
+  return [variable.values, variable.allowed_values]
+    .map((value) => stringList(value))
+    .filter((value) => value !== null);
 }
 
 /**
@@ -717,8 +734,8 @@ function stringList(value) {
  * fragment against the constraints the accepted contract declares for the
  * variables those values are bound to. The declaration-time cross-check
  * already guarantees the variables exist and their enumeration constraints are
- * satisfiable; this checks the value-specific constraints — `format`,
- * `exact_path`, `same_origin_as`, `max_bytes`, and `max_items` — that only
+ * satisfiable; this checks the value-specific constraints — enumerations,
+ * `format`, `exact_path`, `same_origin_as`, `max_bytes`, and `max_items` — that only
  * become checkable once the planned origins, paths, and identifiers are known.
  * A contract that declared, say, `exact_path: "/different"` for the resource
  * or `max_bytes: 1` for the issuer would otherwise be violated by the
@@ -750,6 +767,9 @@ export function validateEmittedMcpAppValues(contractDocument, roles, emitted) {
     /** @param {string} reason */
     const reject = (reason) =>
       usageError(`MCP App contract variable ${name} rejects the planned value: ${reason}`);
+    if (declaredEnumerations(spec).some((declared) => !declared.includes(value))) {
+      throw reject("it is not one of the declared values");
+    }
     if (spec.max_bytes !== undefined && Buffer.byteLength(value, "utf8") > Number(spec.max_bytes)) {
       throw reject(
         `it is ${Buffer.byteLength(value, "utf8")} bytes, exceeding max_bytes ${spec.max_bytes}`,

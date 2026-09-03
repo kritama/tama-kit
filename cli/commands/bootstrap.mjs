@@ -10,7 +10,12 @@ import { readAgentSkillMode } from "../bootstrap/manifest.mjs";
 import { prepareMcpApp } from "../bootstrap/mcp-app.mjs";
 import { verifyMcpApp } from "../bootstrap/mcp-app-verify.mjs";
 import { createBootstrapPlan, publicPlan } from "../bootstrap/plan.mjs";
-import { startCompose, validateCompose, validateComposePrerequisite } from "../bootstrap/start.mjs";
+import {
+  resolveComposeHostGatewayAddress,
+  startCompose,
+  validateCompose,
+  validateComposePrerequisite,
+} from "../bootstrap/start.mjs";
 import { applyOperationsTransactionally } from "../bootstrap/write.mjs";
 import { CLIError, EXIT_CODES, startupError, usageError } from "../errors.mjs";
 import { createProgressBar, paint, renderBox } from "../terminal.mjs";
@@ -558,11 +563,17 @@ async function executeBootstrap(argv, io) {
           throw error;
         }
         if (plan.mcpApp && mcpAppPrepared) {
+          const providerTransportHost =
+            process.platform === "linux" &&
+            new URL(plan.mcpApp.providerOrigin).hostname === "host.docker.internal"
+              ? resolveComposeHostGatewayAddress(plan)
+              : undefined;
           progress.update(5, "Verifying MCP App integration");
           const verification = await verifyMcpApp({
             root: plan.root,
             plan: plan.mcpApp,
             fetch: globalThis.fetch,
+            providerTransportHost,
           });
           plan.mcpAppVerification = verification;
           if (!verification.verified) {
@@ -642,6 +653,7 @@ async function executeBootstrap(argv, io) {
               root: tamaEnabledPlan.root,
               plan: tamaEnabledPlan.mcpApp,
               fetch: globalThis.fetch,
+              providerTransportHost,
             });
             tamaEnabledPlan.mcpAppVerification = enabledVerification;
             if (!enabledVerification.verified) {

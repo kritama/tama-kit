@@ -54,17 +54,21 @@ async function fetchJson(fetch, url) {
 
 /**
  * Verification probes are issued from the host, where the Compose
- * host-gateway name does not resolve. Maps it to the loopback transport the
- * host-native provider listens on. The advertised issuer is still validated
- * against the plan, so a transport serving a different origin cannot pass.
+ * host-gateway name does not resolve on Linux. Maps it to the gateway address
+ * read from Tama's running container; the loopback fallback is retained for
+ * isolated callers that do not have Compose context. The advertised issuer is
+ * still validated against the plan, so a transport serving a different origin
+ * cannot pass.
  *
  * @param {string} origin
+ * @param {string | undefined} providerTransportHost
  * @returns {string}
  */
-function hostTransportOrigin(origin) {
+function hostTransportOrigin(origin, providerTransportHost) {
   const url = new URL(origin);
   if (url.hostname === "host.docker.internal") {
-    url.hostname = "127.0.0.1";
+    const host = providerTransportHost ?? "127.0.0.1";
+    url.hostname = host.includes(":") ? `[${host}]` : host;
   }
   return `${url.protocol}//${url.host}`;
 }
@@ -224,6 +228,18 @@ function jwksHasKid(jwks, kid) {
   return jwks.keys.some((key) => isPlainObject(key) && key.kid === kid);
 }
 
+/** @param {unknown} value @returns {boolean} */
+function permitsVerification(value) {
+  if (value === undefined || value === null) {
+    return true;
+  }
+  return (
+    Array.isArray(value) &&
+    value.includes("verify") &&
+    value.every((operation) => typeof operation === "string")
+  );
+}
+
 /**
  * Reports whether a JWKS publishes the exact public key the integration
  * plans from the persisted private JWK: an RSA signing member with the
@@ -261,6 +277,9 @@ function jwksPublishesExpectedKey(jwks, kid, expected) {
       return false;
     }
     if (key.use !== undefined && key.use !== "sig") {
+      return false;
+    }
+    if (!permitsVerification(key.key_ops)) {
       return false;
     }
     const modulus = typeof key.n === "string" ? base64urlUnsigned(key.n) : null;
@@ -375,13 +394,13 @@ async function signWrongKeyAssertion({ kid, clientId, audience }) {
 }
 
 /**
- * @param {{root: string, plan: McpAppPlan, fetch: VerifyFetch}} input
+ * @param {{root: string, plan: McpAppPlan, fetch: VerifyFetch, providerTransport: string}} input
  * @returns {Promise<McpAppProbe>}
  */
-async function introspectInactiveToken({ root, plan, fetch }) {
+async function introspectInactiveToken({ root, plan, fetch, providerTransport }) {
   // The request travels over the host-resolvable transport, but the client
   // assertion names the advertised endpoint the provider validates.
-  const endpoint = `${hostTransportOrigin(plan.providerOrigin)}/auth/introspections`;
+  const endpoint = `${providerTransport}/auth/introspections`;
   const audience = `${plan.providerOrigin}/auth/introspections`;
   const assertion = await signClientAssertion({
     privateJwk: readEnvironmentValues(root, ".tama.env").get(TAMA_INTROSPECTION_KEY_VARIABLE) ?? "",
@@ -495,15 +514,22 @@ async function routeProbe(fetch, url) {
  * the advertised issuer is still validated. All probes are read-only; nothing
  * is activated or mutated here.
  *
- * @param {{root: string, plan: McpAppPlan, fetch: VerifyFetch, inspectProviderListener?: ProviderListenerInspector}} input
+ * @param {{root: string, plan: McpAppPlan, fetch: VerifyFetch, inspectProviderListener?: ProviderListenerInspector, providerTransportHost?: string}} input
  * @returns {Promise<McpAppVerification>}
  */
-export async function verifyMcpApp({ root, plan, fetch, inspectProviderListener }) {
+export async function verifyMcpApp({
+  root,
+  plan,
+  fetch,
+  inspectProviderListener,
+  providerTransportHost,
+}) {
   /** @type {McpAppProbe[]} */
   const probes = [];
-  // Provider probes travel over the host-resolvable transport; the metadata
-  // check still requires the advertised issuer to match the plan exactly.
-  const providerTransport = hostTransportOrigin(plan.providerOrigin);
+  // Provider probes travel over the host-resolvable transport. For the Linux
+  // host-gateway topology the command layer supplies the address installed in
+  // Tama's container, while metadata still has to advertise the exact origin.
+  const providerTransport = hostTransportOrigin(plan.providerOrigin, providerTransportHost);
   const metadataUrl = `${providerTransport}/.well-known/oauth-authorization-server`;
   const providerMetadata = await fetchJson(fetch, metadataUrl);
   const metadataValid =
@@ -570,7 +596,7 @@ export async function verifyMcpApp({ root, plan, fetch, inspectProviderListener 
   );
 
   if (providerReachable && tamaReachable) {
-    probes.push(await introspectInactiveToken({ root, plan, fetch }));
+    probes.push(await introspectInactiveToken({ root, plan, fetch, providerTransport }));
   } else {
     probes.push(
       probe("inactive_introspection", false, "required provider and Tama keys were not verified"),

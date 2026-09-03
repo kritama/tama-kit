@@ -60,7 +60,10 @@ inspects the host's listening sockets for the effective provider port (80 or
 IPv4-mapped binds such as `::ffff:127.0.0.1` — passes every host-side probe
 yet is unreachable from the Tama container through the gateway, so
 verification fails with a `provider_container_reachability` probe until the
-provider binds `0.0.0.0` or the Docker bridge interface.
+provider binds `0.0.0.0` or the Docker bridge interface. Provider metadata,
+JWKS, and introspection probes use the exact host-gateway address installed in
+the running Tama container rather than assuming loopback, so a provider bound
+only to the Docker bridge can still pass verification.
 
 `--tama-origin` is the exact public Tama origin. It defaults from an accepted
 contract or to loopback at the selected Tama port. A fresh run without

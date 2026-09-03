@@ -1,6 +1,7 @@
 // @ts-check
 
 import { execFileSync, spawn } from "node:child_process";
+import { isIP } from "node:net";
 
 import { prerequisiteError, startupError } from "../errors.mjs";
 
@@ -58,6 +59,87 @@ export function validateComposePrerequisite() {
   if (major < 2 || (major === 2 && minor < 20)) {
     throw prerequisiteError(`Docker Compose 2.20.0 or newer is required; found ${output}`);
   }
+}
+
+/**
+ * Reads the address Docker placed beside host.docker.internal in a running
+ * container's hosts file. The value is the container's actual view of the
+ * host gateway, including daemon-level host-gateway overrides.
+ *
+ * @param {string} content
+ * @returns {string | null}
+ */
+export function parseComposeHostGatewayAddress(content) {
+  for (const rawLine of content.split(/\r?\n/u)) {
+    const line = rawLine.replace(/#.*$/u, "").trim();
+    if (line === "") {
+      continue;
+    }
+    const [address, ...names] = line.split(/\s+/u);
+    if (names.includes("host.docker.internal") && isIP(address) !== 0) {
+      return address;
+    }
+  }
+  return null;
+}
+
+/** @param {string} address @returns {boolean} */
+function isContainerLocalAddress(address) {
+  if (address === "0.0.0.0" || address.startsWith("127.")) {
+    return true;
+  }
+  const normalized = address.toLowerCase();
+  if (normalized === "::" || normalized === "::1") {
+    return true;
+  }
+  const dottedMapped = normalized.match(/^::ffff:(\d{1,3})\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u);
+  if (dottedMapped !== null) {
+    return Number(dottedMapped[1]) === 0 || Number(dottedMapped[1]) === 127;
+  }
+  const hexMapped = normalized.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u);
+  if (hexMapped === null) {
+    return false;
+  }
+  const mappedAddress =
+    (Number.parseInt(hexMapped[1], 16) << 16) | Number.parseInt(hexMapped[2], 16);
+  const firstOctet = mappedAddress >>> 24;
+  return firstOctet === 0 || firstOctet === 127;
+}
+
+/**
+ * Resolves the exact host-gateway address installed in Tama's running
+ * container. Host-side verification uses this address so providers bound
+ * only to the Docker bridge remain reachable without weakening the public
+ * issuer comparison.
+ *
+ * @param {{root: string, composeFile: string}} plan
+ * @returns {string}
+ */
+export function resolveComposeHostGatewayAddress(plan) {
+  let output;
+  try {
+    output = execFileSync(
+      "docker",
+      ["compose", "-f", plan.composeFile, "exec", "-T", "tama", "cat", "/etc/hosts"],
+      {
+        cwd: plan.root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        maxBuffer: 64 * 1024,
+      },
+    );
+  } catch (error) {
+    throw startupError(
+      `could not inspect Tama's host.docker.internal mapping: ${errorMessage(error)}`,
+    );
+  }
+  const address = parseComposeHostGatewayAddress(output);
+  if (address === null || isContainerLocalAddress(address)) {
+    throw startupError(
+      "Tama's host.docker.internal mapping is missing or not a usable host gateway",
+    );
+  }
+  return address;
 }
 
 /**

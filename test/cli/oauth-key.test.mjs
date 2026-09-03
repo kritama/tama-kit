@@ -381,7 +381,13 @@ test("validatePublicJwkSet accepts public-only RSA members with compatible metad
 
   const keyA = { ...rsaPublicJwk(rsaPrivateKeyObject()), alg: "RS256", kid: "key-a", use: "sig" };
   const keyB = { ...rsaPublicJwk(rsaPrivateKeyObject()), kid: "key-b" };
-  const keyC = { ...rsaPublicJwk(rsaPrivateKeyObject()), alg: null, use: null, kid: "key-c" };
+  const keyC = {
+    ...rsaPublicJwk(rsaPrivateKeyObject()),
+    alg: null,
+    use: null,
+    key_ops: ["verify"],
+    kid: "key-c",
+  };
   validatePublicJwkSet(JSON.stringify([keyA, keyB, keyC]), "MEMOVEE_OAUTH_PUBLIC_SIGNING_KEYS");
 });
 
@@ -403,6 +409,8 @@ test("validatePublicJwkSet rejects private, non-RSA, duplicate, and oversized me
   expectInvalidSet(JSON.stringify([{ ...key, kty: "EC" }]));
   expectInvalidSet(JSON.stringify([{ ...key, alg: "HS256" }]));
   expectInvalidSet(JSON.stringify([{ ...key, use: "enc" }]));
+  expectInvalidSet(JSON.stringify([{ ...key, key_ops: ["encrypt"] }]));
+  expectInvalidSet(JSON.stringify([{ ...key, key_ops: ["verify", 12] }]));
   expectInvalidSet(JSON.stringify([{ ...key, kid: null }]));
   expectInvalidSet(JSON.stringify([{ ...key, kid: `key-${"x".repeat(128)}` }]));
   expectInvalidSet(JSON.stringify([{ ...key, n: "!!" }]));

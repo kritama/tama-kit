@@ -395,6 +395,7 @@ function isPublicJwkMember(member, kids) {
     exponentValue === null ||
     !isCompatibleMetadata(member.alg, OAUTH_JWK_ALGORITHM) ||
     !isCompatibleMetadata(member.use, "sig") ||
+    !isVerificationKeyOps(member.key_ops) ||
     typeof member.kid !== "string" ||
     !isBoundedKid(member.kid) ||
     kids.has(member.kid)
@@ -414,6 +415,24 @@ function isPublicJwkMember(member, kids) {
     return false;
   }
   return true;
+}
+
+/**
+ * Public verification keys may omit key operations; when present, the list
+ * must contain only strings and explicitly allow signature verification.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isVerificationKeyOps(value) {
+  if (value === undefined || value === null) {
+    return true;
+  }
+  return (
+    Array.isArray(value) &&
+    value.includes("verify") &&
+    value.every((operation) => typeof operation === "string")
+  );
 }
 
 /**
