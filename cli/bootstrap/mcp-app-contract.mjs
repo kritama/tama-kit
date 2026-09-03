@@ -806,3 +806,39 @@ export function contractLocalOrigin(contractDocument, providerName) {
   const value = local?.[`${providerName}_origin`];
   return typeof value === "string" && value.length > 0 ? value : null;
 }
+
+/**
+ * Reads the local development Tama port from an accepted contract so a fresh
+ * MCP App bootstrap selects the topology the contract documents (normally
+ * the provider on 4000 and Tama on 4001) instead of the generic default,
+ * which would put both host-native services on the same port. The provider
+ * contract wins over the bundled Tama contract; an absent or unparsable
+ * origin yields null.
+ *
+ * @param {Record<string, unknown> | null} providerContract
+ * @param {Record<string, unknown> | null} tamaContract
+ * @returns {number | null}
+ */
+export function contractTamaPort(providerContract, tamaContract) {
+  for (const document of [providerContract, tamaContract]) {
+    const local = isPlainObject(document?.local_development)
+      ? /** @type {Record<string, unknown>} */ (document.local_development)
+      : null;
+    const value = local?.tama_origin;
+    if (typeof value !== "string" || value.length === 0) {
+      continue;
+    }
+    let url;
+    try {
+      url = new URL(value);
+    } catch {
+      continue;
+    }
+    const rawPort = url.port === "" ? (url.protocol === "https:" ? "443" : "80") : url.port;
+    const port = Number.parseInt(rawPort, 10);
+    if (Number.isInteger(port) && port >= 1 && port <= 65_535) {
+      return port;
+    }
+  }
+  return null;
+}

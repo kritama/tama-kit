@@ -24,13 +24,20 @@ Compose namespaces.
 
 `--provider-origin` is both the public OAuth issuer and the origin used by Tama
 for provider metadata, JWKS, and introspection. It must be reachable from the
-host and the Tama container. If its hostname is `host.docker.internal`, Tama
-Kit adds the Compose host-gateway mapping.
+host and the Tama container. Loopback provider origins are rejected: every
+verification probe runs on the host, so a loopback provider would pass them
+while the Tama container can never reach it. If its hostname is
+`host.docker.internal`, Tama Kit adds the Compose host-gateway mapping and
+keeps it on ordinary reruns.
 
 `--tama-origin` is the exact public Tama origin. It defaults from an accepted
-contract or to loopback at the selected Tama port. Origins are persisted and
-compared on reruns. Changing `localhost` to `127.0.0.1`, changing to `::1`, or
-changing any accepted origin is a topology migration, not a normal rerun.
+contract or to loopback at the selected Tama port. A fresh run without
+`--port` selects the Tama port the accepted contract documents (normally
+`4001`), and a selected port that collides with a `host.docker.internal`
+provider origin is rejected because both host-native services would share the
+same host port. Origins are persisted and compared on reruns. Changing
+`localhost` to `127.0.0.1`, changing to `::1`, or changing any accepted origin
+is a topology migration, not a normal rerun.
 
 Pass at least one repeatable `--allowed-origin` for the actual browser or MCP
 client. Tama Kit never infers client origins from either service origin.
@@ -65,7 +72,9 @@ new prepared identity before activating it.
 ## Activation and recovery
 
 Run bootstrap with `--start --activate`. Tama Kit first writes and starts both
-sides as prepared, then verifies provider metadata, both JWKS documents, and an
+sides as prepared, then verifies provider metadata, both JWKS documents
+(against the exact public keys planned from the persisted private JWKs, so a
+stale or misloaded key under the expected identifier fails the probe), and an
 authenticated inactive-token introspection. Only after that checkpoint does it
 enable and restart Tama and verify protected-resource metadata and `/mcp/app`.
 

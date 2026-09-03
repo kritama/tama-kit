@@ -144,18 +144,20 @@ export function configuredPort(root) {
 /**
  * Resolves the public Tama port the way the environment file will reflect it:
  * an explicit request wins, otherwise an existing `TAMA_PORT` is preserved
- * (failing closed when it is invalid), otherwise the default. Exposed so the
- * MCP App planner can derive origins for the same port the environment file
- * will carry.
+ * (failing closed when it is invalid), otherwise a fresh-run default (when
+ * supplied), otherwise the default. Exposed so the MCP App planner can derive
+ * origins for the same port the environment file will carry.
  *
  * @param {string} root
  * @param {number | undefined} [requestedPort]
+ * @param {number | undefined} [freshDefaultPort] Default for a project
+ *   without `.tama.env`, derived from the accepted MCP App contract.
  * @returns {number}
  */
-export function resolveEnvironmentPort(root, requestedPort) {
+export function resolveEnvironmentPort(root, requestedPort, freshDefaultPort) {
   const filename = join(root, ".tama.env");
   if (!existsSync(filename)) {
-    return requestedPort ?? DEFAULTS.port;
+    return requestedPort ?? freshDefaultPort ?? DEFAULTS.port;
   }
   const raw =
     parseEnvironment(readFileSync(filename, "utf8"), filename).get("TAMA_PORT") ??
@@ -626,12 +628,19 @@ function postgresEnvironment(values, filename) {
  * @param {number} [requestedPort]
  * @param {McpAppEnvironmentInput | undefined} [mcpApp]
  * @param {boolean} [materializeSecrets]
+ * @param {number} [freshDefaultPort]
  * @returns {EnvironmentPlan}
  */
-export function planEnvironment(root, requestedPort, mcpApp, materializeSecrets = true) {
+export function planEnvironment(
+  root,
+  requestedPort,
+  mcpApp,
+  materializeSecrets = true,
+  freshDefaultPort,
+) {
   const filename = join(root, ".tama.env");
   if (!existsSync(filename)) {
-    const port = requestedPort ?? DEFAULTS.port;
+    const port = requestedPort ?? freshDefaultPort ?? DEFAULTS.port;
     let content = newEnvironment(port, materializeSecrets);
     if (mcpApp) {
       content =
@@ -659,7 +668,7 @@ export function planEnvironment(root, requestedPort, mcpApp, materializeSecrets 
 
   const original = readFileSync(filename, "utf8");
   const values = parseEnvironment(original, filename);
-  const port = resolveEnvironmentPort(root, requestedPort);
+  const port = resolveEnvironmentPort(root, requestedPort, freshDefaultPort);
   const rawExistingPort = values.get("TAMA_PORT") ?? String(DEFAULTS.port);
   const existingPort = /^\d+$/u.test(rawExistingPort)
     ? Number.parseInt(rawExistingPort, 10)

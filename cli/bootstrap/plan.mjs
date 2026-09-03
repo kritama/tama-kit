@@ -8,9 +8,13 @@ import { BOOTSTRAP_SCHEMA_VERSION, DEFAULTS } from "./constants.mjs";
 import { inspectProject } from "./detect-project.mjs";
 import { planEnvironment, resolveEnvironmentPort } from "./environment.mjs";
 import { planGitignore, validateSecretFilesUntracked } from "./gitignore.mjs";
-import { createManagedFilePlanner } from "./manifest.mjs";
+import { createManagedFilePlanner, readMcpAppProvider } from "./manifest.mjs";
 import { planMcpApp, resolveMcpAppState } from "./mcp-app.mjs";
-import { MCP_APP_COMPATIBILITY_IDENTIFIER } from "./mcp-app-contract.mjs";
+import {
+  contractTamaPort,
+  loadTamaContract,
+  MCP_APP_COMPATIBILITY_IDENTIFIER,
+} from "./mcp-app-contract.mjs";
 import { planAgentSkills } from "./skills.mjs";
 import { renderTemplate } from "./templates.mjs";
 import { planTerraform } from "./terraform.mjs";
@@ -99,7 +103,12 @@ export function createBootstrapPlan(options) {
         contractDocument: mcpAppPrepared.contractDocument,
       })
     : null;
-  const port = resolveEnvironmentPort(inspection.root, options.port);
+  // A fresh MCP App run adopts the Tama port the accepted contract documents
+  // so the container and the host-native provider never share a host port.
+  const mcpAppFreshPort = mcpAppPrepared
+    ? (contractTamaPort(mcpAppPrepared.contractDocument, loadTamaContract()) ?? undefined)
+    : undefined;
+  const port = resolveEnvironmentPort(inspection.root, options.port, mcpAppFreshPort);
   const managedFiles = createManagedFilePlanner(
     inspection.root,
     inspection.tamaDirectory,
@@ -132,13 +141,22 @@ export function createBootstrapPlan(options) {
     options.port,
     mcpAppEnvironment ?? undefined,
     options.materializeSecrets ?? true,
+    mcpAppFreshPort,
   );
-  const providerUsesHostGateway = (() => {
-    if (!mcpApp) {
+  // The host-gateway mapping must survive ordinary reruns without --mcp-app:
+  // the persisted integration (and .tama.env) outlives the current plan, so
+  // the mapping is derived from the persisted provider origin as well.
+  const persistedMcpApp = readMcpAppProvider(inspection.tamaDirectory);
+  const providerUsesHostGateway = [
+    ...(mcpApp ? [mcpApp.providerOrigin] : []),
+    ...(persistedMcpApp?.providerOrigin ? [persistedMcpApp.providerOrigin] : []),
+  ].some((origin) => {
+    try {
+      return new URL(origin).hostname === "host.docker.internal";
+    } catch {
       return false;
     }
-    return new URL(mcpApp.providerOrigin).hostname === "host.docker.internal";
-  })();
+  });
   const replacements = {
     PORT: environment.port,
     CONTAINER_PORT: DEFAULTS.containerPort,

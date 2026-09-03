@@ -84,6 +84,18 @@ export function normalizeMcpAppOrigin(value, flag) {
 }
 
 /**
+ * Reports whether a URL hostname is a loopback address. Loopback is valid for
+ * client and Tama origins (both are reached from the host) but never for the
+ * provider origin, which the Tama container must also reach.
+ *
+ * @param {string} hostname
+ * @returns {boolean}
+ */
+function isLoopbackHostname(hostname) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+}
+
+/**
  * Normalizes an optional allowed origin the same way required origins are,
  * reporting the repeating flag in diagnostics.
  *
@@ -93,9 +105,7 @@ export function normalizeMcpAppOrigin(value, flag) {
 function allowedOrigin(value) {
   const origin = normalizeMcpAppOrigin(value, "--allowed-origin");
   const url = new URL(origin);
-  const loopback =
-    url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
-  if (url.protocol !== "https:" && !loopback) {
+  if (url.protocol !== "https:" && !isLoopbackHostname(url.hostname)) {
     throw usageError(`--allowed-origin must use https unless it is loopback: ${value}`);
   }
   return origin;
@@ -119,12 +129,7 @@ function originForPort(origin, port, flag) {
   if (effectivePort !== port) {
     throw usageError(`${flag} must use the selected Tama port ${port}: ${origin}`);
   }
-  if (
-    url.protocol === "http:" &&
-    url.hostname !== "localhost" &&
-    url.hostname !== "127.0.0.1" &&
-    url.hostname !== "[::1]"
-  ) {
+  if (url.protocol === "http:" && !isLoopbackHostname(url.hostname)) {
     throw usageError(`${flag} must use https unless it is loopback: ${origin}`);
   }
   return normalized;
@@ -450,6 +455,31 @@ export function planMcpApp(input) {
       null,
     "--provider-origin",
   );
+  // Every verification probe is issued from the host, so a loopback provider
+  // origin would pass them while the Tama container can never reach the
+  // host-native provider. Reject it before any state is persisted.
+  if (isLoopbackHostname(new URL(providerOrigin).hostname)) {
+    throw usageError(
+      `the provider origin ${providerOrigin} is loopback and cannot be reached from the Tama container; ` +
+        `pass --provider-origin with a container-reachable origin such as ` +
+        `http://host.docker.internal:${new URL(providerOrigin).port || "80"} ` +
+        `(Tama Kit adds the Compose host-gateway mapping for host.docker.internal)`,
+    );
+  }
+  const providerUrl = new URL(providerOrigin);
+  const providerHostPort =
+    providerUrl.port === ""
+      ? providerUrl.protocol === "https:"
+        ? 443
+        : 80
+      : Number(providerUrl.port);
+  if (providerUrl.hostname === "host.docker.internal" && providerHostPort === port) {
+    throw usageError(
+      `the selected Tama port ${port} collides with the provider origin ${providerOrigin}; ` +
+        `the host-native provider already listens on host port ${providerHostPort}. ` +
+        `Pass --port to select a different Tama port`,
+    );
+  }
   const existingTamaOrigin = persistedTamaOrigin(root);
   const defaultTamaOrigin =
     namedLocalOrigin(input.contractDocument, "tama_origin") ??

@@ -9,6 +9,7 @@ import { readMcpAppProvider } from "../../cli/bootstrap/manifest.mjs";
 import { prepareMcpApp } from "../../cli/bootstrap/mcp-app.mjs";
 import {
   contractLocalOrigin,
+  contractTamaPort,
   discoverProviderContract,
   loadTamaContract,
   resolveBindings,
@@ -158,7 +159,7 @@ function memoveeContract(overrides = {}) {
       enabled: { metadata: true, jwks: true, introspection: true },
     },
     local_development: {
-      memovee_origin: "http://127.0.0.1:4000",
+      memovee_origin: "http://host.docker.internal:4000",
       tama_origin: "http://127.0.0.1:4001",
       resource: "http://127.0.0.1:4001/mcp/app",
     },
@@ -409,7 +410,7 @@ test("verifyEnvironmentLoading confirms application-owned loaders", () => {
 
 test("contractLocalOrigin reads the provider-keyed local development origin", () => {
   const contract = memoveeContract();
-  assert.equal(contractLocalOrigin(contract, "memovee"), "http://127.0.0.1:4000");
+  assert.equal(contractLocalOrigin(contract, "memovee"), "http://host.docker.internal:4000");
   assert.equal(contractLocalOrigin(contract, "acme"), null);
   assert.equal(contractLocalOrigin(null, "memovee"), null);
 });
@@ -635,7 +636,7 @@ test("bootstrap plans a complete MCP App provider integration from a discovered 
   assert.ok(mcp);
   assert.equal(plan.framework, "generic");
   assert.equal(mcp.lifecycle, "prepared");
-  assert.equal(mcp.providerOrigin, "http://127.0.0.1:4000");
+  assert.equal(mcp.providerOrigin, "http://host.docker.internal:4000");
   assert.equal(mcp.tamaOrigin, "http://127.0.0.1:4001");
   assert.equal(mcp.resource, "http://127.0.0.1:4001/mcp/app");
   assert.equal(mcp.introspectionClientId, "http://127.0.0.1:4001/mcp/app/introspection");
@@ -652,7 +653,7 @@ test("bootstrap plans a complete MCP App provider integration from a discovered 
   assert.equal(statSync(fragmentPath).mode & 0o777, 0o600);
   const fragmentValues = parseEnv(fragment);
   assert.equal(fragmentValues.MEMOVEE_TAMA_MCP_APP_MODE, "prepared");
-  assert.equal(fragmentValues.MEMOVEE_OAUTH_ISSUER, "http://127.0.0.1:4000");
+  assert.equal(fragmentValues.MEMOVEE_OAUTH_ISSUER, "http://host.docker.internal:4000");
   assert.equal(fragmentValues.MEMOVEE_TAMA_MCP_APP_RESOURCE, "http://127.0.0.1:4001/mcp/app");
   assert.equal(fragmentValues.MEMOVEE_OAUTH_SIGNING_ALGORITHM, "RS256");
   assert.equal(fragmentValues.MEMOVEE_OAUTH_SIGNING_KEY_ID, mcp.providerSigningKeyId);
@@ -673,11 +674,14 @@ test("bootstrap plans a complete MCP App provider integration from a discovered 
   assert.equal(tamaValues.TAMA_MCP_APP_MODE, "prepared");
   assert.equal(tamaValues.TAMA_MCP_APP_RESOURCE, "http://127.0.0.1:4001/mcp/app");
   assert.equal(tamaValues.TAMA_MCP_APP_ALLOWED_ORIGINS, "http://127.0.0.1:3000");
-  assert.equal(tamaValues.TAMA_MCP_APP_AUTHORIZATION_SERVER, "http://127.0.0.1:4000");
-  assert.equal(tamaValues.TAMA_MCP_APP_JWKS_URI, "http://127.0.0.1:4000/.well-known/jwks.json");
+  assert.equal(tamaValues.TAMA_MCP_APP_AUTHORIZATION_SERVER, "http://host.docker.internal:4000");
+  assert.equal(
+    tamaValues.TAMA_MCP_APP_JWKS_URI,
+    "http://host.docker.internal:4000/.well-known/jwks.json",
+  );
   assert.equal(
     tamaValues.TAMA_MCP_APP_INTROSPECTION_ENDPOINT,
-    "http://127.0.0.1:4000/auth/introspections",
+    "http://host.docker.internal:4000/auth/introspections",
   );
   assert.equal(tamaValues.TAMA_MCP_APP_SIGNING_ALGORITHMS, "RS256");
   assert.equal(tamaValues.TAMA_MCP_APP_INTROSPECTION_CLIENT_ID, mcp.introspectionClientId);
@@ -699,7 +703,7 @@ test("bootstrap plans a complete MCP App provider integration from a discovered 
   assert.equal(manifest.mcpAppProvider.contractSource, "contract");
   assert.equal(manifest.mcpAppProvider.environmentLoading, "verified");
   assert.equal(manifest.mcpAppProvider.bindings.mode, "MEMOVEE_TAMA_MCP_APP_MODE");
-  assert.equal(manifest.mcpAppProvider.providerOrigin, "http://127.0.0.1:4000");
+  assert.equal(manifest.mcpAppProvider.providerOrigin, "http://host.docker.internal:4000");
   assert.equal(manifest.mcpAppProvider.tamaOrigin, "http://127.0.0.1:4001");
   assert.deepEqual(manifest.mcpAppProvider.allowedOrigins, ["http://127.0.0.1:3000"]);
   const example = readFileSync(join(root, ".tama.env.example"), "utf8");
@@ -707,6 +711,8 @@ test("bootstrap plans a complete MCP App provider integration from a discovered 
   assert.doesNotMatch(example, /TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY=/u);
   const generatedReadme = readFileSync(join(root, "tama", "README.md"), "utf8");
   assert.match(generatedReadme, /MCP App provider integration/u);
+  const discoveredCompose = readFileSync(join(root, "tama", "compose.yaml"), "utf8");
+  assert.match(discoveredCompose, /host\.docker\.internal:host-gateway/u);
 
   const second = planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract }));
   assert.ok(second.operations.every((operation) => operation.action === "unchanged"));
@@ -734,7 +740,7 @@ test("bootstrap activates the MCP App integration when requested", () => {
   assert.equal(tama.TAMA_MCP_APP_MODE, "enabled");
 });
 
-test("bootstrap keeps provider service endpoints on one shared origin", () => {
+test("bootstrap keeps provider endpoints on one shared origin and rejects loopback", () => {
   const root = project();
   const contractPath = writeContract(root);
   const contract = validContract();
@@ -759,21 +765,31 @@ test("bootstrap keeps provider service endpoints on one shared origin", () => {
   const compose = readFileSync(join(root, "tama", "compose.yaml"), "utf8");
   assert.match(compose, /host\.docker\.internal:host-gateway/u);
 
-  const loopbackRoot = project();
-  const loopbackContractPath = writeContract(loopbackRoot);
-  const loopbackContract = validContract();
-  const loopback = planWithMcp(
-    loopbackRoot,
-    preparedFor(loopbackRoot, {
-      contractPath: loopbackContractPath,
-      contractDocument: loopbackContract,
-    }),
-    { providerOrigin: "http://127.0.0.1:4000" },
-  );
-  const composeOperation = loopback.operations.find((operation) =>
-    operation.path.endsWith(join("tama", "compose.yaml")),
-  );
-  assert.doesNotMatch(composeOperation?.content ?? "", /host-gateway/u);
+  for (const loopbackOrigin of [
+    "http://127.0.0.1:4000",
+    "http://localhost:4000",
+    "http://[::1]:4000",
+  ]) {
+    const loopbackRoot = project();
+    const loopbackContractPath = writeContract(loopbackRoot);
+    const loopbackContract = validContract();
+    assert.throws(
+      () =>
+        planWithMcp(
+          loopbackRoot,
+          preparedFor(loopbackRoot, {
+            contractPath: loopbackContractPath,
+            contractDocument: loopbackContract,
+          }),
+          { providerOrigin: loopbackOrigin },
+        ),
+      (error) =>
+        error instanceof CLIError &&
+        error.exitCode === EXIT_CODES.USAGE &&
+        /loopback and cannot be reached from the Tama container/u.test(error.message) &&
+        /host\.docker\.internal/u.test(error.message),
+    );
+  }
 });
 
 test("bootstrap requires a provider origin when no contract declares one", () => {
@@ -805,7 +821,7 @@ test("bootstrap derives conventional bindings for providers without a contract",
       source: "flags",
     },
   });
-  const plan = planWithMcp(root, prepared, { providerOrigin: "http://127.0.0.1:5000" });
+  const plan = planWithMcp(root, prepared, { providerOrigin: "http://host.docker.internal:5000" });
   applyOperations(plan.operations);
 
   const mcp = plan.mcpApp;
@@ -817,7 +833,7 @@ test("bootstrap derives conventional bindings for providers without a contract",
   assert.equal(mcp.environmentLoading, "unverified");
   const fragment = parseEnv(readFileSync(join(root, ".acme.integration.env"), "utf8"));
   assert.equal(fragment.ACME_TAMA_MCP_APP_MODE, "prepared");
-  assert.equal(fragment.ACME_OAUTH_ISSUER, "http://127.0.0.1:5000");
+  assert.equal(fragment.ACME_OAUTH_ISSUER, "http://host.docker.internal:5000");
   const manifest = JSON.parse(readFileSync(join(root, "tama", ".tama-kit.json"), "utf8"));
   assert.equal(manifest.mcpAppProvider.contractSource, "conventional");
   assert.equal(manifest.mcpAppProvider.contractPath, null);
@@ -955,10 +971,10 @@ test("bootstrap explicitly migrates provider identity without rotating trust mat
   const root = project();
   const originalPrepared = await prepareFor(root, {
     providerName: "acme",
-    providerOrigin: "http://127.0.0.1:5000",
+    providerOrigin: "http://host.docker.internal:5000",
   });
   const original = planWithMcp(root, originalPrepared, {
-    providerOrigin: "http://127.0.0.1:5000",
+    providerOrigin: "http://host.docker.internal:5000",
   });
   applyOperations(original.operations);
   const oldPath = join(root, ".acme.integration.env");
@@ -966,7 +982,7 @@ test("bootstrap explicitly migrates provider identity without rotating trust mat
 
   writeFileSync(oldPath, `${readFileSync(oldPath, "utf8")}# Provider-owned\nACME_OTHER=kept\n`);
   const adopted = planWithMcp(root, await prepareFor(root), {
-    providerOrigin: "http://127.0.0.1:5000",
+    providerOrigin: "http://host.docker.internal:5000",
   });
   applyOperations(adopted.operations);
   writeFileSync(join(root, ".envrc"), 'dotenv_load ".beta.integration.env"\n');
@@ -974,11 +990,11 @@ test("bootstrap explicitly migrates provider identity without rotating trust mat
   const migratedPrepared = await prepareFor(root, {
     providerName: "beta",
     providerPrefix: "BETA",
-    providerOrigin: "http://127.0.0.1:5000",
+    providerOrigin: "http://host.docker.internal:5000",
     migrateProviderIdentity: true,
   });
   const migrated = planWithMcp(root, migratedPrepared, {
-    providerOrigin: "http://127.0.0.1:5000",
+    providerOrigin: "http://host.docker.internal:5000",
     migrateProviderIdentity: true,
   });
   assert.ok(
@@ -996,7 +1012,7 @@ test("bootstrap explicitly migrates provider identity without rotating trust mat
   assert.equal(readMcpAppProvider(join(root, "tama"))?.identity.name, "acme");
 
   const retry = planWithMcp(root, migratedPrepared, {
-    providerOrigin: "http://127.0.0.1:5000",
+    providerOrigin: "http://host.docker.internal:5000",
     migrateProviderIdentity: true,
   });
   applyOperations(retry.operations);
@@ -1015,7 +1031,7 @@ test("bootstrap explicitly migrates provider identity without rotating trust mat
 
   const convergedPrepared = await prepareFor(root);
   const converged = planWithMcp(root, convergedPrepared, {
-    providerOrigin: "http://127.0.0.1:5000",
+    providerOrigin: "http://host.docker.internal:5000",
   });
   assert.ok(converged.operations.every(({ action }) => action === "unchanged"));
 });
@@ -1167,7 +1183,7 @@ test("bootstrap preserves exact public origins and never infers allowed origins"
   });
   applyOperations(first.operations);
   const persisted = readMcpAppProvider(join(root, "tama"));
-  assert.equal(persisted?.providerOrigin, "http://127.0.0.1:4000");
+  assert.equal(persisted?.providerOrigin, "http://host.docker.internal:4000");
   assert.equal(persisted?.tamaOrigin, "http://127.0.0.1:4001");
   assert.deepEqual(persisted?.allowedOrigins, ["http://127.0.0.1:3000"]);
   assert.throws(
@@ -1221,9 +1237,17 @@ test("readMcpAppProvider fails closed on a malformed persisted provider block", 
   );
 });
 
-/** @param {string} kid @returns {Record<string, unknown>} */
-function jwksDocument(kid) {
-  return { keys: [{ kid, kty: "RSA", alg: "RS256", n: "AQAB", e: "AQAB" }] };
+/**
+ * Builds a JWKS document publishing the public members of a private JWK
+ * under `kid`, or a placeholder key when no JWK is supplied.
+ *
+ * @param {string} kid
+ * @param {string} [privateJwk]
+ * @returns {Record<string, unknown>}
+ */
+function jwksDocument(kid, privateJwk) {
+  const key = privateJwk === undefined ? { n: "AQAB", e: "AQAB" } : JSON.parse(privateJwk);
+  return { keys: [{ kid, kty: "RSA", alg: "RS256", n: key.n, e: key.e }] };
 }
 
 /** @param {NonNullable<ReturnType<typeof planWithMcp>["mcpApp"]>} plan */
@@ -1234,7 +1258,7 @@ function providerMetadata(plan) {
   };
 }
 
-/** @returns {Promise<{root: string, plan: NonNullable<ReturnType<typeof planWithMcp>["mcpApp"]}>} */
+/** @returns {Promise<{root: string, plan: NonNullable<ReturnType<typeof planWithMcp>["mcpApp"]>, providerJwk: string, tamaJwk: string}>} */
 async function buildVerifiedRoot() {
   const root = project();
   const contractPath = writeContract(root);
@@ -1243,11 +1267,22 @@ async function buildVerifiedRoot() {
   applyOperations(plan.operations);
   const mcp = plan.mcpApp;
   assert.ok(mcp);
-  return { root, plan: mcp };
+  const fragment = parseEnv(readFileSync(join(root, mcp.provider.environmentFile), "utf8"));
+  const tamaValues = parseEnv(readFileSync(join(root, ".tama.env"), "utf8"));
+  const providerJwk = fragment[mcp.bindings.roles.access_token_private_signing_key];
+  const tamaJwk = tamaValues.TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY;
+  assert.equal(typeof providerJwk, "string");
+  assert.equal(typeof tamaJwk, "string");
+  return {
+    root,
+    plan: mcp,
+    providerJwk: /** @type {string} */ (providerJwk),
+    tamaJwk: /** @type {string} */ (tamaJwk),
+  };
 }
 
 test("verifyMcpApp verifies both JWKS and the inactive introspection probe", async () => {
-  const { root, plan } = await buildVerifiedRoot();
+  const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
   const calls = [];
   const fetch = async (input, init) => {
     const url = input.href;
@@ -1257,8 +1292,8 @@ test("verifyMcpApp verifies both JWKS and the inactive introspection probe", asy
     }
     if (url.endsWith("/.well-known/jwks.json")) {
       const body = url.startsWith(plan.tamaOrigin)
-        ? jwksDocument(plan.introspectionSigningKeyId)
-        : jwksDocument(plan.providerSigningKeyId);
+        ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+        : jwksDocument(plan.providerSigningKeyId, providerJwk);
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -1296,7 +1331,7 @@ test("verifyMcpApp verifies both JWKS and the inactive introspection probe", asy
 });
 
 test("verifyMcpApp reports each failed probe independently", async () => {
-  const { root, plan } = await buildVerifiedRoot();
+  const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
 
   const wrongProvider = await verifyMcpApp({
     root,
@@ -1307,7 +1342,7 @@ test("verifyMcpApp reports each failed probe independently", async () => {
         return Response.json(providerMetadata(plan));
       }
       const body = url.startsWith(plan.tamaOrigin)
-        ? jwksDocument(plan.introspectionSigningKeyId)
+        ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
         : jwksDocument("wrong-kid");
       return new Response(JSON.stringify(body), {
         status: 200,
@@ -1333,11 +1368,9 @@ test("verifyMcpApp reports each failed probe independently", async () => {
       if (url.endsWith("/.well-known/jwks.json")) {
         return new Response(
           JSON.stringify(
-            jwksDocument(
-              url.startsWith(plan.tamaOrigin)
-                ? plan.introspectionSigningKeyId
-                : plan.providerSigningKeyId,
-            ),
+            url.startsWith(plan.tamaOrigin)
+              ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+              : jwksDocument(plan.providerSigningKeyId, providerJwk),
           ),
           {
             status: 200,
@@ -1359,7 +1392,7 @@ test("verifyMcpApp reports each failed probe independently", async () => {
     fetch: async (input) => {
       const url = input.href;
       if (url.startsWith(plan.tamaOrigin)) {
-        return new Response(JSON.stringify(jwksDocument(plan.introspectionSigningKeyId)), {
+        return new Response(JSON.stringify(jwksDocument(plan.introspectionSigningKeyId, tamaJwk)), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
@@ -1375,7 +1408,7 @@ test("verifyMcpApp reports each failed probe independently", async () => {
 });
 
 test("verifyMcpApp gates enabled metadata, route, and exact provider advertisement", async () => {
-  const { root, plan } = await buildVerifiedRoot();
+  const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
   const enabledPlan = { ...plan, lifecycle: "enabled", providerLifecycle: "enabled" };
   const result = await verifyMcpApp({
     root,
@@ -1396,11 +1429,9 @@ test("verifyMcpApp gates enabled metadata, route, and exact provider advertiseme
       }
       if (url.endsWith("/.well-known/jwks.json")) {
         return Response.json(
-          jwksDocument(
-            url.startsWith(enabledPlan.tamaOrigin)
-              ? enabledPlan.introspectionSigningKeyId
-              : enabledPlan.providerSigningKeyId,
-          ),
+          url.startsWith(enabledPlan.tamaOrigin)
+            ? jwksDocument(enabledPlan.introspectionSigningKeyId, tamaJwk)
+            : jwksDocument(enabledPlan.providerSigningKeyId, providerJwk),
         );
       }
       if (url === enabledPlan.resource) {
@@ -1424,6 +1455,166 @@ test("verifyMcpApp gates enabled metadata, route, and exact provider advertiseme
   );
 });
 
+test("verifyMcpApp rejects a JWKS whose key material does not match the persisted key", async () => {
+  const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
+
+  const staleProvider = await verifyMcpApp({
+    root,
+    plan,
+    fetch: async (input) => {
+      const url = input.href;
+      if (url.endsWith("/.well-known/oauth-authorization-server")) {
+        return Response.json(providerMetadata(plan));
+      }
+      if (url.endsWith("/.well-known/jwks.json")) {
+        return Response.json(
+          url.startsWith(plan.tamaOrigin)
+            ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+            : jwksDocument(plan.providerSigningKeyId),
+        );
+      }
+      return Response.json({ active: false });
+    },
+  });
+  assert.equal(staleProvider.verified, false);
+  assert.equal(staleProvider.providerReachable, false);
+  assert.equal(staleProvider.tamaReachable, true);
+  const staleProbe = staleProvider.probes.find(({ name }) => name === "provider_jwks");
+  assert.equal(staleProbe?.ok, false);
+  assert.match(staleProbe?.reason ?? "", /different key under the expected identifier/u);
+
+  const staleTama = await verifyMcpApp({
+    root,
+    plan,
+    fetch: async (input) => {
+      const url = input.href;
+      if (url.endsWith("/.well-known/oauth-authorization-server")) {
+        return Response.json(providerMetadata(plan));
+      }
+      if (url.endsWith("/.well-known/jwks.json")) {
+        return Response.json(
+          url.startsWith(plan.tamaOrigin)
+            ? jwksDocument(plan.introspectionSigningKeyId)
+            : jwksDocument(plan.providerSigningKeyId, providerJwk),
+        );
+      }
+      return Response.json({ active: false });
+    },
+  });
+  assert.equal(staleTama.verified, false);
+  assert.equal(staleTama.providerReachable, true);
+  assert.equal(staleTama.tamaReachable, false);
+  const staleTamaProbe = staleTama.probes.find(({ name }) => name === "tama_jwks");
+  assert.equal(staleTamaProbe?.ok, false);
+  assert.match(
+    staleTamaProbe?.reason ?? "",
+    /different introspection key under the expected identifier/u,
+  );
+});
+
+test("verifyMcpApp rejects a JWKS that exposes private members under the expected identifier", async () => {
+  const { root, plan, providerJwk, tamaJwk } = await buildVerifiedRoot();
+  const leaked = await verifyMcpApp({
+    root,
+    plan,
+    fetch: async (input) => {
+      const url = input.href;
+      if (url.endsWith("/.well-known/oauth-authorization-server")) {
+        return Response.json(providerMetadata(plan));
+      }
+      if (url.endsWith("/.well-known/jwks.json")) {
+        const body = url.startsWith(plan.tamaOrigin)
+          ? jwksDocument(plan.introspectionSigningKeyId, tamaJwk)
+          : jwksDocument(plan.providerSigningKeyId, providerJwk);
+        body.keys[0].d = "leaked-private-exponent";
+        return Response.json(body);
+      }
+      return Response.json({ active: false });
+    },
+  });
+  assert.equal(leaked.verified, false);
+  assert.equal(leaked.providerReachable, false);
+  const leakedProbe = leaked.probes.find(({ name }) => name === "provider_jwks");
+  assert.equal(leakedProbe?.ok, false);
+  assert.match(leakedProbe?.reason ?? "", /different key under the expected identifier/u);
+});
+
+test("contractTamaPort derives the fresh Tama port from the accepted contract", () => {
+  const contract = validContract();
+  assert.equal(contractTamaPort(contract, null), 4001);
+  assert.equal(contractTamaPort(null, loadTamaContract()), 4001);
+  const override = structuredClone(memoveeContract());
+  override.local_development.tama_origin = "http://127.0.0.1:4567";
+  assert.equal(contractTamaPort(validateMcpAppContract(override), loadTamaContract()), 4567);
+  const none = structuredClone(memoveeContract());
+  delete none.local_development.tama_origin;
+  assert.equal(contractTamaPort(null, validateMcpAppContract(none)), null);
+});
+
+test("bootstrap derives the fresh Tama port from the accepted contract", () => {
+  const root = project();
+  const contractPath = writeContract(root);
+  const contract = validContract();
+  const plan = createBootstrapPlan({
+    cwd: root,
+    targetPath: root,
+    mcpApp: {
+      requested: true,
+      activate: false,
+      allowedOrigins: ["http://127.0.0.1:3000"],
+    },
+    mcpAppPrepared: preparedFor(root, { contractPath, contractDocument: contract }),
+  });
+  assert.equal(plan.port, 4001);
+  assert.equal(plan.mcpApp?.tamaOrigin, "http://127.0.0.1:4001");
+  assert.equal(plan.mcpApp?.providerOrigin, "http://host.docker.internal:4000");
+  assert.equal(plan.mcpApp?.resource, "http://127.0.0.1:4001/mcp/app");
+  assert.equal(plan.mcpApp?.introspectionClientId, "http://127.0.0.1:4001/mcp/app/introspection");
+});
+
+test("bootstrap rejects a Tama port that collides with the host-native provider", () => {
+  const root = project();
+  const contractPath = writeContract(root);
+  const contract = validContract();
+  assert.throws(
+    () =>
+      createBootstrapPlan({
+        cwd: root,
+        targetPath: root,
+        port: 4000,
+        mcpApp: {
+          requested: true,
+          activate: false,
+          allowedOrigins: ["http://127.0.0.1:3000"],
+        },
+        mcpAppPrepared: preparedFor(root, { contractPath, contractDocument: contract }),
+      }),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.USAGE &&
+      /collides with the provider origin/u.test(error.message),
+  );
+});
+
+test("bootstrap retains the host-gateway mapping on ordinary reruns", () => {
+  const root = project();
+  const contractPath = writeContract(root);
+  const contract = validContract();
+  const first = planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract }), {
+    providerOrigin: "http://host.docker.internal:4000",
+  });
+  applyOperations(first.operations);
+  assert.match(readFileSync(join(root, "tama", "compose.yaml"), "utf8"), /host-gateway/u);
+
+  // The mapping is derived from the persisted provider origin, so an
+  // ordinary rerun re-renders the identical Compose file.
+  const rerun = createBootstrapPlan({ cwd: root, targetPath: root });
+  const composeOperation = rerun.operations.find((operation) =>
+    operation.path.endsWith(join("tama", "compose.yaml")),
+  );
+  assert.equal(composeOperation?.action, "unchanged");
+});
+
 test("the bootstrap command plans the provider integration from explicit flags", async () => {
   const root = project();
   const { exitCode, stdout } = await command(root, [
@@ -1439,7 +1630,7 @@ test("the bootstrap command plans the provider integration from explicit flags",
     "--provider-name",
     "acme",
     "--provider-origin",
-    "http://127.0.0.1:5000",
+    "http://host.docker.internal:5000",
     "--allowed-origin",
     "http://127.0.0.1:3000",
   ]);
@@ -1459,7 +1650,7 @@ test("the bootstrap command plans the provider integration from explicit flags",
   });
   assert.equal(result.mcpApp.mode, "prepared");
   assert.equal(result.mcpApp.activated, false);
-  assert.equal(result.mcpApp.providerOrigin, "http://127.0.0.1:5000");
+  assert.equal(result.mcpApp.providerOrigin, "http://host.docker.internal:5000");
   assert.equal(result.mcpApp.tamaOrigin, "http://127.0.0.1:4001");
   assert.equal(result.mcpApp.resource, "http://127.0.0.1:4001/mcp/app");
   assert.equal(result.mcpApp.introspectionClientId, "http://127.0.0.1:4001/mcp/app/introspection");
@@ -1484,7 +1675,7 @@ test("MCP App JSON dry-runs are byte-for-byte deterministic and write no secrets
     "--provider-name",
     "acme",
     "--provider-origin",
-    "http://127.0.0.1:5000",
+    "http://host.docker.internal:5000",
     "--tama-origin",
     "http://127.0.0.1:4001",
     "--allowed-origin",
@@ -1528,7 +1719,7 @@ test("the bootstrap command discovers the contract identity for --mcp-app", asyn
     modeVariable: "MEMOVEE_TAMA_MCP_APP_MODE",
     environmentLoading: "verified",
   });
-  assert.equal(result.mcpApp.providerOrigin, "http://127.0.0.1:4000");
+  assert.equal(result.mcpApp.providerOrigin, "http://host.docker.internal:4000");
   assert.ok(result.changes.some((change) => change.path.endsWith(".memovee.integration.env")));
 });
 
@@ -1553,7 +1744,7 @@ test("the bootstrap command gates provider flags behind --mcp-app and --start be
     "bootstrap",
     root,
     "--provider-origin",
-    "http://127.0.0.1:5000",
+    "http://host.docker.internal:5000",
   ]);
   assert.equal(gated.exitCode, EXIT_CODES.USAGE);
   assert.match(gated.stderr, /require --mcp-app/u);

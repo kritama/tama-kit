@@ -44,21 +44,95 @@ async function fetchJson(fetch, url) {
   }
 }
 
+/** @param {unknown} value @returns {bigint | null} */
+function base64urlUnsigned(value) {
+  if (typeof value !== "string" || value.length === 0 || !/^[A-Za-z0-9_-]+$/u.test(value)) {
+    return null;
+  }
+  const bytes = Buffer.from(value, "base64url");
+  if (bytes.byteLength === 0) {
+    return null;
+  }
+  const integer = BigInt(`0x${bytes.toString("hex")}`);
+  return integer > 0n ? integer : null;
+}
+
+/** @type {readonly string[]} */
+const JWK_PRIVATE_MEMBERS = Object.freeze(["d", "p", "q", "dp", "dq", "qi", "oth", "k"]);
+
+/** @typedef {{n: string | null, e: string | null}} ExpectedPublicMembers */
+
+/**
+ * Reads the persisted private JWK for one side of the integration and
+ * extracts the public members the live JWKS must publish under the expected
+ * identifier. A missing or invalid value yields null members so the JWKS
+ * probe fails with an actionable reason instead of accepting unchecked key
+ * material.
+ *
+ * @param {string} root
+ * @param {string} filename
+ * @param {string} variable
+ * @returns {ExpectedPublicMembers}
+ */
+function expectedPublicMembers(root, filename, variable) {
+  const encoded = readEnvironmentValues(root, filename).get(variable);
+  if (typeof encoded !== "string" || encoded.length === 0) {
+    return { n: null, e: null };
+  }
+  /** @type {unknown} */
+  let parsed;
+  try {
+    parsed = JSON.parse(encoded);
+  } catch {
+    return { n: null, e: null };
+  }
+  if (!isPlainObject(parsed) || typeof parsed.n !== "string" || typeof parsed.e !== "string") {
+    return { n: null, e: null };
+  }
+  return { n: parsed.n, e: parsed.e };
+}
+
 /** @param {Record<string, unknown> | null} jwks @param {string} kid */
-function jwksContainsKid(jwks, kid) {
+function jwksHasKid(jwks, kid) {
   if (jwks === null || !Array.isArray(jwks.keys)) {
     return false;
   }
-  return jwks.keys.some(
-    (key) =>
-      isPlainObject(key) &&
-      key.kid === kid &&
-      key.kty === "RSA" &&
-      key.alg === "RS256" &&
-      typeof key.n === "string" &&
-      typeof key.e === "string" &&
-      key.d === undefined,
-  );
+  return jwks.keys.some((key) => isPlainObject(key) && key.kid === kid);
+}
+
+/**
+ * Reports whether a JWKS publishes the exact public key the integration
+ * plans from the persisted private JWK: a member with the expected
+ * identifier whose modulus and exponent match the expected key material and
+ * that carries no private members. Key material is compared, not only
+ * metadata, so a stale or misloaded key published under the expected
+ * identifier cannot pass verification.
+ *
+ * @param {Record<string, unknown> | null} jwks
+ * @param {string} kid
+ * @param {ExpectedPublicMembers} expected
+ * @returns {boolean}
+ */
+function jwksPublishesExpectedKey(jwks, kid, expected) {
+  const expectedModulus = base64urlUnsigned(expected.n);
+  const expectedExponent = base64urlUnsigned(expected.e);
+  if (jwks === null || !Array.isArray(jwks.keys)) {
+    return false;
+  }
+  if (expectedModulus === null || expectedExponent === null) {
+    return false;
+  }
+  return jwks.keys.some((key) => {
+    if (!isPlainObject(key) || key.kid !== kid) {
+      return false;
+    }
+    if (JWK_PRIVATE_MEMBERS.some((name) => key[name] !== undefined)) {
+      return false;
+    }
+    const modulus = typeof key.n === "string" ? base64urlUnsigned(key.n) : null;
+    const exponent = typeof key.e === "string" ? base64urlUnsigned(key.e) : null;
+    return modulus === expectedModulus && exponent === expectedExponent;
+  });
 }
 
 /**
@@ -171,8 +245,9 @@ async function routeProbe(fetch, url) {
 }
 
 /**
- * Verifies a running MCP App integration: the provider publishes its access
- * token key, Tama publishes the introspection key, and Tama's authenticated
+ * Verifies a running MCP App integration: the provider publishes the exact
+ * access-token key the bootstrap planned from the persisted private JWK,
+ * Tama publishes the exact introspection key, and Tama's authenticated
  * inactive-token introspection is rejected by the provider exactly as an
  * inactive token must be. All probes are read-only; nothing is activated or
  * mutated here.
@@ -198,23 +273,53 @@ export async function verifyMcpApp({ root, plan, fetch }) {
     ),
   );
 
+  const providerKey = expectedPublicMembers(
+    root,
+    plan.provider.environmentFile,
+    plan.bindings.roles.access_token_private_signing_key,
+  );
   const providerJwksResult = await fetchJson(fetch, `${plan.providerOrigin}/.well-known/jwks.json`);
-  const providerReachable = jwksContainsKid(providerJwksResult.body, plan.providerSigningKeyId);
+  const providerReachable = jwksPublishesExpectedKey(
+    providerJwksResult.body,
+    plan.providerSigningKeyId,
+    providerKey,
+  );
   probes.push(
     probe(
       "provider_jwks",
       providerReachable,
-      "provider JWKS did not contain the expected public RS256 key",
+      providerJwksResult.response === null
+        ? "provider JWKS was unreachable"
+        : !providerJwksResult.response.ok
+          ? `provider JWKS returned HTTP ${providerJwksResult.response.status}`
+          : providerKey.n === null || providerKey.e === null
+            ? `could not read the expected provider public key from ${plan.provider.environmentFile}`
+            : jwksHasKid(providerJwksResult.body, plan.providerSigningKeyId)
+              ? "provider JWKS publishes a different key under the expected identifier"
+              : "provider JWKS did not contain the expected key identifier",
     ),
   );
 
+  const tamaKey = expectedPublicMembers(root, ".tama.env", TAMA_INTROSPECTION_KEY_VARIABLE);
   const tamaJwksResult = await fetchJson(fetch, `${plan.tamaOrigin}/.well-known/jwks.json`);
-  const tamaReachable = jwksContainsKid(tamaJwksResult.body, plan.introspectionSigningKeyId);
+  const tamaReachable = jwksPublishesExpectedKey(
+    tamaJwksResult.body,
+    plan.introspectionSigningKeyId,
+    tamaKey,
+  );
   probes.push(
     probe(
       "tama_jwks",
       tamaReachable,
-      "Tama JWKS did not contain the expected public RS256 introspection key",
+      tamaJwksResult.response === null
+        ? "Tama JWKS was unreachable"
+        : !tamaJwksResult.response.ok
+          ? `Tama JWKS returned HTTP ${tamaJwksResult.response.status}`
+          : tamaKey.n === null || tamaKey.e === null
+            ? `could not read the expected Tama public key from .tama.env`
+            : jwksHasKid(tamaJwksResult.body, plan.introspectionSigningKeyId)
+              ? "Tama JWKS publishes a different introspection key under the expected identifier"
+              : "Tama JWKS did not contain the expected key identifier",
     ),
   );
 

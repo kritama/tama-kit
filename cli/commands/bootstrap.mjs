@@ -64,7 +64,7 @@ function usage() {
     "  --mcp-app-contract <path> Provider bootstrap contract (default: discover)",
     "  --provider-name <name> Provider identity name",
     "  --provider-prefix <prefix> Environment prefix override",
-    "  --provider-origin <origin> Public provider OAuth issuer origin",
+    "  --provider-origin <origin> Provider issuer origin, reachable from the Tama container",
     "  --tama-origin <origin> Exact public Tama origin",
     "  --allowed-origin <origin> Explicit allowed origin (repeatable)",
     "  --migrate-provider-identity Migrate the persisted provider identity",

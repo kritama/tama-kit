@@ -112,12 +112,12 @@
     }
   },
   "local_development": {
-    "memovee_origin": "http://127.0.0.1:4000",
+    "memovee_origin": "http://host.docker.internal:4000",
     "tama_origin": "http://127.0.0.1:4001",
     "resource": "http://127.0.0.1:4001/mcp/app",
     "introspection_client_id": "http://127.0.0.1:4001/mcp/app/introspection",
-    "memovee_jwks_uri": "http://127.0.0.1:4000/.well-known/jwks.json",
-    "memovee_introspection_endpoint": "http://127.0.0.1:4000/auth/introspections",
+    "memovee_jwks_uri": "http://host.docker.internal:4000/.well-known/jwks.json",
+    "memovee_introspection_endpoint": "http://host.docker.internal:4000/auth/introspections",
     "tama_jwks_uri": "http://127.0.0.1:4001/.well-known/jwks.json"
   },
   "local_loopback": {
