@@ -87,7 +87,10 @@ const server = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const form = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
-    if (!(await validAssertion(form.get("client_assertion") ?? "", values))) {
+    if (
+      form.get("client_id") !== values.FIXTURE_TAMA_INTROSPECTION_CLIENT_ID ||
+      !(await validAssertion(form.get("client_assertion") ?? "", values))
+    ) {
       json(response, 401, { error: "invalid_client" });
       return;
     }

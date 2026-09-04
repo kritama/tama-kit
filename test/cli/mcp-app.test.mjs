@@ -2266,6 +2266,7 @@ test("verifyMcpApp verifies both JWKS and the inactive introspection probe", asy
   const introspectionCalls = calls.filter((call) => call.url.endsWith("/auth/introspections"));
   assert.equal(introspectionCalls.length, 2);
   const controlBody = new URLSearchParams(String(introspectionCalls[0]?.body));
+  assert.equal(controlBody.get("client_id"), plan.introspectionClientId);
   // The negative control is structurally valid — a real JWT shape — but
   // signed by an unrelated key, so only signature verification rejects it.
   assert.match(String(controlBody.get("client_assertion")), JWT_PATTERN);
@@ -2275,6 +2276,7 @@ test("verifyMcpApp verifies both JWKS and the inactive introspection probe", asy
   );
   const body = new URLSearchParams(String(introspectionCalls[1]?.body));
   assert.equal(body.get("token"), "tama-kit-bootstrap-inactive-probe");
+  assert.equal(body.get("client_id"), plan.introspectionClientId);
   assert.equal(
     body.get("client_assertion_type"),
     "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",

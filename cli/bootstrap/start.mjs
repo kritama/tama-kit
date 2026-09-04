@@ -207,11 +207,12 @@ export function resolveComposeHostGatewayAddress(plan) {
  * not follow redirects unless explicitly requested, so success belongs to the
  * configured provider endpoint itself.
  *
- * @param {{root: string, composeFile: string}} plan
+ * @param {{root: string, composeFile: string, localHttps?: {providerHost: string, httpsPort: number} | null}} plan
  * @param {string} endpoint
+ * @param {typeof execFileSync} [execute]
  * @returns {boolean}
  */
-export function probeComposeProviderEndpoint(plan, endpoint) {
+export function probeComposeProviderEndpoint(plan, endpoint, execute = execFileSync) {
   let url;
   try {
     url = new URL(endpoint);
@@ -221,8 +222,14 @@ export function probeComposeProviderEndpoint(plan, endpoint) {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     return false;
   }
+  const endpointPort = url.port || (url.protocol === "https:" ? "443" : "80");
+  const localHttps = plan.localHttps;
+  const connectThroughCaddy =
+    localHttps && url.hostname === localHttps.providerHost
+      ? ["--connect-to", `${url.hostname}:${endpointPort}:caddy:${localHttps.httpsPort}`]
+      : [];
   try {
-    const status = execFileSync(
+    const status = execute(
       "docker",
       [
         "compose",
@@ -232,6 +239,7 @@ export function probeComposeProviderEndpoint(plan, endpoint) {
         "-T",
         "tama",
         "curl",
+        ...connectThroughCaddy,
         "--fail",
         "--silent",
         "--show-error",

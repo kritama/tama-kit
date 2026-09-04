@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
-import { managedComposeServiceExists } from "../../cli/bootstrap/start.mjs";
+import {
+  managedComposeServiceExists,
+  probeComposeProviderEndpoint,
+} from "../../cli/bootstrap/start.mjs";
 
 test("managed Compose service detection distinguishes reruns from unrelated listeners", () => {
   const plan = { root: "/tmp/example", composeFile: "/tmp/example/tama/compose.yaml" };
@@ -43,4 +46,42 @@ test("fetch timeout keeps a top-level await alive until the request is aborted",
   });
 
   assert.equal(output.trim(), "timed out");
+});
+
+test("local HTTPS provider probes preserve authority while connecting through Caddy", () => {
+  const calls = [];
+  const plan = {
+    root: "/tmp/example",
+    composeFile: "/tmp/example/compose.yaml",
+    localHttps: {
+      providerHost: "app.localhost",
+      httpsPort: 443,
+    },
+  };
+  const reachable = probeComposeProviderEndpoint(
+    plan,
+    "https://app.localhost/.well-known/oauth-authorization-server",
+    (command, args, options) => {
+      calls.push({ command, args, options });
+      return "200";
+    },
+  );
+
+  assert.equal(reachable, true);
+  assert.deepEqual(calls[0].args.slice(0, 10), [
+    "compose",
+    "-f",
+    plan.composeFile,
+    "exec",
+    "-T",
+    "tama",
+    "curl",
+    "--connect-to",
+    "app.localhost:443:caddy:443",
+    "--fail",
+  ]);
+  assert.equal(
+    calls[0].args.at(-1),
+    "https://app.localhost/.well-known/oauth-authorization-server",
+  );
 });

@@ -566,6 +566,7 @@ async function introspectInactiveToken({ root, plan, fetch, providerTransport })
       headers,
       body: new URLSearchParams({
         token: INACTIVE_PROBE_TOKEN,
+        client_id: plan.introspectionClientId,
         client_assertion: controlAssertion,
         client_assertion_type: CLIENT_ASSERTION_TYPE,
       }).toString(),
@@ -592,6 +593,7 @@ async function introspectInactiveToken({ root, plan, fetch, providerTransport })
       headers,
       body: new URLSearchParams({
         token: INACTIVE_PROBE_TOKEN,
+        client_id: plan.introspectionClientId,
         client_assertion: assertion,
         client_assertion_type: CLIENT_ASSERTION_TYPE,
       }).toString(),
