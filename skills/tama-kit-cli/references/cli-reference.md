@@ -30,12 +30,17 @@ decisions.
 
 Recommended agent sequence for a standard app:
 
+Resolve the skill mode from `tama/.tama-kit.json` first. A recorded `local`
+mode must remain `local`. Otherwise choose `manual` when the active agent
+already has Tama Kit's skills, or `local` when repository-local skills are
+explicitly requested.
+
 ```bash
 npx @kritama/tama-kit bootstrap /path/to/app \
-  --skills local --dry-run --json
+  --skills <resolved-skill-mode> --dry-run --json
 
 npx @kritama/tama-kit bootstrap /path/to/app \
-  --skills local --json
+  --skills <resolved-skill-mode> --json
 ```
 
 Add `--start` to the write command only when starting Docker services is part of
@@ -58,8 +63,11 @@ All provider-specific flags require `--mcp-app`.
 | `--migrate-provider-identity` | Deliberately migrate persisted provider identity. Requires an explicit `--provider-name`, a verified loader for the new fragment, and prepared provider mode. It cannot be combined with `--activate`. |
 
 For this Tama Kit contract revision, the bundled supported Tama range is
-`>= 0.13.1 and < 0.14.0`; confirm it against the installed version before
-choosing a tag. A typical local plan is:
+`>= 0.13.1 and < 0.14.0`. If an application-owned provider contract declares
+`supported_tama_versions`, choose a concrete pinned image version in the
+intersection of that range and the provider range. If it does not, `0.13.1` is
+a valid default. Stop when no known pinned version lies in both ranges. A
+typical local plan is:
 
 ```bash
 npx @kritama/tama-kit bootstrap /path/to/provider \
@@ -69,8 +77,8 @@ npx @kritama/tama-kit bootstrap /path/to/provider \
   --tama-origin http://127.0.0.1:4001 \
   --allowed-origin http://127.0.0.1:3000 \
   --port 4001 \
-  --image ghcr.io/upmaru/tama:0.13.1 \
-  --skills local \
+  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection> \
+  --skills <resolved-skill-mode> \
   --dry-run --json
 ```
 

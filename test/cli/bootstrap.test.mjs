@@ -35,6 +35,20 @@ function planFor(root, extra = {}) {
   return createBootstrapPlan({ cwd: root, targetPath: root, ...extra });
 }
 
+test("bootstrap help explains the allowed-origin HTTPS requirement and cap", async () => {
+  const output = [];
+  const exitCode = await run(["bootstrap", "--help"], {
+    cwd: project(),
+    interactive: false,
+    color: false,
+    stdout: (message = "") => output.push(message),
+    stderr: () => {},
+  });
+
+  assert.equal(exitCode, EXIT_CODES.SUCCESS);
+  assert.match(output.join("\n"), /--allowed-origin.*HTTPS off loopback, max 32 unique/u);
+});
+
 test("bootstrap creates a private, idempotent generic project scaffold", () => {
   const root = project();
   const first = planFor(root);
@@ -248,10 +262,14 @@ test("agent setup prompt covers runtime, private setup, Terraform validation, an
   assert.match(prompt, /wait until Tama responds successfully at http:\/\/localhost:4000\//u);
   assert.match(
     prompt,
-    /private onboarding URL is http:\/\/localhost:4000\/setup\/root\?token=private-test-token/u,
+    /open the private onboarding URL http:\/\/localhost:4000\/setup\/root\?token=private-test-token in the in-app browser/u,
   );
   assert.equal(prompt.split(setupUrl).length - 1, 1);
-  assert.match(prompt, /do not repeat it after this prompt or include it in logs/u);
+  assert.match(prompt, /do not repeat it or its token elsewhere in chat or logs/u);
+  assert.match(
+    prompt,
+    /If browser control is unavailable, direct me to tama\/README\.md without reproducing the token/u,
+  );
   assert.match(prompt, /Do not ask me to paste credentials into chat/u);
   assert.match(prompt, /terraform -chdir=tama init/u);
   assert.match(prompt, /terraform -chdir=tama validate/u);

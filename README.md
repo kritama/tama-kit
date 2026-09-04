@@ -33,7 +33,7 @@ the bundled `tama-kit-cli`, `app-integration`, `graph-builder`, and
 `graph-audit` skills into the repository's `.agents/skills/` directory or leave
 skill installation to the user. It preserves an existing global-foundation
 address and refuses ambiguous ownership rather than creating duplicate
-data-bearing resources.
+data-bearing resources. It does not require a separate Tama source checkout.
 
 Skip the prompt in scripts by selecting the skill mode explicitly:
 
@@ -54,8 +54,10 @@ the private browser setup without exposing credentials, runs Terraform
 initialization, formatting, validation, and planning, and requires explicit
 approval before `terraform apply`. Human output includes the complete private
 onboarding URL with its setup token so it can be opened or copied into the agent
-prompt. Treat that URL as a secret. JSON output exposes a token-redacted version
-as `agentPrompt`; dry-run output sets it to `null`.
+prompt. If the user explicitly requests guided setup and in-app browser control
+is available, the agent opens the URL there; otherwise it follows the local
+README instructions. Treat that URL as a secret. JSON output exposes a
+token-redacted version as `agentPrompt`; dry-run output sets it to `null`.
 
 Generated non-sensitive files are tracked by `tama/.tama-kit.json`. If a
 tracked file has been edited since the previous bootstrap, Tama Kit stops and
@@ -89,14 +91,22 @@ npx @kritama/tama-kit bootstrap --mcp-app \
   --tama-origin http://127.0.0.1:4001 \
   --allowed-origin http://127.0.0.1:3000 \
   --port 4001 \
-  --image ghcr.io/upmaru/tama:0.13.1
+  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection>
 ```
+
+Choose a concrete pinned image version in the intersection of Tama Kit's
+bundled range `>= 0.13.1 and < 0.14.0` and the application-owned contract's
+`supported_tama_versions` when that contract is present. If no provider range
+is declared, `0.13.1` is a valid default. Do not use `0.13.1` when the provider
+contract excludes it.
 
 The provider origin must be one origin reachable from both the host-native
 provider and the Tama container. `host.docker.internal` adds the managed
 host-gateway mapping; Tama Kit does not rewrite OAuth endpoints to a different
 transport origin. Public origins are exact identifiers, so `localhost`,
 `127.0.0.1`, and `::1` are not interchangeable.
+Allowed client origins may use HTTP only on loopback; every non-loopback
+allowed origin must use HTTPS. Supply at most 32 unique allowed origins.
 
 The same command also manages
 `tama/contracts/mcp-app-provider-v1.json`, a non-secret local contract that
@@ -116,7 +126,7 @@ npx @kritama/tama-kit bootstrap --mcp-app \
   --tama-origin http://127.0.0.1:4001 \
   --allowed-origin http://127.0.0.1:3000 \
   --port 4001 \
-  --image ghcr.io/upmaru/tama:0.13.1 --start --activate
+  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection> --start --activate
 ```
 
 The first run verifies prepared state and enables/restarts Tama, then reports
@@ -140,7 +150,7 @@ npx @kritama/tama-kit bootstrap --mcp-app \
   --tama-origin http://127.0.0.1:4001 \
   --allowed-origin http://127.0.0.1:3000 \
   --port 4001 \
-  --image ghcr.io/upmaru/tama:0.13.1
+  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection>
 ```
 
 The migration moves preserved provider-owned entries to the new fragment,
@@ -329,8 +339,9 @@ For an ambiguous application bootstrap request, it first asks whether the app
 is an MCP App provider before choosing flags.
 
 `app-integration` implements and provisions the application-owned OAuth
-authorization server for Tama's exact `/mcp/app` protected resource. It consumes
-the generated local contract, first verifies whether existing OAuth is ready,
+authorization server for Tama's exact `/mcp/app` protected resource. For setup
+requests it first validates the Tama Kit bootstrap artifacts and generated local
+contract, then verifies whether existing OAuth is ready,
 partial, or absent, preserves provider/Tama key custody, implements the
 disabled/prepared/enabled lifecycle when authorized, and verifies the staged
 activation handoff.
