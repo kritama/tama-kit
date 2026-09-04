@@ -190,36 +190,42 @@ export function safeRelativePath(value, label) {
 }
 
 /**
- * Paths a provider fragment must never occupy: bootstrap writes the Tama
- * runtime environment, the Tama Kit manifest, and the Compose configuration
- * under these names, and `.envrc` belongs to the application's loader. A
- * fragment planned onto any of them would overwrite that managed content
- * with only the provider bindings.
+ * Paths a provider fragment must never occupy inside `tama/`: bootstrap owns
+ * runtime, manifest, Compose, contract, and Terraform files there. A fragment
+ * planned onto any of them would overwrite that content with only the provider
+ * bindings.
  */
 const RESERVED_FRAGMENT_PATHS = new Set([
-  ".tama.env",
-  ".tama.env.example",
-  ".tama.postgres.env",
-  ".gitignore",
-  ".envrc",
-  ".agents",
-  ".agents/skills",
-  "compose.yaml",
-  "compose.yml",
-  "docker-compose.yaml",
-  "docker-compose.yml",
+  "tama/.tama.env",
+  "tama/.tama.env.example",
+  "tama/.tama.postgres.env",
+  "tama/.gitignore",
+  "tama/.tama-kit.json",
+  "tama/AGENTS.md",
+  "tama/README.md",
+  "tama/compose.yaml",
 ]);
 
 /** @param {string} path @param {string} label */
 export function assertUnreservedFragmentPath(path, label) {
+  if (!path.startsWith("tama/")) {
+    throw usageError(
+      `${label} must be inside the Tama directory: ${path}; choose a dedicated provider ` +
+        `fragment filename such as tama/.<provider>.integration.env`,
+    );
+  }
   if (
     RESERVED_FRAGMENT_PATHS.has(path) ||
-    path.startsWith("tama/") ||
-    path.startsWith(".agents/skills/")
+    path.startsWith("tama/contracts/") ||
+    path.startsWith("tama/.terraform/") ||
+    path === "tama/.terraform.lock.hcl" ||
+    /^tama\/[^/]+\.tf(?:\.json)?$/u.test(path) ||
+    /^tama\/[^/]+\.tfvars(?:\.json)?$/u.test(path) ||
+    /^tama\/[^/]+\.tfstate(?:\..+)?$/u.test(path)
   ) {
     throw usageError(
       `${label} collides with a bootstrap-managed or application-owned path: ` +
-        `${path}; choose a dedicated provider fragment filename such as .<provider>.integration.env`,
+        `${path}; choose a dedicated provider fragment filename such as tama/.<provider>.integration.env`,
     );
   }
 }

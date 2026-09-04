@@ -4,7 +4,7 @@ services:
     image: {{POSTGRES_IMAGE}}
     restart: unless-stopped
     env_file:
-      - ../.tama.postgres.env
+      - ./.tama.postgres.env
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -19,7 +19,7 @@ services:
     image: {{TAMA_IMAGE}}
     restart: unless-stopped
     env_file:
-      - ../.tama.env
+      - ./.tama.env
     depends_on:
       tama-postgres:
         condition: service_healthy

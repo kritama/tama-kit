@@ -2,6 +2,7 @@
 
 import { readFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
+import { BOOTSTRAP_PATHS } from "./constants.mjs";
 import { readEnvironmentValues } from "./environment.mjs";
 
 /** @typedef {import("../types.mjs").McpAppPlan} McpAppPlan */
@@ -452,7 +453,10 @@ async function introspectInactiveToken({ root, plan, fetch, providerTransport })
   const endpoint = `${providerTransport}${introspectionPath}`;
   const audience = `${plan.providerOrigin}${introspectionPath}`;
   const assertion = await signClientAssertion({
-    privateJwk: readEnvironmentValues(root, ".tama.env").get(TAMA_INTROSPECTION_KEY_VARIABLE) ?? "",
+    privateJwk:
+      readEnvironmentValues(root, BOOTSTRAP_PATHS.environment).get(
+        TAMA_INTROSPECTION_KEY_VARIABLE,
+      ) ?? "",
     kid: plan.introspectionSigningKeyId,
     clientId: plan.introspectionClientId,
     audience,
@@ -681,7 +685,11 @@ export async function verifyMcpApp({
     );
   }
 
-  const tamaKey = expectedPublicMembers(root, ".tama.env", TAMA_INTROSPECTION_KEY_VARIABLE);
+  const tamaKey = expectedPublicMembers(
+    root,
+    BOOTSTRAP_PATHS.environment,
+    TAMA_INTROSPECTION_KEY_VARIABLE,
+  );
   const tamaJwksResult = await fetchJson(fetch, `${plan.tamaOrigin}/.well-known/jwks.json`);
   const tamaReachable = jwksPublishesExpectedKey(
     tamaJwksResult.body,
@@ -697,7 +705,7 @@ export async function verifyMcpApp({
         : !tamaJwksResult.response.ok
           ? `Tama JWKS returned HTTP ${tamaJwksResult.response.status}`
           : tamaKey.n === null || tamaKey.e === null
-            ? `could not read the expected Tama public key from .tama.env`
+            ? `could not read the expected Tama public key from ${BOOTSTRAP_PATHS.environment}`
             : jwksHasKid(tamaJwksResult.body, plan.introspectionSigningKeyId)
               ? "Tama JWKS publishes a different introspection key under the expected identifier"
               : "Tama JWKS did not contain the expected key identifier",

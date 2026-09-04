@@ -79,7 +79,7 @@ bounded public-only overlap set. Production defaults to `disabled` when mode is
 omitted.
 
 The generated local contract is safe to commit. The provider fragment and
-`.tama.env` contain private keys and must remain ignored and untracked.
+`tama/.tama.env` contain private keys and must remain ignored and untracked.
 
 ## Public endpoints
 

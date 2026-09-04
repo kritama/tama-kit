@@ -48,7 +48,7 @@ appropriate `tama-kit bootstrap` command from the application repository.
 
 1. For repository workflows, read the target repository's `AGENTS.md` and
    inspect its Git status, framework, Compose files, existing `tama/`
-   directory, `.tama.env*` files, and `tama/.tama-kit.json` when present.
+   directory, `tama/.tama.env*` files, and `tama/.tama-kit.json` when present.
 2. Confirm Node.js 20.12 or newer. Prefer an already installed `tama-kit`
    executable; otherwise use `npx @kritama/tama-kit` without installing it
    globally.
@@ -155,8 +155,8 @@ Optional standard flags are:
 - `--port <port>` to change Tama's host port from the default `4000`; and
 - `--image <reference>` to select a different supported image.
 
-After a write, expect a private root `.tama.env`, optional
-`.tama.postgres.env`, a managed Compose include, and a `tama/` Terraform root
+After a write, expect private `tama/.tama.env` and optional
+`tama/.tama.postgres.env` files, a managed Compose include, and a `tama/` Terraform root
 containing `README.md`, `AGENTS.md`, `.gitignore`, and the manifest
 `.tama-kit.json`. Verify private files are ignored and untracked and that the
 reported non-sensitive changes are expected.
@@ -174,7 +174,7 @@ the user instructs you to run bootstrap, review that plan first, then run the
 same command without `--dry-run`; add `--start` only when they also want the
 local runtime started.
 
-After the write, verify that sensitive generated files such as `.tama.env*` are
+After the write, verify that sensitive generated files such as `tama/.tama.env*` are
 ignored and untracked. Non-sensitive Terraform, documentation, skill, manifest,
 and application-owned Compose changes may be intended for version control;
 verify that all reported changes are expected rather than untracking them. If
@@ -186,7 +186,7 @@ Terraform planning, while keeping the private setup URL out of the response.
 
 After a successful non-dry-run bootstrap, if guided setup was requested, start
 the managed Compose runtime and wait for the reported health endpoint. Then
-load `.tama.env` without echoing it and
+load `tama/.tama.env` without echoing it and
 open the private `/setup/root?token=...` URL in the in-app browser. Walk the
 user through creating the root user, signing in, and creating provisioner
 credentials. Keep the URL and token inside the browser interaction; never
@@ -196,7 +196,7 @@ control is unavailable, direct the user to the local instructions in
 
 Do not open the setup URL or create credentials unless the user explicitly asks
 for guided setup. Do not ask the user to paste credentials into chat; have them
-store the resulting `TAMA_CLIENT_ID` and `TAMA_CLIENT_SECRET` in `.tama.env`.
+store the resulting `TAMA_CLIENT_ID` and `TAMA_CLIENT_SECRET` in `tama/.tama.env`.
 
 The complete standard setup sequence is:
 
@@ -204,13 +204,13 @@ The complete standard setup sequence is:
 2. If `--start` was omitted, run the Compose command printed by Tama Kit from
    the project root, then run the printed Compose status command. Wait for
    `http://localhost:<TAMA_PORT>/` to respond successfully.
-3. If the user explicitly requests guided setup, load `.tama.env` without
+3. If the user explicitly requests guided setup, load `tama/.tama.env` without
    echoing it, derive `http://localhost:<TAMA_PORT>/setup/root?token=<TAMA_SETUP_TOKEN>`
    locally, and open it in the in-app browser. Create the root user, sign in,
    and create provisioner credentials through the browser.
 4. Have the user store `TAMA_CLIENT_ID` and `TAMA_CLIENT_SECRET` in the root
-   `.tama.env`; never ask them to paste those values into chat.
-5. Load `.tama.env` without echoing values and run:
+   `tama/.tama.env`; never ask them to paste those values into chat.
+5. Load `tama/.tama.env` without echoing values and run:
 
    ```bash
    terraform -chdir=tama init
@@ -227,7 +227,7 @@ The complete standard setup sequence is:
 Run this workflow from the provider application's repository. First inspect
 the Tama Kit bootstrap state before inspecting or changing provider behavior.
 Check `tama/.tama-kit.json`, `tama/AGENTS.md`, `tama/README.md`,
-`tama/contracts/mcp-app-provider-v1.json`, `.tama.env*`, and the optional
+`tama/contracts/mcp-app-provider-v1.json`, `tama/.tama.env*`, and the optional
 `priv/contracts/tama-mcp-app-bootstrap-v1.json` for presence, ownership, and
 loader wiring; also inspect the intended Compose file and `.gitignore` rules.
 Classify the state as complete, incomplete, or absent without printing private
@@ -341,7 +341,7 @@ only when Tama Kit reports both services live and the enabled checkpoint.
 
 The generated local contract at
 `tama/contracts/mcp-app-provider-v1.json` is safe to commit. The provider
-fragment and `.tama.env` contain private keys and must remain ignored and
+fragment and `tama/.tama.env` contain private keys and must remain ignored and
 untracked. The optional provider contract at
 `priv/contracts/tama-mcp-app-bootstrap-v1.json` is application-owned: read it,
 but never create or rewrite it.

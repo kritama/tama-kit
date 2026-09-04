@@ -5,25 +5,16 @@ import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 
 import { ownershipError, prerequisiteError } from "../errors.mjs";
+import { BOOTSTRAP_PATHS } from "./constants.mjs";
 import { operationForContent } from "./files.mjs";
 
 /** @typedef {import("../types.mjs").FileOperation} FileOperation */
 
-const ROOT_MANAGED_BLOCK = ["# Tama Kit local runtime", "/.tama.env", "/.tama.postgres.env"].join(
-  "\n",
-);
-const LEGACY_UNANCHORED_ROOT_MANAGED_BLOCK = [
+const TAMA_MANAGED_BLOCK = [
   "# Tama Kit local runtime",
-  ".tama.env",
-  ".tama.postgres.env",
-].join("\n");
-const LEGACY_ROOT_MANAGED_BLOCK = [
-  LEGACY_UNANCHORED_ROOT_MANAGED_BLOCK,
-  "tama/.terraform/",
-  "tama/*.tfstate",
-  "tama/*.tfstate.*",
-].join("\n");
-const TERRAFORM_MANAGED_BLOCK = [
+  "/.tama.env",
+  "/.tama.postgres.env",
+  "",
   "# Tama Kit Terraform local state",
   ".terraform/",
   "*.tfstate",
@@ -34,7 +25,7 @@ const DEV_ROOT_MANAGED_BLOCK = [
   "/.envrc",
   "/.tama.dev.postgres.env",
 ].join("\n");
-const SECRET_FILES = [".tama.env", ".tama.postgres.env"];
+const SECRET_FILES = [BOOTSTRAP_PATHS.environment, BOOTSTRAP_PATHS.postgresEnvironment];
 const MCP_APP_IGNORE_HEADER = "# Tama Kit MCP App integration";
 const MCP_APP_IGNORE_HEADER_PATTERN = new RegExp(`^${MCP_APP_IGNORE_HEADER}$`, "u");
 
@@ -49,6 +40,17 @@ const MCP_APP_IGNORE_HEADER_PATTERN = new RegExp(`^${MCP_APP_IGNORE_HEADER}$`, "
 function fragmentLinePattern(file) {
   const escaped = file.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   return new RegExp(`^\\/?${escaped}$`, "u");
+}
+
+/** @param {string} file @returns {string} */
+function tamaRelativeFragment(file) {
+  const prefix = `${BOOTSTRAP_PATHS.tamaDirectory}/`;
+  if (!file.startsWith(prefix) || file.length === prefix.length) {
+    throw ownershipError(`Provider environment fragment must be inside ${prefix}: ${file}`, {
+      path: file,
+    });
+  }
+  return file.slice(prefix.length);
 }
 
 /** @param {string} root @param {string[]} [secretFiles] */
@@ -94,10 +96,9 @@ export function validateSecretFilesUntracked(root, secretFiles = SECRET_FILES) {
 
 /**
  * Confirms that every private environment file is effectively ignored after
- * the managed `.gitignore` operations have been written. Git evaluates the
- * nearest matching rule last, so a nested `.gitignore` can negate an anchored
- * rule in the project root; checking the final rules prevents the transaction
- * from leaving a generated secret exposed.
+ * the managed `.gitignore` operation has been written. Git evaluates the
+ * nearest matching rule last, so checking the final rules prevents a nested
+ * negation from leaving a generated secret exposed.
  *
  * @param {string} root
  * @param {string[]} [secretFiles]
@@ -148,7 +149,7 @@ export function validateSecretFilesIgnored(root, secretFiles = SECRET_FILES) {
   }
   if (notIgnored.length > 0) {
     throw ownershipError(
-      `Refusing to continue because private environment files are not effectively ignored by Git: ${notIgnored.join(", ")}. A nested .gitignore may override the managed root rule.`,
+      `Refusing to continue because private environment files are not effectively ignored by Git: ${notIgnored.join(", ")}. A nested .gitignore may override the managed rule.`,
       { paths: notIgnored },
     );
   }
@@ -308,30 +309,32 @@ function planIgnoreFile(filename, managedBlock, legacyBlocks = [], removalPatter
  * @returns {FileOperation[]}
  */
 export function planGitignore(root, mcpAppFragments = { current: null, persisted: null }) {
-  const rootLines = ROOT_MANAGED_BLOCK.split("\n");
-  /** @type {string[]} */
-  const legacyBlocks = [LEGACY_ROOT_MANAGED_BLOCK, LEGACY_UNANCHORED_ROOT_MANAGED_BLOCK];
+  const tamaLines = TAMA_MANAGED_BLOCK.split("\n");
   /** @type {RegExp[]} */
   const removalPatterns = [];
   if (mcpAppFragments.current !== null) {
-    rootLines.push("", MCP_APP_IGNORE_HEADER, `/${mcpAppFragments.current}`);
+    const current = tamaRelativeFragment(mcpAppFragments.current);
+    tamaLines.push("", MCP_APP_IGNORE_HEADER, `/${current}`);
     const fragmentFiles = [
       ...new Set([
-        mcpAppFragments.current,
-        ...(mcpAppFragments.persisted !== null ? [mcpAppFragments.persisted] : []),
+        current,
+        ...(mcpAppFragments.persisted !== null
+          ? [tamaRelativeFragment(mcpAppFragments.persisted)]
+          : []),
       ]),
     ];
     removalPatterns.push(
       MCP_APP_IGNORE_HEADER_PATTERN,
       ...fragmentFiles.map((file) => fragmentLinePattern(file)),
     );
-    // A migrated on-disk block no longer matches the planned block exactly,
-    // which would strand the old root block as unmanaged content.
-    legacyBlocks.push(ROOT_MANAGED_BLOCK);
   }
   return [
-    planIgnoreFile(join(root, ".gitignore"), rootLines.join("\n"), legacyBlocks, removalPatterns),
-    planIgnoreFile(join(root, "tama", ".gitignore"), TERRAFORM_MANAGED_BLOCK),
+    planIgnoreFile(
+      join(root, BOOTSTRAP_PATHS.tamaDirectory, ".gitignore"),
+      tamaLines.join("\n"),
+      [TAMA_MANAGED_BLOCK],
+      removalPatterns,
+    ),
   ];
 }
 

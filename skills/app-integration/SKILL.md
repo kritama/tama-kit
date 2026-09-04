@@ -51,7 +51,7 @@ changing provider OAuth behavior:
 
 1. Read the repository instructions and Git status, then inspect the presence
    and ownership of `tama/.tama-kit.json`, `tama/AGENTS.md`, `tama/README.md`,
-   `tama/contracts/mcp-app-provider-v1.json`, `.tama.env*`, and the optional
+   `tama/contracts/mcp-app-provider-v1.json`, `tama/.tama.env*`, and the optional
    application-owned `priv/contracts/tama-mcp-app-bootstrap-v1.json`. Also
    inspect the intended Compose file and `.gitignore` entries for managed and
    private files.
@@ -174,11 +174,11 @@ options are `--provider-name`, `--provider-origin`, `--tama-origin`, repeated
 `--allowed-origin`, `--provider-prefix`, `--provider-env-file`,
 `--mcp-app-contract`, `--activate`, and `--migrate-provider-identity`.
 
-After a successful write, verify that `.tama.env` and the provider fragment
+After a successful write, verify that `tama/.tama.env` and the provider fragment
 are ignored and untracked, that the generated local contract exists, and that
 the provider loader consumes the reported fragment. If the user explicitly
 asks for guided Tama setup, start the managed Compose runtime if necessary,
-wait for its health endpoint, load `.tama.env` without echoing it, and open the
+wait for its health endpoint, load `tama/.tama.env` without echoing it, and open the
 reported private `/setup/root?token=...` URL in the in-app browser. Walk the
 user through creating the root user, signing in, and creating provisioner
 credentials. If browser control is unavailable, use `tama/README.md` without

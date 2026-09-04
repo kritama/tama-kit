@@ -113,13 +113,13 @@ function memoveeContract(overrides = {}) {
     provider: {
       name: "memovee",
       environment_prefix: "MEMOVEE",
-      environment_file: ".memovee.integration.env",
+      environment_file: "tama/.memovee.integration.env",
     },
     bindings,
     environment_loading: {
       mechanism: "direnv",
       loader: ".envrc",
-      loads: ".memovee.integration.env",
+      loads: "tama/.memovee.integration.env",
     },
     variables: {
       [bindings.mode]: {
@@ -220,7 +220,7 @@ function writeContract(root, document = memoveeContract()) {
 const MEMOVEE = {
   name: "memovee",
   environmentPrefix: "MEMOVEE",
-  environmentFile: ".memovee.integration.env",
+  environmentFile: "tama/.memovee.integration.env",
 };
 
 /**
@@ -260,7 +260,7 @@ function planWithMcp(root, prepared, mcpApp = {}) {
     cwd: root,
     targetPath: root,
     image: PINNED_TAMA_IMAGE,
-    port: existsSync(join(root, ".tama.env")) ? undefined : 4001,
+    port: existsSync(join(root, "tama", ".tama.env")) ? undefined : 4001,
     mcpApp: {
       requested: true,
       activate: false,
@@ -639,7 +639,7 @@ test("local MCP App contract render, validation, and serialization are stable", 
     identity: {
       name: "acme",
       environmentPrefix: "ACME",
-      environmentFile: ".acme.integration.env",
+      environmentFile: "tama/.acme.integration.env",
       source: "flags",
     },
     bindings,
@@ -663,10 +663,10 @@ test("local MCP App contract render, validation, and serialization are stable", 
 
 test("verifyEnvironmentLoading confirms application-owned loaders", () => {
   const root = project();
-  assert.equal(verifyEnvironmentLoading(root, ".acme.integration.env", null), "unverified");
-  writeFileSync(join(root, ".envrc"), 'dotenv_load ".acme.integration.env"\n');
-  assert.equal(verifyEnvironmentLoading(root, ".acme.integration.env", null), "verified");
-  assert.deepEqual(verifyEnvironmentLoadingEvidence(root, ".acme.integration.env", null), {
+  assert.equal(verifyEnvironmentLoading(root, "tama/.acme.integration.env", null), "unverified");
+  writeFileSync(join(root, ".envrc"), 'dotenv_load "tama/.acme.integration.env"\n');
+  assert.equal(verifyEnvironmentLoading(root, "tama/.acme.integration.env", null), "verified");
+  assert.deepEqual(verifyEnvironmentLoadingEvidence(root, "tama/.acme.integration.env", null), {
     status: "verified",
     mechanism: "direnv",
     evidencePath: ".envrc",
@@ -675,19 +675,25 @@ test("verifyEnvironmentLoading confirms application-owned loaders", () => {
   const composeRoot = project();
   writeFileSync(
     join(composeRoot, "compose.yaml"),
-    "services:\n  app:\n    env_file:\n      - .acme.integration.env\n",
+    "services:\n  app:\n    env_file:\n      - tama/.acme.integration.env\n",
   );
-  assert.equal(verifyEnvironmentLoading(composeRoot, ".acme.integration.env", null), "verified");
   assert.equal(
-    verifyEnvironmentLoading(composeRoot, ".acme.integration.env", {
+    verifyEnvironmentLoading(composeRoot, "tama/.acme.integration.env", null),
+    "verified",
+  );
+  assert.equal(
+    verifyEnvironmentLoading(composeRoot, "tama/.acme.integration.env", {
       environment_loading: { mechanism: "direnv" },
     }),
     "verified",
   );
 
   const unquotedRoot = project();
-  writeFileSync(join(unquotedRoot, ".envrc"), "dotenv .acme.integration.env\n");
-  assert.equal(verifyEnvironmentLoading(unquotedRoot, ".acme.integration.env", null), "verified");
+  writeFileSync(join(unquotedRoot, ".envrc"), "dotenv tama/.acme.integration.env\n");
+  assert.equal(
+    verifyEnvironmentLoading(unquotedRoot, "tama/.acme.integration.env", null),
+    "verified",
+  );
 
   // A bare textual occurrence is not an active loader: a comment or an
   // unrelated command naming the fragment must not verify it, because
@@ -695,17 +701,24 @@ test("verifyEnvironmentLoading confirms application-owned loaders", () => {
   const commentRoot = project();
   writeFileSync(
     join(commentRoot, ".envrc"),
-    ['# dotenv_load ".acme.integration.env"', 'echo ".acme.integration.env"', ""].join("\n"),
+    ['# dotenv_load "tama/.acme.integration.env"', 'echo "tama/.acme.integration.env"', ""].join(
+      "\n",
+    ),
   );
-  assert.equal(verifyEnvironmentLoading(commentRoot, ".acme.integration.env", null), "unverified");
+  assert.equal(
+    verifyEnvironmentLoading(commentRoot, "tama/.acme.integration.env", null),
+    "unverified",
+  );
 
   const composeCommentRoot = project();
   writeFileSync(
     join(composeCommentRoot, "compose.yaml"),
-    ["services:", "  app:", "    # env_file:", "    #   - .acme.integration.env", ""].join("\n"),
+    ["services:", "  app:", "    # env_file:", "    #   - tama/.acme.integration.env", ""].join(
+      "\n",
+    ),
   );
   assert.equal(
-    verifyEnvironmentLoading(composeCommentRoot, ".acme.integration.env", null),
+    verifyEnvironmentLoading(composeCommentRoot, "tama/.acme.integration.env", null),
     "unverified",
   );
 
@@ -719,23 +732,26 @@ test("verifyEnvironmentLoading confirms application-owned loaders", () => {
       "  app:",
       "    command:",
       "      - cat",
-      "      - .acme.integration.env",
+      "      - tama/.acme.integration.env",
       "    labels:",
-      "      fragment: .acme.integration.env",
+      "      fragment: tama/.acme.integration.env",
       "    volumes:",
-      "      - .acme.integration.env:/frag.env:ro",
+      "      - tama/.acme.integration.env:/frag.env:ro",
       "",
     ].join("\n"),
   );
-  assert.equal(verifyEnvironmentLoading(decoyRoot, ".acme.integration.env", null), "unverified");
+  assert.equal(
+    verifyEnvironmentLoading(decoyRoot, "tama/.acme.integration.env", null),
+    "unverified",
+  );
 
   const inlineEnvFileRoot = project();
   writeFileSync(
     join(inlineEnvFileRoot, "compose.yaml"),
-    "services:\n  app:\n    env_file: .acme.integration.env\n",
+    "services:\n  app:\n    env_file: tama/.acme.integration.env\n",
   );
   assert.equal(
-    verifyEnvironmentLoading(inlineEnvFileRoot, ".acme.integration.env", null),
+    verifyEnvironmentLoading(inlineEnvFileRoot, "tama/.acme.integration.env", null),
     "verified",
   );
 
@@ -744,16 +760,21 @@ test("verifyEnvironmentLoading confirms application-owned loaders", () => {
   const selectedCompose = join(selectedComposeRoot, "ops", "dev.yaml");
   writeFileSync(
     selectedCompose,
-    "services:\n  app:\n    env_file:\n      - ../.acme.integration.env\n      - ../.memovee.integration.env\n",
+    "services:\n  app:\n    env_file:\n      - ../tama/.acme.integration.env\n      - ../tama/.memovee.integration.env\n",
   );
   assert.equal(
-    verifyEnvironmentLoading(selectedComposeRoot, ".acme.integration.env", null, selectedCompose),
+    verifyEnvironmentLoading(
+      selectedComposeRoot,
+      "tama/.acme.integration.env",
+      null,
+      selectedCompose,
+    ),
     "verified",
   );
   assert.deepEqual(
     verifyEnvironmentLoadingEvidence(
       selectedComposeRoot,
-      ".acme.integration.env",
+      "tama/.acme.integration.env",
       null,
       selectedCompose,
     ),
@@ -829,7 +850,7 @@ test("unsupportedTamaImage checks semver tags against the contract range", () =>
 test("provider identity normalization derives the prefix and fragment file", () => {
   assert.equal(normalizeProviderName("My__Service  "), "my-service");
   assert.equal(prefixFromName("my-service"), "MY_SERVICE");
-  assert.equal(environmentFileForName("my-service"), ".my-service.integration.env");
+  assert.equal(environmentFileForName("my-service"), "tama/.my-service.integration.env");
   assert.throws(() => normalizeProviderName("123"), /begin with a letter/u);
 });
 
@@ -847,7 +868,7 @@ test("resolveProviderIdentity applies precedence when explicit identity signals 
   const manifest = {
     name: "memovee",
     environmentPrefix: "MEMOVEE",
-    environmentFile: ".memovee.integration.env",
+    environmentFile: "tama/.memovee.integration.env",
     source: "manifest",
   };
   const fromManifest = resolveProviderIdentity({
@@ -857,12 +878,12 @@ test("resolveProviderIdentity applies precedence when explicit identity signals 
     contractDocument: contract,
     name: "memovee",
     prefix: "MEMOVEE",
-    environmentFile: ".memovee.integration.env",
+    environmentFile: "tama/.memovee.integration.env",
   });
   assert.deepEqual(fromManifest, {
     name: "memovee",
     environmentPrefix: "MEMOVEE",
-    environmentFile: ".memovee.integration.env",
+    environmentFile: "tama/.memovee.integration.env",
     source: "manifest",
   });
 
@@ -873,7 +894,7 @@ test("resolveProviderIdentity applies precedence when explicit identity signals 
     contractDocument: contract,
     name: "flagged",
     prefix: "FLAGGED",
-    environmentFile: ".flagged.integration.env",
+    environmentFile: "tama/.flagged.integration.env",
   });
   assert.equal(fromContract.name, "memovee");
   assert.equal(fromContract.source, "contract");
@@ -891,7 +912,7 @@ test("resolveProviderIdentity applies precedence when explicit identity signals 
   assert.deepEqual(fromFlags, {
     name: "my-service",
     environmentPrefix: "MY_SERVICE",
-    environmentFile: ".my-service.integration.env",
+    environmentFile: "tama/.my-service.integration.env",
     source: "flags",
   });
 
@@ -969,7 +990,7 @@ test("prepareMcpApp accepts a custom name when the detection is rejected", async
   assert.deepEqual(prepared.identity, {
     name: "custom-provider",
     environmentPrefix: "CUSTOM_PROVIDER",
-    environmentFile: ".custom-provider.integration.env",
+    environmentFile: "tama/.custom-provider.integration.env",
     source: "flags",
   });
 });
@@ -1034,9 +1055,9 @@ test("prepareMcpApp rejects identity drift from flags or a contract", async () =
   driftedContract.provider = {
     name: "acme",
     environment_prefix: "ACME",
-    environment_file: ".acme.integration.env",
+    environment_file: "tama/.acme.integration.env",
   };
-  driftedContract.environment_loading.loads = ".acme.integration.env";
+  driftedContract.environment_loading.loads = "tama/.acme.integration.env";
   writeContract(root, driftedContract);
   await assert.rejects(
     () => prepareFor(root, {}, { nonInteractive: true }),
@@ -1066,7 +1087,7 @@ test("bootstrap plans a complete MCP App provider integration from a discovered 
   assert.ok(mcp.providerSigningKeyId.startsWith("mcp-app-provider-"));
   assert.ok(mcp.introspectionSigningKeyId.startsWith("mcp-app-tama-"));
 
-  const fragmentPath = join(root, ".memovee.integration.env");
+  const fragmentPath = join(root, "tama", ".memovee.integration.env");
   const fragment = readFileSync(fragmentPath, "utf8");
   assert.match(fragment, /^# Generated by Tama Kit/mu);
   assert.equal(statSync(fragmentPath).mode & 0o777, 0o600);
@@ -1089,7 +1110,7 @@ test("bootstrap plans a complete MCP App provider integration from a discovered 
 
   assert.deepEqual(JSON.parse(fragmentValues.MEMOVEE_OAUTH_PUBLIC_SIGNING_KEYS), []);
 
-  const tamaValues = parseEnv(readFileSync(join(root, ".tama.env"), "utf8"));
+  const tamaValues = parseEnv(readFileSync(join(root, "tama", ".tama.env"), "utf8"));
   assert.equal(tamaValues.TAMA_MCP_APP_MODE, "prepared");
   assert.equal(tamaValues.TAMA_MCP_APP_RESOURCE, "http://127.0.0.1:4001/mcp/app");
   assert.equal(tamaValues.TAMA_MCP_APP_ALLOWED_ORIGINS, "http://127.0.0.1:3000");
@@ -1114,7 +1135,7 @@ test("bootstrap plans a complete MCP App provider integration from a discovered 
   assert.notEqual(tamaJwk.kid, mcp.providerSigningKeyId);
   assert.deepEqual(JSON.parse(tamaValues.TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS), []);
 
-  const gitignore = readFileSync(join(root, ".gitignore"), "utf8");
+  const gitignore = readFileSync(join(root, "tama", ".gitignore"), "utf8");
   assert.match(gitignore, /^\/\.tama\.env$/mu);
   assert.match(gitignore, /^\/\.memovee\.integration\.env$/mu);
   const manifest = JSON.parse(readFileSync(join(root, "tama", ".tama-kit.json"), "utf8"));
@@ -1138,7 +1159,7 @@ test("bootstrap plans a complete MCP App provider integration from a discovered 
   assert.deepEqual(localContract.provider, {
     name: "memovee",
     environment_prefix: "MEMOVEE",
-    environment_file: ".memovee.integration.env",
+    environment_file: "tama/.memovee.integration.env",
   });
   assert.equal(localContract.bindings.issuer, "MEMOVEE_OAUTH_ISSUER");
   assert.deepEqual(localContract.environment_loading, {
@@ -1147,7 +1168,7 @@ test("bootstrap plans a complete MCP App provider integration from a discovered 
     evidence_path: null,
   });
   assert.doesNotMatch(readFileSync(localContractPath, "utf8"), /PRIVATE KEY|"d"\s*:/u);
-  const example = readFileSync(join(root, ".tama.env.example"), "utf8");
+  const example = readFileSync(join(root, "tama", ".tama.env.example"), "utf8");
   assert.match(example, /TAMA_MCP_APP_RESOURCE=http:\/\/127\.0\.0\.1:4001\/mcp\/app/u);
   assert.doesNotMatch(example, /TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY=/u);
   const generatedReadme = readFileSync(join(root, "tama", "README.md"), "utf8");
@@ -1175,9 +1196,9 @@ test("bootstrap activates the MCP App integration when requested", () => {
   );
   assert.equal(activated.mcpApp?.lifecycle, "enabled");
   applyOperations(activated.operations);
-  const fragment = parseEnv(readFileSync(join(root, ".memovee.integration.env"), "utf8"));
+  const fragment = parseEnv(readFileSync(join(root, "tama", ".memovee.integration.env"), "utf8"));
   assert.equal(fragment.MEMOVEE_TAMA_MCP_APP_MODE, "enabled");
-  const tama = parseEnv(readFileSync(join(root, ".tama.env"), "utf8"));
+  const tama = parseEnv(readFileSync(join(root, "tama", ".tama.env"), "utf8"));
   assert.equal(tama.TAMA_MCP_APP_MODE, "enabled");
 });
 
@@ -1193,7 +1214,7 @@ test("bootstrap keeps provider endpoints on one shared origin and rejects loopba
   const mcp = plan.mcpApp;
   assert.ok(mcp);
   assert.equal(mcp.providerOrigin, "http://host.docker.internal:4000");
-  const tama = parseEnv(readFileSync(join(root, ".tama.env"), "utf8"));
+  const tama = parseEnv(readFileSync(join(root, "tama", ".tama.env"), "utf8"));
   assert.equal(tama.TAMA_MCP_APP_AUTHORIZATION_SERVER, "http://host.docker.internal:4000");
   assert.equal(
     tama.TAMA_MCP_APP_JWKS_URI,
@@ -1264,7 +1285,7 @@ test("bootstrap requires a provider origin when no contract declares one", () =>
     identity: {
       name: "acme",
       environmentPrefix: "ACME",
-      environmentFile: ".acme.integration.env",
+      environmentFile: "tama/.acme.integration.env",
       source: "flags",
     },
   });
@@ -1283,7 +1304,7 @@ test("bootstrap derives conventional bindings for providers without a contract",
     identity: {
       name: "acme",
       environmentPrefix: "ACME",
-      environmentFile: ".acme.integration.env",
+      environmentFile: "tama/.acme.integration.env",
       source: "flags",
     },
   });
@@ -1297,7 +1318,7 @@ test("bootstrap derives conventional bindings for providers without a contract",
   assert.equal(mcp.bindings.source, "conventional");
   assert.equal(mcp.bindings.roles.issuer, "ACME_OAUTH_ISSUER");
   assert.equal(mcp.environmentLoading, "unverified");
-  const fragment = parseEnv(readFileSync(join(root, ".acme.integration.env"), "utf8"));
+  const fragment = parseEnv(readFileSync(join(root, "tama", ".acme.integration.env"), "utf8"));
   assert.equal(fragment.ACME_TAMA_MCP_APP_MODE, "prepared");
   assert.equal(fragment.ACME_OAUTH_ISSUER, "http://host.docker.internal:5000");
   const manifest = JSON.parse(readFileSync(join(root, "tama", ".tama-kit.json"), "utf8"));
@@ -1322,7 +1343,7 @@ test("a matching provider contract updates provenance without rotating provider 
     providerOrigin: "http://host.docker.internal:4000",
   });
   applyOperations(first.operations);
-  const fragmentPath = join(root, ".acme.integration.env");
+  const fragmentPath = join(root, "tama", ".acme.integration.env");
   const originalFragment = readFileSync(fragmentPath, "utf8");
 
   const acmeContract = JSON.parse(
@@ -1379,8 +1400,8 @@ test("a failed managed transaction removes a newly generated local contract", as
     /forced validation failure/u,
   );
   assert.equal(existsSync(join(root, "tama", "contracts", "mcp-app-provider-v1.json")), false);
-  assert.equal(existsSync(join(root, ".acme.integration.env")), false);
-  assert.equal(existsSync(join(root, ".tama.env")), false);
+  assert.equal(existsSync(join(root, "tama", ".acme.integration.env")), false);
+  assert.equal(existsSync(join(root, "tama", ".tama.env")), false);
 });
 
 test("bootstrap rejects Tama image tags outside the supported contract range", () => {
@@ -1458,7 +1479,7 @@ test("bootstrap fails closed when the provider identity or contract bindings dri
     identity: {
       name: "other",
       environmentPrefix: "OTHER",
-      environmentFile: ".other.integration.env",
+      environmentFile: "tama/.other.integration.env",
       source: "flags",
     },
   });
@@ -1500,8 +1521,9 @@ test("bootstrap requires the provider fragment key and kid together", () => {
   const root = project();
   const contractPath = writeContract(root);
   const contract = validContract();
+  mkdirSync(join(root, "tama"));
   writeFileSync(
-    join(root, ".memovee.integration.env"),
+    join(root, "tama", ".memovee.integration.env"),
     "MEMOVEE_OAUTH_SIGNING_KEY_ID=mcp-app-provider-orphan\n",
   );
   assert.throws(
@@ -1520,7 +1542,7 @@ test("bootstrap refuses a user-modified provider fragment", () => {
   applyOperations(
     planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })).operations,
   );
-  const fragmentPath = join(root, ".memovee.integration.env");
+  const fragmentPath = join(root, "tama", ".memovee.integration.env");
   writeFileSync(
     fragmentPath,
     readFileSync(fragmentPath, "utf8").replace(
@@ -1544,7 +1566,7 @@ test("bootstrap preserves unrelated provider fragment entries and comments", () 
   applyOperations(
     planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })).operations,
   );
-  const fragmentPath = join(root, ".memovee.integration.env");
+  const fragmentPath = join(root, "tama", ".memovee.integration.env");
   writeFileSync(
     fragmentPath,
     `${readFileSync(fragmentPath, "utf8")}# Provider-owned setting\nMEMOVEE_OTHER_VALUE=kept\n`,
@@ -1568,7 +1590,7 @@ test("bootstrap explicitly migrates provider identity without rotating trust mat
     providerOrigin: "http://host.docker.internal:5000",
   });
   applyOperations(original.operations);
-  const oldPath = join(root, ".acme.integration.env");
+  const oldPath = join(root, "tama", ".acme.integration.env");
   const originalValues = parseEnv(readFileSync(oldPath, "utf8"));
 
   writeFileSync(oldPath, `${readFileSync(oldPath, "utf8")}# Provider-owned\nACME_OTHER=kept\n`);
@@ -1576,7 +1598,7 @@ test("bootstrap explicitly migrates provider identity without rotating trust mat
     providerOrigin: "http://host.docker.internal:5000",
   });
   applyOperations(adopted.operations);
-  writeFileSync(join(root, ".envrc"), 'dotenv_load ".beta.integration.env"\n');
+  writeFileSync(join(root, ".envrc"), 'dotenv_load "tama/.beta.integration.env"\n');
 
   const migratedPrepared = await prepareFor(root, {
     providerName: "beta",
@@ -1599,7 +1621,7 @@ test("bootstrap explicitly migrates provider identity without rotating trust mat
     /forced post-write failure/u,
   );
   assert.equal(existsSync(oldPath), true);
-  assert.equal(existsSync(join(root, ".beta.integration.env")), false);
+  assert.equal(existsSync(join(root, "tama", ".beta.integration.env")), false);
   assert.equal(readMcpAppProvider(join(root, "tama"))?.identity.name, "acme");
 
   const retry = planWithMcp(root, migratedPrepared, {
@@ -1608,7 +1630,7 @@ test("bootstrap explicitly migrates provider identity without rotating trust mat
   });
   applyOperations(retry.operations);
 
-  const newPath = join(root, ".beta.integration.env");
+  const newPath = join(root, "tama", ".beta.integration.env");
   assert.equal(existsSync(oldPath), false);
   const migratedValues = parseEnv(readFileSync(newPath, "utf8"));
   assert.equal(
@@ -1638,7 +1660,7 @@ test("bootstrap preserves a valid persisted public JWK overlap set byte-for-byte
   const rotated = generateOAuthKeyPair("rotated");
   const rotatedKey = { ...JSON.parse(rotated.publicJwk), kid: "rotated-overlap-key" };
 
-  const fragmentPath = join(root, ".memovee.integration.env");
+  const fragmentPath = join(root, "tama", ".memovee.integration.env");
   const fragment = readFileSync(fragmentPath, "utf8")
     .split("\n")
     .map((line) =>
@@ -1649,7 +1671,7 @@ test("bootstrap preserves a valid persisted public JWK overlap set byte-for-byte
     .join("\n");
   writeFileSync(fragmentPath, fragment);
 
-  const tamaPath = join(root, ".tama.env");
+  const tamaPath = join(root, "tama", ".tama.env");
   const tamaEnv = readFileSync(tamaPath, "utf8")
     .split("\n")
     .map((line) =>
@@ -1694,7 +1716,7 @@ test("bootstrap fails closed on an invalid persisted public JWK overlap set", ()
     planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })).operations,
   );
 
-  const fragmentPath = join(root, ".memovee.integration.env");
+  const fragmentPath = join(root, "tama", ".memovee.integration.env");
   const fragmentLines = readFileSync(fragmentPath, "utf8").split("\n");
   const overlapIndex = fragmentLines.findIndex((line) =>
     line.startsWith("MEMOVEE_OAUTH_PUBLIC_SIGNING_KEYS="),
@@ -1734,7 +1756,7 @@ test("bootstrap fails closed on an invalid persisted public JWK overlap set", ()
   fragmentLines[overlapIndex] = "MEMOVEE_OAUTH_PUBLIC_SIGNING_KEYS='[]'";
   writeFileSync(fragmentPath, fragmentLines.join("\n"));
 
-  const tamaPath = join(root, ".tama.env");
+  const tamaPath = join(root, "tama", ".tama.env");
   const tamaLines = readFileSync(tamaPath, "utf8").split("\n");
   const tamaIndex = tamaLines.findIndex((line) =>
     line.startsWith("TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS="),
@@ -1764,7 +1786,7 @@ test("bootstrap rejects a weak RSA key persisted in the public overlap set", () 
   const { publicKey } = generateKeyPairSync("rsa", { modulusLength: 1024 });
   const weak = publicKey.export({ format: "jwk" });
   const weakKey = { .../** @type {Record<string, string>} */ (weak), kid: "weak-overlap-key" };
-  const fragmentPath = join(root, ".memovee.integration.env");
+  const fragmentPath = join(root, "tama", ".memovee.integration.env");
   const fragment = readFileSync(fragmentPath, "utf8")
     .split("\n")
     .map((line) =>
@@ -1816,7 +1838,7 @@ test("MCP App reruns update the port and allowed origins without changing stable
   const contract = validContract();
   const first = planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract }));
   applyOperations(first.operations);
-  const fragmentPath = join(root, ".memovee.integration.env");
+  const fragmentPath = join(root, "tama", ".memovee.integration.env");
   const firstFragment = parseEnv(readFileSync(fragmentPath, "utf8"));
   const localPath = join(root, "tama", "contracts", "mcp-app-provider-v1.json");
   const firstLocalContract = readFileSync(localPath, "utf8");
@@ -1849,7 +1871,7 @@ test("MCP App reruns update the port and allowed origins without changing stable
   );
   assert.equal(secondFragment.MEMOVEE_TAMA_MCP_APP_RESOURCE, "http://127.0.0.1:4020/mcp/app");
   assert.equal(readFileSync(localPath, "utf8"), firstLocalContract);
-  const tama = parseEnv(readFileSync(join(root, ".tama.env"), "utf8"));
+  const tama = parseEnv(readFileSync(join(root, "tama", ".tama.env"), "utf8"));
   assert.equal(tama.TAMA_MCP_APP_RESOURCE, "http://127.0.0.1:4020/mcp/app");
   assert.equal(tama.TAMA_MCP_APP_ALLOWED_ORIGINS, "http://127.0.0.1:3001");
 });
@@ -1890,10 +1912,11 @@ test("resolveEnvironmentPort preserves a configured port and fails closed on inv
   const root = project();
   assert.equal(resolveEnvironmentPort(root, undefined), 4000);
   assert.equal(resolveEnvironmentPort(root, 5000), 5000);
-  writeFileSync(join(root, ".tama.env"), "TAMA_PORT=4567\n");
+  mkdirSync(join(root, "tama"));
+  writeFileSync(join(root, "tama", ".tama.env"), "TAMA_PORT=4567\n");
   assert.equal(resolveEnvironmentPort(root, undefined), 4567);
   assert.equal(resolveEnvironmentPort(root, 6000), 6000);
-  writeFileSync(join(root, ".tama.env"), "TAMA_PORT=not-a-port\n");
+  writeFileSync(join(root, "tama", ".tama.env"), "TAMA_PORT=not-a-port\n");
   assert.throws(
     () => resolveEnvironmentPort(root, undefined),
     (error) => error instanceof CLIError && error.exitCode === EXIT_CODES.OWNERSHIP,
@@ -1911,7 +1934,7 @@ test("readMcpAppProvider fails closed on a malformed persisted provider block", 
       mcpAppProvider: {
         name: "memovee",
         environmentPrefix: "MEMOVEE",
-        environmentFile: ".memovee.integration.env",
+        environmentFile: "tama/.memovee.integration.env",
         contractSource: "bogus",
         contractPath: null,
         bindings: { mode: "MEMOVEE_TAMA_MCP_APP_MODE" },
@@ -1998,7 +2021,7 @@ async function clientAssertionIsValid({ root, plan }, assertion) {
     return false;
   }
   const tamaJwk = parseEnv(
-    readFileSync(join(root, ".tama.env"), "utf8"),
+    readFileSync(join(root, "tama", ".tama.env"), "utf8"),
   ).TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY;
   if (typeof tamaJwk !== "string") {
     return false;
@@ -2057,7 +2080,7 @@ async function buildVerifiedRoot() {
   const mcp = plan.mcpApp;
   assert.ok(mcp);
   const fragment = parseEnv(readFileSync(join(root, mcp.provider.environmentFile), "utf8"));
-  const tamaValues = parseEnv(readFileSync(join(root, ".tama.env"), "utf8"));
+  const tamaValues = parseEnv(readFileSync(join(root, "tama", ".tama.env"), "utf8"));
   const providerJwk = fragment[mcp.bindings.roles.access_token_private_signing_key];
   const tamaJwk = tamaValues.TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY;
   assert.equal(typeof providerJwk, "string");
@@ -2989,7 +3012,7 @@ test("bootstrap preserves unrelated .integration.env ignore entries on MCP App r
     planWithMcp(root, originalPrepared, { providerOrigin: "http://host.docker.internal:5000" })
       .operations,
   );
-  const gitignorePath = join(root, ".gitignore");
+  const gitignorePath = join(root, "tama", ".gitignore");
   writeFileSync(gitignorePath, `${readFileSync(gitignorePath, "utf8")}.other.integration.env\n`);
 
   applyOperations(
@@ -3003,7 +3026,7 @@ test("bootstrap preserves unrelated .integration.env ignore entries on MCP App r
   assert.match(gitignore, /^\/?\.other\.integration\.env$/mu);
   assert.match(gitignore, /^\/\.acme\.integration\.env$/mu);
 
-  writeFileSync(join(root, ".envrc"), 'dotenv_load ".beta.integration.env"\n');
+  writeFileSync(join(root, ".envrc"), 'dotenv_load "tama/.beta.integration.env"\n');
   const migratedPrepared = await prepareFor(root, {
     providerName: "beta",
     providerPrefix: "BETA",
@@ -3027,16 +3050,16 @@ test("bootstrap preserves unrelated .integration.env ignore entries on MCP App r
 test("bootstrap rejects nested Git ignore overrides and rolls generated secrets back", async () => {
   const root = project();
   execFileSync("git", ["init", "--quiet"], { cwd: root });
-  mkdirSync(join(root, "config"), { recursive: true });
-  writeFileSync(join(root, "config", ".gitignore"), "!provider.env\n");
+  mkdirSync(join(root, "tama", "config"), { recursive: true });
+  writeFileSync(join(root, "tama", "config", ".gitignore"), "!provider.env\n");
 
   const contract = memoveeContract();
   contract.provider = {
     name: "memovee",
     environment_prefix: "MEMOVEE",
-    environment_file: "config/provider.env",
+    environment_file: "tama/config/provider.env",
   };
-  contract.environment_loading.loads = "config/provider.env";
+  contract.environment_loading.loads = "tama/config/provider.env";
   const contractDocument = validateMcpAppContract(contract);
   const contractPath = writeContract(root, contract);
   const plan = planWithMcp(
@@ -3047,7 +3070,7 @@ test("bootstrap rejects nested Git ignore overrides and rolls generated secrets 
       identity: {
         name: "memovee",
         environmentPrefix: "MEMOVEE",
-        environmentFile: "config/provider.env",
+        environmentFile: "tama/config/provider.env",
         source: "contract",
       },
     }),
@@ -3057,30 +3080,30 @@ test("bootstrap rejects nested Git ignore overrides and rolls generated secrets 
     () =>
       applyOperationsTransactionally(plan.operations, () => {
         validateSecretFilesIgnored(root, [
-          ".tama.env",
-          ".tama.postgres.env",
-          "config/provider.env",
+          "tama/.tama.env",
+          "tama/.tama.postgres.env",
+          "tama/config/provider.env",
         ]);
       }),
     /not effectively ignored by Git.*nested \.gitignore/u,
   );
-  assert.equal(existsSync(join(root, ".tama.env")), false);
-  assert.equal(existsSync(join(root, ".tama.postgres.env")), false);
-  assert.equal(existsSync(join(root, "config", "provider.env")), false);
+  assert.equal(existsSync(join(root, "tama", ".tama.env")), false);
+  assert.equal(existsSync(join(root, "tama", ".tama.postgres.env")), false);
+  assert.equal(existsSync(join(root, "tama", "config", "provider.env")), false);
 });
 
 test("ordinary reruns validate effective ignores for the persisted provider fragment", async () => {
   const root = project();
   execFileSync("git", ["init", "--quiet"], { cwd: root });
-  mkdirSync(join(root, "config"), { recursive: true });
+  mkdirSync(join(root, "tama", "config"), { recursive: true });
 
   const contract = memoveeContract();
   contract.provider = {
     name: "memovee",
     environment_prefix: "MEMOVEE",
-    environment_file: "config/provider.env",
+    environment_file: "tama/config/provider.env",
   };
-  contract.environment_loading.loads = "config/provider.env";
+  contract.environment_loading.loads = "tama/config/provider.env";
   const contractDocument = validateMcpAppContract(contract);
   const contractPath = writeContract(root, contract);
   const initial = planWithMcp(
@@ -3091,13 +3114,13 @@ test("ordinary reruns validate effective ignores for the persisted provider frag
       identity: {
         name: "memovee",
         environmentPrefix: "MEMOVEE",
-        environmentFile: "config/provider.env",
+        environmentFile: "tama/config/provider.env",
         source: "contract",
       },
     }),
   );
   applyOperations(initial.operations);
-  writeFileSync(join(root, "config", ".gitignore"), "!provider.env\n");
+  writeFileSync(join(root, "tama", "config", ".gitignore"), "!provider.env\n");
 
   const ordinary = createBootstrapPlan({
     cwd: root,
@@ -3109,7 +3132,7 @@ test("ordinary reruns validate effective ignores for the persisted provider frag
       applyOperationsTransactionally(ordinary.operations, () => {
         validateWrittenSecretsIgnored(ordinary);
       }),
-    /not effectively ignored by Git: config\/provider\.env/u,
+    /not effectively ignored by Git: tama\/config\/provider\.env/u,
   );
 });
 
@@ -3249,7 +3272,10 @@ test("ordinary reruns keep the MCP App documentation rendered from the persisted
     providerOrigin: "http://host.docker.internal:4000",
   });
   applyOperations(first.operations);
-  assert.match(readFileSync(join(root, ".tama.env.example"), "utf8"), /host\.docker\.internal/u);
+  assert.match(
+    readFileSync(join(root, "tama", ".tama.env.example"), "utf8"),
+    /host\.docker\.internal/u,
+  );
 
   // An ordinary rerun does not plan the MCP App topology, but the managed
   // example and README section must still render from the persisted state —
@@ -3271,7 +3297,7 @@ test("ordinary reruns reject drift in persisted MCP App environment variables", 
     providerOrigin: "http://host.docker.internal:4000",
   });
   applyOperations(first.operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   const original = readFileSync(filename, "utf8");
   const drifts = [
     ["TAMA_MCP_APP_RESOURCE", "http://127.0.0.1:4001/mcp/app?drifted=true"],
@@ -3384,15 +3410,19 @@ test("project-local provider contract paths remain valid after the project moves
 
 test("provider fragment paths that collide with managed files are rejected", () => {
   for (const environmentFile of [
-    ".tama.env",
-    ".tama.env.example",
-    ".tama.postgres.env",
-    ".envrc",
-    ".gitignore",
-    "compose.yaml",
-    ".agents/skills/graph-builder",
+    "tama/.tama.env",
+    "tama/.tama.env.example",
+    "tama/.tama.postgres.env",
+    "tama/.gitignore",
+    "tama/AGENTS.md",
+    "tama/README.md",
     "tama/compose.yaml",
     "tama/.tama-kit.json",
+    "tama/contracts/provider.env",
+    "tama/main.tf",
+    "tama/main.tf.json",
+    "tama/terraform.tfvars",
+    "tama/.terraform.lock.hcl",
   ]) {
     const document = structuredClone(memoveeContract());
     document.provider.environment_file = environmentFile;
@@ -3405,15 +3435,34 @@ test("provider fragment paths that collide with managed files are rejected", () 
   }
 });
 
+test("provider fragment paths outside the Tama directory are rejected", () => {
+  for (const environmentFile of [
+    ".provider.integration.env",
+    ".envrc",
+    "config/provider.env",
+    ".agents/skills/graph-builder",
+  ]) {
+    const document = structuredClone(memoveeContract());
+    document.provider.environment_file = environmentFile;
+    document.environment_loading.loads = environmentFile;
+    assert.throws(
+      () => validateMcpAppContract(document),
+      (error) =>
+        error instanceof CLIError && /must be inside the Tama directory/u.test(error.message),
+    );
+  }
+});
+
 test("bootstrap rejects a provider fragment matching a custom selected Compose file", () => {
   const root = project();
-  writeFileSync(join(root, "custom-stack.yaml"), "services: {}\n");
+  mkdirSync(join(root, "tama"));
+  writeFileSync(join(root, "tama", "custom-stack.yaml"), "services: {}\n");
   assert.throws(
     () =>
       createBootstrapPlan({
         cwd: root,
         targetPath: root,
-        composePath: "custom-stack.yaml",
+        composePath: "tama/custom-stack.yaml",
         image: PINNED_TAMA_IMAGE,
         port: 4001,
         mcpApp: {
@@ -3426,7 +3475,7 @@ test("bootstrap rejects a provider fragment matching a custom selected Compose f
           identity: {
             name: "acme",
             environmentPrefix: "ACME",
-            environmentFile: "custom-stack.yaml",
+            environmentFile: "tama/custom-stack.yaml",
             source: "flags",
           },
         }),
@@ -3441,7 +3490,7 @@ test("bootstrap rejects a provider fragment matching a custom selected Compose f
 test("resolveProviderIdentity rejects reserved and unsafe provider fragment paths", () => {
   const root = project();
   for (const [environmentFile, pattern] of [
-    [".tama.env", /collides with a bootstrap-managed/u],
+    [".tama.env", /must be inside the Tama directory/u],
     ["tama/compose.yaml", /collides with a bootstrap-managed/u],
     ["../evil.env", /safe project-relative path/u],
     ["/etc/passwd", /safe project-relative path/u],
@@ -3479,7 +3528,7 @@ test("resolveProviderIdentity rejects reserved and unsafe provider fragment path
     contractDocument: null,
     name: "acme",
   });
-  assert.equal(identity.environmentFile, ".acme.integration.env");
+  assert.equal(identity.environmentFile, "tama/.acme.integration.env");
 });
 
 test("bootstrap fails closed when a persisted provider fragment path no longer matches", () => {
@@ -3498,7 +3547,7 @@ test("bootstrap fails closed when a persisted provider fragment path no longer m
   const manifest = /** @type {Record<string, any>} */ (
     JSON.parse(readFileSync(manifestPath, "utf8"))
   );
-  manifest.mcpAppProvider.environmentFile = ".tama.env";
+  manifest.mcpAppProvider.environmentFile = "tama/.tama.env";
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   assert.throws(
     () => planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })),
@@ -3519,14 +3568,14 @@ test("bootstrap rejects a tracked provider fragment even on ordinary reruns", ()
 
   // The fragment holds the provider's private signing key: force-adding it to
   // the index must fail every subsequent plan, not only --mcp-app runs.
-  execFileSync("git", ["add", "--force", ".memovee.integration.env"], { cwd: root });
+  execFileSync("git", ["add", "--force", "tama/.memovee.integration.env"], { cwd: root });
   assert.throws(
     () => createBootstrapPlan({ cwd: root, targetPath: root }),
     (error) =>
       error instanceof CLIError &&
       error.exitCode === EXIT_CODES.OWNERSHIP &&
-      error.message.includes(".memovee.integration.env") &&
-      error.details.paths.includes(".memovee.integration.env"),
+      error.message.includes("tama/.memovee.integration.env") &&
+      error.details.paths.includes("tama/.memovee.integration.env"),
   );
 });
 
@@ -3558,7 +3607,7 @@ test("the bootstrap command plans the provider integration from explicit flags",
   assert.deepEqual(result.provider, {
     name: "acme",
     environmentPrefix: "ACME",
-    environmentFile: ".acme.integration.env",
+    environmentFile: "tama/.acme.integration.env",
     identitySource: "flags",
     contractPath: null,
     mode: "prepared",
@@ -3583,7 +3632,7 @@ test("the bootstrap command plans the provider integration from explicit flags",
     action: "create",
   });
   assert.ok(
-    result.changes.some((change) => change.path.endsWith(".acme.integration.env")),
+    result.changes.some((change) => change.path.endsWith("tama/.acme.integration.env")),
     "the provider fragment should be part of the planned changes",
   );
 });
@@ -3615,7 +3664,7 @@ test("the human bootstrap result warns when provider environment loading is unve
   assert.match(stdout, /Source:\s+generated/u);
   assert.match(stdout, /Bindings:\s+conventional/u);
   assert.match(stdout, /Provider environment loading is not verified:/u);
-  assert.match(stdout, /load \.acme\.integration\.env before starting or restarting it/u);
+  assert.match(stdout, /load tama\/\.acme\.integration\.env before starting or restarting it/u);
 });
 
 test("the bootstrap command accepts --provider-env-file for the provider fragment", async () => {
@@ -3635,7 +3684,7 @@ test("the bootstrap command accepts --provider-env-file for the provider fragmen
     "--provider-name",
     "acme",
     "--provider-env-file",
-    ".acme.custom.env",
+    "tama/.acme.custom.env",
     "--provider-origin",
     "http://host.docker.internal:5000",
     "--allowed-origin",
@@ -3644,7 +3693,7 @@ test("the bootstrap command accepts --provider-env-file for the provider fragmen
   assert.equal(exitCode, EXIT_CODES.SUCCESS);
   const result = JSON.parse(stdout);
   assert.equal(result.ok, true);
-  assert.equal(result.provider.environmentFile, ".acme.custom.env");
+  assert.equal(result.provider.environmentFile, "tama/.acme.custom.env");
   assert.ok(
     result.changes.some((change) => change.path.endsWith(".acme.custom.env")),
     "the custom fragment should be part of the planned changes",
@@ -3658,7 +3707,7 @@ test("the bootstrap command accepts --provider-env-file for the provider fragmen
     "--skills",
     "manual",
     "--provider-env-file",
-    ".acme.custom.env",
+    "tama/.acme.custom.env",
   ]);
   assert.equal(rejected.exitCode, EXIT_CODES.USAGE);
   assert.match(rejected.stderr, /require --mcp-app/u);
@@ -3680,7 +3729,7 @@ test("the bootstrap command accepts --provider-env-file for the provider fragmen
     "--provider-name",
     "acme",
     "--provider-env-file",
-    ".tama.env",
+    "tama/.tama.env",
     "--provider-origin",
     "http://host.docker.internal:5000",
     "--allowed-origin",
@@ -3719,8 +3768,8 @@ test("MCP App JSON dry-runs are byte-for-byte deterministic and write no secrets
   assert.equal(first.exitCode, EXIT_CODES.SUCCESS);
   assert.equal(second.exitCode, EXIT_CODES.SUCCESS);
   assert.equal(second.stdout, first.stdout);
-  assert.equal(existsSync(join(root, ".tama.env")), false);
-  assert.equal(existsSync(join(root, ".acme.integration.env")), false);
+  assert.equal(existsSync(join(root, "tama", ".tama.env")), false);
+  assert.equal(existsSync(join(root, "tama", ".acme.integration.env")), false);
   assert.equal(existsSync(join(root, "tama", "contracts", "mcp-app-provider-v1.json")), false);
   assert.doesNotMatch(first.stdout, /"d"\s*:|PRIVATE KEY|pending-secret-material/u);
 });
@@ -3748,7 +3797,7 @@ test("the bootstrap command discovers the contract identity for --mcp-app", asyn
   assert.deepEqual(result.provider, {
     name: "memovee",
     environmentPrefix: "MEMOVEE",
-    environmentFile: ".memovee.integration.env",
+    environmentFile: "tama/.memovee.integration.env",
     identitySource: "contract",
     contractPath,
     mode: "prepared",
@@ -3758,7 +3807,7 @@ test("the bootstrap command discovers the contract identity for --mcp-app", asyn
   assert.equal(result.providerContract.source, "provider-contract");
   assert.equal(result.providerContract.sourcePath, "priv/contracts/tama-mcp-app-bootstrap-v1.json");
   assert.equal(result.mcpApp.providerOrigin, "http://host.docker.internal:4000");
-  assert.ok(result.changes.some((change) => change.path.endsWith(".memovee.integration.env")));
+  assert.ok(result.changes.some((change) => change.path.endsWith("tama/.memovee.integration.env")));
 });
 
 test("the bootstrap command fails closed on a detected identity in non-interactive mode", async () => {
