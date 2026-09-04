@@ -86,11 +86,12 @@ Docker executable, missing Compose plugin, or a Compose version older than
 inspect services. It must not block a dry run or a bootstrap write that does
 not start services. Pause and tell the user which prerequisite is missing or
 too old so they can install or start/initialize Docker first. Do not install
-Docker, start a daemon, run Compose, open the setup URL, or activate the
-integration on the user's behalf. After the user confirms Docker is ready,
-rerun the checks required for the next operation. These checks are not
-required for the standalone `dev setup --prepare-only` or `oauth generate-key`
-workflows when they do not use Docker.
+Docker or start a daemon on the user's behalf. Do not run Compose, open the
+setup URL, or activate the integration unless the user explicitly requested
+that operation. After the user confirms Docker is ready, rerun the checks
+required for the next operation. These checks are not required for the
+standalone `dev setup --prepare-only` or `oauth generate-key` workflows when
+they do not use Docker.
 
 ## Plan bootstrap, then write
 
@@ -317,13 +318,15 @@ and stop if no known pinned version lies in both ranges. The provider origin
 must not be `localhost`, `127.0.0.0/8`, `::1`, `0.0.0.0`, or `::`; use
 `http://host.docker.internal:<provider-port>` for a host-native provider.
 
-Supported MCP App flags are `--mcp-app-contract <path>`, `--provider-prefix
-<prefix>`, `--provider-env-file <path>`, repeated `--allowed-origin <origin>`,
-`--activate`, and `--migrate-provider-identity`. Provider-specific flags
-require `--mcp-app`; `--activate` also requires `--start`; identity migration
-requires an explicit provider name, prepared mode, and verified loader, and
-cannot be combined with activation. Keep provider name, origin, allowed
-origins, image, and bindings unchanged on ordinary reruns.
+Supported MCP App flags are `--provider-name <name>`, `--provider-origin
+<origin>`, `--tama-origin <origin>`, repeated `--allowed-origin <origin>`,
+`--mcp-app-contract <path>`, `--provider-prefix <prefix>`,
+`--provider-env-file <path>`, `--activate`, and
+`--migrate-provider-identity`. Provider-specific flags require `--mcp-app`;
+`--activate` also requires `--start`; identity migration requires an explicit
+provider name, prepared mode, and verified loader, and cannot be combined with
+activation. Keep provider name, origin, allowed origins, image, and bindings
+unchanged on ordinary reruns.
 
 After reviewing the dry run, repeat the exact command without `--dry-run` to
 write prepared configuration. Configure the provider to load the reported

@@ -50,6 +50,7 @@ test("Tama Kit CLI guidance repeats the bootstrap gate", () => {
   assert.match(tamaKitCli, /hard preflight failure/u);
   assert.match(tamaKitCli, /JSON dry run is a pure planning step/u);
   assert.match(tamaKitCli, /must not block a dry run/u);
+  assert.match(tamaKitCli, /unless the user explicitly requested\s+that operation/u);
   assert.match(tamaKitCli, /bootstrap --mcp-app --dry-run --json/u);
   assert.match(tamaKitCli, /Do not require a Tama source checkout/u);
   assert.match(tamaKitCli, /in-app browser/u);
@@ -62,6 +63,9 @@ test("Tama Kit CLI guidance repeats the bootstrap gate", () => {
   assert.doesNotMatch(tamaKitCli, /--skills manual --dry-run --json/u);
   assert.match(tamaKitCli, /every non-loopback allowed\s+origin must use HTTPS/u);
   assert.match(tamaKitCli, /at most 32 unique allowed origins/u);
+  assert.match(tamaKitCli, /Supported MCP App flags are `--provider-name/u);
+  assert.match(tamaKitCli, /`--provider-origin/u);
+  assert.match(tamaKitCli, /`--tama-origin/u);
   assert.doesNotMatch(tamaKitCli, /CLI reference/u);
 });
 

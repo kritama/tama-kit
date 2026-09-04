@@ -168,9 +168,10 @@ incompatibility before running bootstrap.
 Review the JSON plan before writing. If accepted, repeat the exact command
 without `--dry-run` to stage prepared configuration. Add `--start` only when
 the user requests that Tama start. `--activate` requires both `--mcp-app` and
-`--start`; do not add it during preparation. `--provider-prefix`,
-`--provider-env-file`, `--mcp-app-contract`, repeated `--allowed-origin`, and
-`--migrate-provider-identity` are the only provider-specific overrides.
+`--start`; do not add it during preparation. Supported provider-specific
+options are `--provider-name`, `--provider-origin`, `--tama-origin`, repeated
+`--allowed-origin`, `--provider-prefix`, `--provider-env-file`,
+`--mcp-app-contract`, `--activate`, and `--migrate-provider-identity`.
 
 After a successful write, verify that `.tama.env` and the provider fragment
 are ignored and untracked, that the generated local contract exists, and that
