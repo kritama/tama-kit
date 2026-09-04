@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { ownershipError, usageError } from "../errors.mjs";
-import { MANAGED_MARKER } from "./constants.mjs";
+import { BOOTSTRAP_PATHS, MANAGED_MARKER } from "./constants.mjs";
 import {
   PENDING_SECRET_VALUE,
   readEnvironmentValues,
@@ -196,14 +196,16 @@ function originForPort(origin, port, flag) {
 }
 
 /**
- * Reads the Tama origin the persisted `.tama.env` MCP App resource advertises,
+ * Reads the Tama origin the persisted `tama/.tama.env` MCP App resource advertises,
  * or null when no MCP App state is persisted there.
  *
  * @param {string} root
  * @returns {string | null}
  */
 export function persistedTamaOrigin(root) {
-  const resource = readEnvironmentValues(root, ".tama.env").get("TAMA_MCP_APP_RESOURCE");
+  const resource = readEnvironmentValues(root, BOOTSTRAP_PATHS.environment).get(
+    "TAMA_MCP_APP_RESOURCE",
+  );
   if (!resource) {
     return null;
   }
@@ -211,14 +213,14 @@ export function persistedTamaOrigin(root) {
   try {
     url = new URL(resource);
   } catch {
-    throw ownershipError(".tama.env has an invalid TAMA_MCP_APP_RESOURCE", {
-      path: join(root, ".tama.env"),
+    throw ownershipError(`${BOOTSTRAP_PATHS.environment} has an invalid TAMA_MCP_APP_RESOURCE`, {
+      path: join(root, BOOTSTRAP_PATHS.environment),
       variable: "TAMA_MCP_APP_RESOURCE",
     });
   }
   if (url.pathname !== TAMA_MCP_APP_RESOURCE_PATH || url.search !== "" || url.hash !== "") {
-    throw ownershipError(".tama.env has an invalid TAMA_MCP_APP_RESOURCE", {
-      path: join(root, ".tama.env"),
+    throw ownershipError(`${BOOTSTRAP_PATHS.environment} has an invalid TAMA_MCP_APP_RESOURCE`, {
+      path: join(root, BOOTSTRAP_PATHS.environment),
       variable: "TAMA_MCP_APP_RESOURCE",
     });
   }
@@ -484,7 +486,7 @@ export function resolveMcpAppState({
 /**
  * Plans the MCP App provider integration: the provider-owned fragment with
  * its preserved or generated access-token key pair, the Tama-side variables
- * for `.tama.env` with its preserved or generated introspection key pair, and
+ * for `tama/.tama.env` with its preserved or generated introspection key pair, and
  * the origins every side needs to reach the other.
  *
  * @param {PlanMcpAppInput} input
@@ -750,7 +752,7 @@ export function planMcpApp(input) {
     }
   }
 
-  const tamaValues = readEnvironmentValues(root, ".tama.env");
+  const tamaValues = readEnvironmentValues(root, BOOTSTRAP_PATHS.environment);
   const existingTamaKey = tamaValues.get(TAMA_INTROSPECTION_KEY_VARIABLE);
   const existingTamaKid = tamaValues.get(TAMA_INTROSPECTION_KID_VARIABLE);
   let introspectionSigningKeyId;
@@ -758,9 +760,9 @@ export function planMcpApp(input) {
   if (existingTamaKey || existingTamaKid) {
     if (!existingTamaKey || !existingTamaKid) {
       throw ownershipError(
-        `.tama.env must define ${TAMA_INTROSPECTION_KEY_VARIABLE} and ${TAMA_INTROSPECTION_KID_VARIABLE} together`,
+        `${BOOTSTRAP_PATHS.environment} must define ${TAMA_INTROSPECTION_KEY_VARIABLE} and ${TAMA_INTROSPECTION_KID_VARIABLE} together`,
         {
-          path: join(root, ".tama.env"),
+          path: join(root, BOOTSTRAP_PATHS.environment),
           variables: [TAMA_INTROSPECTION_KEY_VARIABLE, TAMA_INTROSPECTION_KID_VARIABLE],
         },
       );

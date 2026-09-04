@@ -4,7 +4,7 @@ import { join, relative, resolve } from "node:path";
 import { ownershipError, usageError } from "../errors.mjs";
 import { planRootCompose } from "./compose.mjs";
 import { formatComposePsCommand, formatComposeUpCommand } from "./compose-command.mjs";
-import { BOOTSTRAP_SCHEMA_VERSION, DEFAULTS } from "./constants.mjs";
+import { BOOTSTRAP_PATHS, BOOTSTRAP_SCHEMA_VERSION, DEFAULTS } from "./constants.mjs";
 import { inspectProject } from "./detect-project.mjs";
 import { planEnvironment, readEnvironmentValues, resolveEnvironmentPort } from "./environment.mjs";
 import { planGitignore, validateSecretFilesUntracked } from "./gitignore.mjs";
@@ -53,7 +53,7 @@ function persistedMcpDocView(persisted, root) {
     return null;
   }
   const resource = `${persisted.tamaOrigin}${TAMA_MCP_APP_RESOURCE_PATH}`;
-  const mode = readEnvironmentValues(root, ".tama.env").get("TAMA_MCP_APP_MODE");
+  const mode = readEnvironmentValues(root, BOOTSTRAP_PATHS.environment).get("TAMA_MCP_APP_MODE");
   const lifecycle =
     mode === "disabled" || mode === "prepared" || mode === "enabled" ? mode : "prepared";
   return {
@@ -106,7 +106,7 @@ function mcpAppReadmeGuidance(mcpApp) {
     "",
     "## MCP App provider integration",
     "",
-    `The provider fragment \`${mcpApp.provider.environmentFile}\` and \`.tama.env\` contain private signing material. Keep both files untracked and never paste their values into chat or logs.`,
+    `The provider fragment \`${mcpApp.provider.environmentFile}\` and \`${BOOTSTRAP_PATHS.environment}\` contain private signing material. Keep both files untracked and never paste their values into chat or logs.`,
     "",
     "The non-secret local bridge contract is managed at `tama/contracts/mcp-app-provider-v1.json`. It records resolved names and loader evidence; it is local configuration, not proof that the provider implements the OAuth runtime contract.",
     "",
@@ -155,8 +155,8 @@ export function createBootstrapPlan(options) {
     );
   }
   const secretFiles = [
-    ".tama.env",
-    ".tama.postgres.env",
+    BOOTSTRAP_PATHS.environment,
+    BOOTSTRAP_PATHS.postgresEnvironment,
     ...(mcpAppPrepared ? [mcpAppPrepared.identity.environmentFile] : []),
     ...(mcpAppPrepared?.persisted ? [mcpAppPrepared.persisted.identity.environmentFile] : []),
     ...(persistedMcpApp ? [persistedMcpApp.identity.environmentFile] : []),
@@ -196,7 +196,7 @@ export function createBootstrapPlan(options) {
     } catch {
       throw ownershipError(
         `the persisted MCP App Tama origin ${persistedTamaOriginValue} is not a valid origin`,
-        { path: join(inspection.tamaDirectory, ".tama-kit.json") },
+        { path: join(inspection.root, BOOTSTRAP_PATHS.manifest) },
       );
     }
     if (persistedPort !== port && mcpAppPrepared === null) {
@@ -310,7 +310,7 @@ export function createBootstrapPlan(options) {
     mcpAppFreshPort,
   );
   // The host-gateway mapping must survive ordinary reruns without --mcp-app:
-  // the persisted integration (and .tama.env) outlives the current plan, so
+  // the persisted integration (and tama/.tama.env) outlives the current plan, so
   // the mapping is derived from the persisted provider origin as well.
   const providerUsesHostGateway = [
     ...(mcpApp ? [mcpApp.providerOrigin] : []),
@@ -333,8 +333,9 @@ export function createBootstrapPlan(options) {
   /** @type {FileOperation[]} */
   const operations = [
     ...planGitignore(inspection.root, {
-      current: mcpApp?.provider.environmentFile ?? null,
-      persisted: mcpApp ? (persistedMcpApp?.identity.environmentFile ?? null) : null,
+      current:
+        mcpApp?.provider.environmentFile ?? persistedMcpApp?.identity.environmentFile ?? null,
+      persisted: persistedMcpApp?.identity.environmentFile ?? null,
     }),
     environment.operation,
     environment.postgresOperation,
@@ -342,7 +343,7 @@ export function createBootstrapPlan(options) {
   operations.push(
     managedTemplate(
       managedFiles.plan,
-      join(inspection.root, ".tama.env.example"),
+      join(inspection.root, BOOTSTRAP_PATHS.environmentExample),
       "tama-env.example",
       { PORT: environment.port, MCP_APP_EXAMPLE: mcpAppExample(mcpAppDoc) },
     ),
@@ -350,7 +351,7 @@ export function createBootstrapPlan(options) {
   operations.push(
     managedTemplate(
       managedFiles.plan,
-      join(inspection.tamaDirectory, "compose.yaml"),
+      join(inspection.root, BOOTSTRAP_PATHS.compose),
       "compose.yaml",
       replacements,
     ),
@@ -358,7 +359,7 @@ export function createBootstrapPlan(options) {
   operations.push(
     planRootCompose(
       inspection.selectedCompose,
-      join(inspection.tamaDirectory, "compose.yaml"),
+      join(inspection.root, BOOTSTRAP_PATHS.compose),
       renderTemplate("root-compose.yaml"),
     ),
   );

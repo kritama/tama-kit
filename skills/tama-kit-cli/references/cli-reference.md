@@ -55,7 +55,7 @@ All provider-specific flags require `--mcp-app`.
 | `--mcp-app-contract <path>` | Select an application-owned provider contract instead of default discovery. |
 | `--provider-name <name>` | Confirm the stable provider identity. Non-interactive runs must make a detected identity explicit unless the contract or persisted state owns it. |
 | `--provider-prefix <prefix>` | Override the derived provider environment-variable prefix. Keep it stable across reruns. |
-| `--provider-env-file <path>` | Override the derived private provider fragment path. The provider must actually load this file. |
+| `--provider-env-file <path>` | Override the derived private provider fragment path inside `tama/`. The provider must actually load this file. |
 | `--provider-origin <origin>` | Set the provider issuer/service origin. It must have no path, query, or fragment and must be reachable by both host probes and the Tama container. Do not use loopback or `0.0.0.0`; for a host-native HTTP provider, use `http://host.docker.internal:<provider-port>`. |
 | `--tama-origin <origin>` | Set Tama's exact public origin. For the generated local Compose service it must be HTTP loopback and use the selected `--port`. |
 | `--allowed-origin <origin>` | Allow an exact browser/MCP client origin. Repeat for multiple origins. At least one is required; non-loopback origins must use HTTPS. Maximum 32 unique origins. |
@@ -109,7 +109,7 @@ after the fragment is restored. Do not report activation until the next full
 verification succeeds.
 
 The generated provider private key stays in the provider fragment. Tama's
-introspection private key stays in `.tama.env`. Neither belongs in source
+introspection private key stays in `tama/.tama.env`. Neither belongs in source
 control, logs, prompts, or chat.
 
 ### MCP App reruns

@@ -4,6 +4,7 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 
 import { usageError } from "../errors.mjs";
+import { BOOTSTRAP_PATHS } from "./constants.mjs";
 import { contentDigest } from "./files.mjs";
 import {
   assertUnreservedFragmentPath,
@@ -16,7 +17,7 @@ import {
 } from "./mcp-app-contract.mjs";
 
 export const MCP_APP_LOCAL_CONTRACT_KIND = "tama-kit-mcp-app-local-provider-contract";
-export const MCP_APP_LOCAL_CONTRACT_PATH = "tama/contracts/mcp-app-provider-v1.json";
+export const MCP_APP_LOCAL_CONTRACT_PATH = BOOTSTRAP_PATHS.mcpAppLocalContract;
 
 const TOP_LEVEL_KEYS = Object.freeze([
   "schema_version",

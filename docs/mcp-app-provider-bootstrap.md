@@ -63,10 +63,11 @@ paths are known.
 Providers without a contract use conventional variables derived from
 `--provider-name` and must supply `--provider-origin`. Environment prefixes are
 limited to 24 characters and may not use reserved Tama, database, Docker, or
-Compose namespaces. A contract's `provider.environment_file` must not collide
-with a bootstrap-managed or application-owned path (`.tama.env`,
-`.tama.postgres.env`, `.envrc`, `.gitignore`, or any `tama/` output), because
-the fragment write would overwrite that content.
+Compose namespaces. A contract's `provider.environment_file` must be inside
+`tama/` and must not collide with bootstrap-managed files such as
+`tama/.tama.env`, `tama/.tama.postgres.env`, `tama/.gitignore`, Compose,
+contracts, or Terraform files, because the fragment write would overwrite that
+content.
 
 ## Exact topology
 
@@ -128,16 +129,16 @@ range grammar cannot express prerelease bounds, so such a tag cannot be held to
 the range. While an integration is persisted, ordinary reruns without
 `--mcp-app` must pass the same pinned, supported `--image`: the floating
 default tag would otherwise silently replace the pinned runtime. Ordinary
-reruns also keep the managed MCP App example in `.tama.env.example` and the
+reruns also keep the managed MCP App example in `tama/.tama.env.example` and the
 README section in sync with the persisted integration, so the public
 documentation is not dropped by a rerun.
 
 ## Private files
 
-Bootstrap manages `.tama.env`, `.tama.postgres.env`, and the provider fragment
-such as `.memovee.integration.env` as mode `0600` secret files. Root-anchored
-ignore rules are written before the files, and tracked or staged secret files
-cause bootstrap to stop — including a persisted provider fragment on an
+Bootstrap manages `tama/.tama.env`, `tama/.tama.postgres.env`, and the provider
+fragment such as `tama/.memovee.integration.env` as mode `0600` secret files.
+Exact rules in `tama/.gitignore` are written before the files, and tracked or
+staged secret files cause bootstrap to stop — including a persisted provider fragment on an
 ordinary rerun, because the fragment holds the provider's private signing key.
 Existing keys and valid public overlap sets are
 preserved. A fresh overlap set is `[]`; the current public key is published by
@@ -174,7 +175,7 @@ contract (when present) to the new derived fragment filename, then pass
 Migration preserves the private access-token signing JWK, key identifier,
 valid overlap keys, and unrelated provider-owned fragment entries. It renames
 the managed bindings, writes the new fragment before removing the old managed
-fragment, updates root-anchored ignore rules, and changes the manifest in the
+fragment, updates exact rules in `tama/.gitignore`, and changes the manifest in the
 same transaction. Migration and `--activate` cannot be combined; verify the
 new prepared identity before activating it.
 

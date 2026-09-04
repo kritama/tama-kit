@@ -4,7 +4,7 @@ import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "nod
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { ambiguityError, ownershipError, usageError } from "../errors.mjs";
-import { COMPOSE_FILENAMES } from "./constants.mjs";
+import { BOOTSTRAP_PATHS, COMPOSE_FILENAMES } from "./constants.mjs";
 
 /** @typedef {import("../types.mjs").BootstrapPlanOptions} BootstrapPlanOptions */
 /** @typedef {import("../types.mjs").FrameworkDetection} FrameworkDetection */
@@ -133,7 +133,7 @@ export function inspectProject({ cwd, targetPath, composePath }) {
   }
 
   const detected = detectFramework(root);
-  const tamaDirectory = join(root, "tama");
+  const tamaDirectory = join(root, BOOTSTRAP_PATHS.tamaDirectory);
   if (existsSync(tamaDirectory)) {
     const metadata = lstatSync(tamaDirectory);
     if (metadata.isSymbolicLink()) {
@@ -145,7 +145,7 @@ export function inspectProject({ cwd, targetPath, composePath }) {
       });
     }
   }
-  const managedCompose = join(tamaDirectory, "compose.yaml");
+  const managedCompose = join(root, BOOTSTRAP_PATHS.compose);
   if (resolve(selectedCompose) === resolve(managedCompose)) {
     throw ownershipError(
       `the project Compose file cannot also be Tama Kit's managed Compose fragment: ${selectedCompose}`,

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createPrivateKey } from "node:crypto";
 import {
   chmodSync,
@@ -76,21 +76,49 @@ test("bootstrap creates a private, idempotent generic project scaffold", () => {
   assert.ok(existsSync(join(root, "tama", ".tama-kit.json")));
   assert.ok(existsSync(join(root, "tama", "AGENTS.md")));
   assert.ok(existsSync(join(root, "tama", "main.tf")));
+  assert.ok(existsSync(join(root, "tama", ".tama.env.example")));
+  assert.equal(existsSync(join(root, ".tama.env")), false);
+  assert.equal(existsSync(join(root, ".tama.postgres.env")), false);
+  assert.equal(existsSync(join(root, ".tama.env.example")), false);
+  const managedCompose = readFileSync(join(root, "tama", "compose.yaml"), "utf8");
+  assert.match(managedCompose, /- \.\/\.tama\.env$/mu);
+  assert.match(managedCompose, /- \.\/\.tama\.postgres\.env$/mu);
+  assert.doesNotMatch(managedCompose, /\.\.\/\.tama/u);
   assert.match(readFileSync(join(root, "tama", "main.tf"), "utf8"), /module "global"/u);
-  assert.equal(statSync(join(root, ".tama.env")).mode & 0o777, 0o600);
-  assert.equal(statSync(join(root, ".tama.postgres.env")).mode & 0o777, 0o600);
-  const postgresEnvironment = readFileSync(join(root, ".tama.postgres.env"), "utf8");
+  assert.equal(statSync(join(root, "tama", ".tama.env")).mode & 0o777, 0o600);
+  assert.equal(statSync(join(root, "tama", ".tama.postgres.env")).mode & 0o777, 0o600);
+  const postgresEnvironment = readFileSync(join(root, "tama", ".tama.postgres.env"), "utf8");
   assert.match(postgresEnvironment, /^POSTGRES_PASSWORD=.+$/mu);
   assert.doesNotMatch(postgresEnvironment, /TAMA_SETUP_TOKEN|SECRET_KEY_BASE/u);
 
-  const secretBefore = readFileSync(join(root, ".tama.env"), "utf8");
+  const secretBefore = readFileSync(join(root, "tama", ".tama.env"), "utf8");
   const setupToken = secretBefore.match(/^TAMA_SETUP_TOKEN=(.+)$/mu)[1];
   assert.equal(readSetupUrl(root), `http://localhost:4000/setup/root?token=${setupToken}`);
   const second = planFor(root);
   assert.equal(second.terraform.foundation, "preserved");
   assert.ok(second.operations.every((operation) => operation.action === "unchanged"));
   applyOperations(second.operations);
-  assert.equal(readFileSync(join(root, ".tama.env"), "utf8"), secretBefore);
+  assert.equal(readFileSync(join(root, "tama", ".tama.env"), "utf8"), secretBefore);
+});
+
+test("bootstrap ignores legacy root dotenv files and keeps the nested example commit-safe", () => {
+  const root = project();
+  execFileSync("git", ["init", "--quiet"], { cwd: root });
+  const legacy = "TAMA_PORT=7777\nlegacy-user-content=true\n";
+  writeFileSync(join(root, ".tama.env"), legacy);
+
+  const plan = planFor(root);
+  assert.equal(plan.port, 4000);
+  applyOperations(plan.operations);
+
+  assert.equal(readFileSync(join(root, ".tama.env"), "utf8"), legacy);
+  assert.equal(
+    spawnSync("git", ["check-ignore", "--no-index", "tama/.tama.env.example"], {
+      cwd: root,
+      encoding: "utf8",
+    }).status,
+    1,
+  );
 });
 
 test("bootstrap installs complete repository-local agent skills when selected", () => {
@@ -286,6 +314,11 @@ test("agent setup prompt covers runtime, private setup, Terraform validation, an
     /If browser control is unavailable, direct me to tama\/README\.md without reproducing the token/u,
   );
   assert.match(prompt, /Do not ask me to paste credentials into chat/u);
+  assert.match(
+    prompt,
+    /store TAMA_CLIENT_ID and TAMA_CLIENT_SECRET directly in tama\/\.tama\.env/u,
+  );
+  assert.match(prompt, /load tama\/\.tama\.env without echoing its values/u);
   assert.match(prompt, /terraform -chdir=tama init/u);
   assert.match(prompt, /terraform -chdir=tama validate/u);
   assert.match(prompt, /terraform -chdir=tama plan/u);
@@ -420,7 +453,7 @@ test("bootstrap upgrades previously generated Terraform templates", () => {
 test("dry-run reports and bootstrap repairs unsafe sensitive-file permissions", async () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const environmentFile = join(root, ".tama.env");
+  const environmentFile = join(root, "tama", ".tama.env");
   chmodSync(environmentFile, 0o644);
 
   const output = [];
@@ -536,7 +569,7 @@ test("bootstrap rolls back every file change when post-write validation fails", 
 
   assert.equal(readFileSync(composeFile, "utf8"), original);
   assert.equal(statSync(composeFile).mode & 0o777, 0o600);
-  assert.equal(existsSync(join(root, ".tama.env")), false);
+  assert.equal(existsSync(join(root, "tama", ".tama.env")), false);
   assert.equal(existsSync(join(root, "tama")), false);
 });
 
@@ -620,7 +653,7 @@ test("bootstrap rejects a Compose file that escapes through a symlinked director
       /must resolve inside the project root/u.test(error.message),
   );
   assert.equal(readFileSync(externalCompose, "utf8"), original);
-  assert.equal(existsSync(join(root, ".tama.env")), false);
+  assert.equal(existsSync(join(root, "tama", ".tama.env")), false);
 });
 
 test("bootstrap rejects ambiguous Compose roots and unmanaged service collisions", () => {
@@ -934,7 +967,7 @@ test("JSON dry-run writes nothing and never exposes generated secrets", async ()
   });
   assert.equal(exitCode, EXIT_CODES.SUCCESS);
   assert.deepEqual(errors, []);
-  assert.equal(existsSync(join(root, ".tama.env")), false);
+  assert.equal(existsSync(join(root, "tama", ".tama.env")), false);
   const payload = JSON.parse(output.join("\n"));
   assert.equal(payload.ok, true);
   assert.equal(payload.mode, "dry-run");
@@ -968,12 +1001,12 @@ test("an explicit port updates public local URLs without rotating secrets", () =
   const root = project();
   const first = planFor(root);
   applyOperations(first.operations);
-  const before = readFileSync(join(root, ".tama.env"), "utf8");
+  const before = readFileSync(join(root, "tama", ".tama.env"), "utf8");
   const setupToken = before.match(/^TAMA_SETUP_TOKEN=(.+)$/mu)[1];
 
   const second = planFor(root, { port: 4567 });
   applyOperations(second.operations);
-  const after = readFileSync(join(root, ".tama.env"), "utf8");
+  const after = readFileSync(join(root, "tama", ".tama.env"), "utf8");
   assert.match(after, /^TAMA_PORT=4567$/mu);
   assert.match(after, /^TAMA_BASE_URL=http:\/\/localhost:4567$/mu);
   assert.match(after, new RegExp(`^TAMA_SETUP_TOKEN=${setupToken}$`, "mu"));
@@ -983,7 +1016,7 @@ test("an explicit port updates public local URLs without rotating secrets", () =
 test("an explicit port preserves additional MCP allowed origins", () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   writeFileSync(
     filename,
     readFileSync(filename, "utf8").replace(
@@ -1004,7 +1037,7 @@ test("bootstrap rejects an invalid persisted port instead of silently changing i
   const root = project();
   const first = planFor(root);
   applyOperations(first.operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   writeFileSync(
     filename,
     readFileSync(filename, "utf8").replace(/^TAMA_PORT=4000$/mu, "TAMA_PORT=invalid"),
@@ -1028,7 +1061,7 @@ const OAUTH_PRIVATE_MEMBERS = ["d", "p", "q", "dp", "dq", "qi"];
 test("bootstrap generates an asymmetric System OAuth signing key", () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const content = readFileSync(join(root, ".tama.env"), "utf8");
+  const content = readFileSync(join(root, "tama", ".tama.env"), "utf8");
   const { jwk, id } = oauthJwkLines(content);
   assert.ok(jwk);
   assert.ok(id);
@@ -1049,17 +1082,17 @@ test("bootstrap generates an asymmetric System OAuth signing key", () => {
       "-c",
       "set -a\n. \"$1\"\nset +a\nnode -e 'const key = JSON.parse(process.env.TAMA_OAUTH_PRIVATE_JWK); if (key.kid !== process.env.TAMA_OAUTH_PRIVATE_JWK_ID) process.exit(1)'",
       "bash",
-      join(root, ".tama.env"),
+      join(root, "tama", ".tama.env"),
     ],
     { stdio: "ignore" },
   );
 
-  const example = readFileSync(join(root, ".tama.env.example"), "utf8");
+  const example = readFileSync(join(root, "tama", ".tama.env.example"), "utf8");
   assert.match(example, /^TAMA_OAUTH_PRIVATE_JWK=replace-me$/mu);
   assert.match(example, /^TAMA_OAUTH_PRIVATE_JWK_ID=replace-me$/mu);
   assert.doesNotMatch(example, /TAMA_OAUTH_SIGNING_KEY/u);
 
-  const postgresEnvironment = readFileSync(join(root, ".tama.postgres.env"), "utf8");
+  const postgresEnvironment = readFileSync(join(root, "tama", ".tama.postgres.env"), "utf8");
   assert.doesNotMatch(postgresEnvironment, /TAMA_OAUTH/u);
   for (const member of OAUTH_PRIVATE_MEMBERS) {
     assert.equal(postgresEnvironment.includes(parsed[member]), false, `leaked ${member}`);
@@ -1069,7 +1102,7 @@ test("bootstrap generates an asymmetric System OAuth signing key", () => {
 test("bootstrap preserves the OAuth private JWK across reruns, ports, and skill modes", () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   const before = readFileSync(filename, "utf8");
   const beforePair = oauthJwkLines(before);
   const jwtSecret = before.match(/^TAMA_JWT_SECRET=.+$/mu)[0];
@@ -1086,7 +1119,7 @@ test("bootstrap preserves the OAuth private JWK across reruns, ports, and skill 
 test("bootstrap dry-run output never contains the OAuth private JWK", async () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const { jwk, id } = oauthJwkLines(readFileSync(join(root, ".tama.env"), "utf8"));
+  const { jwk, id } = oauthJwkLines(readFileSync(join(root, "tama", ".tama.env"), "utf8"));
   const parsed = /** @type {Record<string, string>} */ (JSON.parse(jwk));
 
   const output = [];
@@ -1108,7 +1141,7 @@ test("bootstrap dry-run output never contains the OAuth private JWK", async () =
 test("bootstrap fails closed for an unmanaged environment without the private JWK pair", () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   writeFileSync(
     filename,
     readFileSync(filename, "utf8")
@@ -1131,7 +1164,7 @@ test("bootstrap fails closed for an unmanaged environment without the private JW
 test("bootstrap fails closed when only one half of the private JWK pair is present", () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   writeFileSync(
     filename,
     readFileSync(filename, "utf8").replace(/^TAMA_OAUTH_PRIVATE_JWK=.*$/mu, ""),
@@ -1149,7 +1182,7 @@ test("bootstrap fails closed when only one half of the private JWK pair is prese
 test("bootstrap migrates a managed environment from the retired signing key pair", () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   const before = readFileSync(filename, "utf8");
   const migrated = before
     .replace(/^TAMA_OAUTH_PRIVATE_JWK=.*$/mu, "TAMA_OAUTH_SIGNING_KEY=legacy-symmetric-secret")
@@ -1185,7 +1218,7 @@ test("bootstrap migrates a managed environment from the retired signing key pair
 test("bootstrap migrates the retired pair and applies a port change in one pass", () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   writeFileSync(
     filename,
     readFileSync(filename, "utf8")
@@ -1204,7 +1237,7 @@ test("bootstrap migrates the retired pair and applies a port change in one pass"
 test("bootstrap fails closed for an incomplete retired signing key pair", () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   writeFileSync(
     filename,
     readFileSync(filename, "utf8")
@@ -1225,7 +1258,7 @@ test("bootstrap fails closed for an incomplete retired signing key pair", () => 
 test("bootstrap fails closed when exactly one half of the new pair is present", () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   writeFileSync(
     filename,
     readFileSync(filename, "utf8").replace(
@@ -1246,7 +1279,7 @@ test("bootstrap fails closed when exactly one half of the new pair is present", 
 test("bootstrap fails closed for a managed environment with an invalid private JWK", () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   writeFileSync(
     filename,
     readFileSync(filename, "utf8").replace(
@@ -1268,7 +1301,7 @@ test("bootstrap fails closed for a managed environment with an invalid private J
 test("bootstrap leaves a valid new pair untouched when retired variables are also present", () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   writeFileSync(
     filename,
     readFileSync(filename, "utf8") +
@@ -1286,7 +1319,7 @@ test("bootstrap rejects a persisted internal port that disagrees with Compose", 
   const root = project();
   const first = planFor(root);
   applyOperations(first.operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   writeFileSync(filename, readFileSync(filename, "utf8").replace(/^PORT=4000$/mu, "PORT=5000"));
 
   assert.throws(
@@ -1302,7 +1335,7 @@ test("bootstrap rejects persisted public URLs that disagree with TAMA_PORT", () 
   const root = project();
   const first = planFor(root);
   applyOperations(first.operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   writeFileSync(
     filename,
     readFileSync(filename, "utf8").replace(/^TAMA_PORT=4000$/mu, "TAMA_PORT=4567"),
@@ -1322,7 +1355,7 @@ test("bootstrap rejects missing required variables in a persisted environment", 
     const root = project();
     const first = planFor(root);
     applyOperations(first.operations);
-    const filename = join(root, ".tama.env");
+    const filename = join(root, "tama", ".tama.env");
     writeFileSync(
       filename,
       readFileSync(filename, "utf8").replace(new RegExp(`^${name}=.*$`, "mu"), `${name}=`),
@@ -1346,7 +1379,7 @@ test("bootstrap rejects persisted runtime secrets with invalid formats", () => {
   ]) {
     const root = project();
     applyOperations(planFor(root).operations);
-    const filename = join(root, ".tama.env");
+    const filename = join(root, "tama", ".tama.env");
     writeFileSync(
       filename,
       readFileSync(filename, "utf8").replace(
@@ -1369,7 +1402,7 @@ test("bootstrap rejects persisted runtime secrets with invalid formats", () => {
 test("bootstrap accepts the Tama runtime's 32-byte raw vault-key format", () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   writeFileSync(
     filename,
     readFileSync(filename, "utf8").replace(
@@ -1385,7 +1418,7 @@ test("bootstrap rejects duplicate keys in a persisted environment", () => {
   const root = project();
   const first = planFor(root);
   applyOperations(first.operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   writeFileSync(filename, `${readFileSync(filename, "utf8")}TAMA_BASE_URL=http://localhost:4000\n`);
 
   assert.throws(
@@ -1401,7 +1434,7 @@ test("bootstrap rejects PostgreSQL credentials that disagree with DATABASE_URL",
   const root = project();
   const first = planFor(root);
   applyOperations(first.operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   writeFileSync(
     filename,
     readFileSync(filename, "utf8").replace(
@@ -1422,7 +1455,7 @@ test("bootstrap rejects PostgreSQL credentials that disagree with DATABASE_URL",
 test("bootstrap quotes parsed PostgreSQL values in the derived Compose environment", () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   const password = "pass # word\nnext";
   writeFileSync(
     filename,
@@ -1435,7 +1468,7 @@ test("bootstrap quotes parsed PostgreSQL values in the derived Compose environme
   );
 
   applyOperations(planFor(root).operations);
-  const derived = readFileSync(join(root, ".tama.postgres.env"), "utf8");
+  const derived = readFileSync(join(root, "tama", ".tama.postgres.env"), "utf8");
 
   assert.match(derived, /^POSTGRES_PASSWORD="pass # word\\nnext"$/mu);
   assert.equal(parseEnv(derived).POSTGRES_PASSWORD, password);
@@ -1444,7 +1477,7 @@ test("bootstrap quotes parsed PostgreSQL values in the derived Compose environme
 test("bootstrap protects PostgreSQL dollar signs from Compose interpolation", () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   writeFileSync(
     filename,
     readFileSync(filename, "utf8")
@@ -1456,7 +1489,7 @@ test("bootstrap protects PostgreSQL dollar signs from Compose interpolation", ()
   );
 
   applyOperations(planFor(root).operations);
-  const derived = readFileSync(join(root, ".tama.postgres.env"), "utf8");
+  const derived = readFileSync(join(root, "tama", ".tama.postgres.env"), "utf8");
 
   assert.match(derived, /^POSTGRES_PASSWORD="dollar \$\$HOME"$/mu);
 });
@@ -1464,7 +1497,7 @@ test("bootstrap protects PostgreSQL dollar signs from Compose interpolation", ()
 test("bootstrap rejects PostgreSQL values Compose cannot represent faithfully", () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   const password = `control${String.fromCharCode(1)}value`;
   writeFileSync(
     filename,
@@ -1489,7 +1522,7 @@ test("bootstrap rejects PostgreSQL values Compose cannot represent faithfully", 
 test("bootstrap rejects a non-default PostgreSQL port in DATABASE_URL", () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const filename = join(root, ".tama.env");
+  const filename = join(root, "tama", ".tama.env");
   writeFileSync(
     filename,
     readFileSync(filename, "utf8").replace("@tama-postgres/tama", "@tama-postgres:5433/tama"),
@@ -1504,13 +1537,14 @@ test("bootstrap rejects a non-default PostgreSQL port in DATABASE_URL", () => {
   );
 });
 
-test("bootstrap appends ignore rules after a later secret-file negation", () => {
+test("bootstrap appends nested ignore rules after a later secret-file negation", () => {
   const root = project();
-  writeFileSync(join(root, ".gitignore"), ".tama.env\n!.tama.env\n");
+  mkdirSync(join(root, "tama"));
+  writeFileSync(join(root, "tama", ".gitignore"), ".tama.env\n!.tama.env\n");
 
   const first = planFor(root);
   applyOperations(first.operations);
-  const content = readFileSync(join(root, ".gitignore"), "utf8");
+  const content = readFileSync(join(root, "tama", ".gitignore"), "utf8");
   assert.ok(content.lastIndexOf(".tama.env") > content.lastIndexOf("!.tama.env"));
 
   const second = planFor(root);
@@ -1521,7 +1555,9 @@ test("bootstrap refuses private environment files already tracked by Git", () =>
   const root = project();
   execFileSync("git", ["init", "--quiet"], { cwd: root });
   applyOperations(planFor(root).operations);
-  execFileSync("git", ["add", "--force", ".tama.env", ".tama.postgres.env"], { cwd: root });
+  execFileSync("git", ["add", "--force", "tama/.tama.env", "tama/.tama.postgres.env"], {
+    cwd: root,
+  });
 
   assert.throws(
     () => planFor(root),
@@ -1529,24 +1565,27 @@ test("bootstrap refuses private environment files already tracked by Git", () =>
       error instanceof CLIError &&
       error.exitCode === EXIT_CODES.OWNERSHIP &&
       error.message.includes("git rm --cached") &&
-      error.details.paths.includes(".tama.env") &&
-      error.details.paths.includes(".tama.postgres.env"),
+      error.details.paths.includes("tama/.tama.env") &&
+      error.details.paths.includes("tama/.tama.postgres.env"),
   );
-  assert.ok(existsSync(join(root, ".tama.env")));
-  assert.ok(existsSync(join(root, ".tama.postgres.env")));
+  assert.ok(existsSync(join(root, "tama", ".tama.env")));
+  assert.ok(existsSync(join(root, "tama", ".tama.postgres.env")));
 });
 
-test("bootstrap moves one managed ignore block to the end without duplicating it", () => {
+test("bootstrap moves one Tama-directory ignore block to the end without duplicating it", () => {
   const root = project();
+  mkdirSync(join(root, "tama"));
   writeFileSync(
-    join(root, ".gitignore"),
+    join(root, "tama", ".gitignore"),
     [
       "# Tama Kit local runtime",
-      ".tama.env",
-      ".tama.postgres.env",
-      "tama/.terraform/",
-      "tama/*.tfstate",
-      "tama/*.tfstate.*",
+      "/.tama.env",
+      "/.tama.postgres.env",
+      "",
+      "# Tama Kit Terraform local state",
+      ".terraform/",
+      "*.tfstate",
+      "*.tfstate.*",
       "",
       "coverage/",
       "",
@@ -1554,13 +1593,13 @@ test("bootstrap moves one managed ignore block to the end without duplicating it
   );
 
   applyOperations(planFor(root).operations);
-  const content = readFileSync(join(root, ".gitignore"), "utf8");
-  const nestedContent = readFileSync(join(root, "tama", ".gitignore"), "utf8");
+  const content = readFileSync(join(root, "tama", ".gitignore"), "utf8");
   assert.equal((content.match(/# Tama Kit local runtime/gu) ?? []).length, 1);
+  assert.equal((content.match(/# Tama Kit Terraform local state/gu) ?? []).length, 1);
   assert.ok(content.lastIndexOf("# Tama Kit local runtime") > content.lastIndexOf("coverage/"));
-  assert.doesNotMatch(content, /tama\/\.terraform|tama\/\*\.tfstate/u);
-  assert.match(nestedContent, /^\.terraform\/$/mu);
-  assert.match(nestedContent, /^\*\.tfstate$/mu);
+  assert.match(content, /^\.terraform\/$/mu);
+  assert.match(content, /^\*\.tfstate$/mu);
+  assert.equal(existsSync(join(root, ".gitignore")), false);
   assert.ok(planFor(root).operations.every((operation) => operation.action === "unchanged"));
 });
 

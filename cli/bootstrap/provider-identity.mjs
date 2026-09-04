@@ -103,7 +103,7 @@ export function prefixFromName(name) {
 
 /** @param {string} name @returns {string} */
 export function environmentFileForName(name) {
-  return `.${name}.integration.env`;
+  return `tama/.${name}.integration.env`;
 }
 
 /** @param {string} value @returns {string} */

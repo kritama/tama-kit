@@ -1,6 +1,6 @@
 # Tama Directory File Layout Cleanup
 
-Status: proposed on `feature/tama-directory-file-layout`
+Status: implemented on `feature/tama-directory-file-layout`
 
 ## Summary
 
@@ -342,7 +342,17 @@ issuance, lifecycle, persistence, revocation, JWKS, or introspection behavior.
 
 ## Delivery boundary
 
-This branch contains the WIP only. Implementation begins after the layout and
-provider-fragment path contract are reviewed. The eventual PR should remain
-focused on file placement and path propagation; Caddy, `.dev` domains, TLS,
-and certificate provisioning remain separate future work.
+This branch implements the approved layout and provider-fragment path contract.
+The PR remains focused on file placement and path propagation; Caddy, `.dev`
+domains, TLS, and certificate provisioning remain separate future work.
+
+## Implementation validation
+
+- Focused bootstrap and MCP App suites: 172 passed.
+- Full Node test suite: 242 passed, 1 expected root-only skip.
+- Biome checks and TypeScript checking passed.
+- Submission and review-ready metadata validation passed.
+- Package dry run passed and included the updated CLI, templates, docs, skills,
+  and evals.
+- Bootstrap validation reached and passed Docker Compose configuration, then
+  stopped because Terraform is not installed in the validation environment.

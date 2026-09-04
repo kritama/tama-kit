@@ -4,6 +4,7 @@ import { join, relative } from "node:path";
 import { parseArgs } from "node:util";
 import { formatAgentSetupPrompt } from "../bootstrap/agent-prompt.mjs";
 import { formatComposeUpCommand } from "../bootstrap/compose-command.mjs";
+import { BOOTSTRAP_PATHS } from "../bootstrap/constants.mjs";
 import { inspectProject } from "../bootstrap/detect-project.mjs";
 import { readSetupUrl } from "../bootstrap/environment.mjs";
 import { validateSecretFilesIgnored } from "../bootstrap/gitignore.mjs";
@@ -72,7 +73,7 @@ function usage() {
     "  --mcp-app-contract <path> Provider bootstrap contract (default: discover)",
     "  --provider-name <name> Provider identity name",
     "  --provider-prefix <prefix> Environment prefix override",
-    "  --provider-env-file <path> Provider fragment file override",
+    "  --provider-env-file <path> Provider fragment override inside tama/",
     "  --provider-origin <origin> Provider issuer origin, reachable from the Tama container",
     "  --tama-origin <origin> Exact public Tama origin",
     "  --allowed-origin <origin> Allowed client origin; HTTPS off loopback, max 32 unique (repeatable)",
@@ -275,7 +276,8 @@ function resultEnvelope(plan, { dryRun, started, healthUrl }) {
 
 /** @param {BootstrapPlan} plan */
 export function validateWrittenSecretsIgnored(plan) {
-  const files = new Set([".tama.env", ".tama.postgres.env"]);
+  /** @type {Set<string>} */
+  const files = new Set([BOOTSTRAP_PATHS.environment, BOOTSTRAP_PATHS.postgresEnvironment]);
   if (plan.mcpApp) {
     files.add(plan.mcpApp.provider.environmentFile);
   }

@@ -14,6 +14,7 @@
         "Permit HTTP allowed origins only for loopback clients, require HTTPS for every non-loopback browser or MCP client origin, and stop before bootstrap if more than 32 unique origins are required.",
         "Treat the application as the OAuth authorization server and Tama as the owner of the exact /mcp/app protected resource instead of implementing that endpoint in the application.",
         "Read or generate tama/contracts/mcp-app-provider-v1.json through Tama Kit, then use its semantic bindings and endpoint paths rather than inventing independent environment names.",
+        "Keep every bootstrap-generated dotenv file under tama/, including tama/.tama.env, tama/.tama.postgres.env, tama/.tama.env.example, and the provider fragment; reject provider fragment overrides outside that directory.",
         "Implement lifecycle-gated metadata, public JWKS, authorization, token, revocation, registration when supported, and private-key-JWT-authenticated introspection with exact mcp.message resource binding.",
         "Retain actors, consent, grants, persistence, lifecycle, revocation, locking, and key custody in the application while using a compatible library only for generic OAuth and JWT mechanics.",
         "Prepare configuration first, verify provider loader evidence and prepared behavior, and require explicit authority before the two-step Tama Kit activation handoff."
@@ -36,6 +37,7 @@
         "Verify PKCE S256, fixed metadata and public JWKS paths, exact /mcp/app audience, mcp.message scope, application actor subjects, lifecycle behavior, persistence and revocation, and Tama-authenticated introspection.",
         "Reuse compatible provider capabilities and identify only evidence-backed gaps instead of rebuilding the OAuth server.",
         "Generate or consume the Tama Kit local contract and provision prepared configuration before activation.",
+        "Require the provider fragment and both Tama runtime dotenv files under tama/, with private entries ignored by tama/.gitignore and the example remaining commit-safe.",
         "Activate only with explicit authority and only after the provider satisfies readiness and prepared-mode verification."
       ],
       "expected_result_shape": "A readiness verdict with evidence and exact gaps, followed by reviewed Tama Kit dry-run and write commands and a status report that does not confuse existing OAuth with verified Tama compatibility.",
@@ -92,6 +94,7 @@
         "Inspect the repository and current Tama Kit help before selecting flags, and ask only for inputs that cannot be established from repository evidence.",
         "Allow the JSON dry run before Docker preflight; require Docker and Compose 2.20.0 or newer before a bootstrap write, and require docker info to reach the daemon before starting or inspecting services or guided setup.",
         "Run a deterministic dry-run plan before writing, preserving --skills local when tama/.tama-kit.json records it; otherwise default to --skills manual because the active Tama Kit skill is already installed and use --skills local when the user explicitly requests repository-local skills.",
+        "Expect all bootstrap-generated dotenv assets under tama/ and do not read, migrate, or create legacy root .tama.env files.",
         "If the user authorizes execution, perform the reviewed bootstrap write and start the local runtime only when requested; if the user requests guided setup, use the in-app browser for the private setup URL without exposing its token.",
         "Keep secret values and the private setup URL out of chat, and do not start services, activate an integration, or apply Terraform without the required user intent."
       ],
