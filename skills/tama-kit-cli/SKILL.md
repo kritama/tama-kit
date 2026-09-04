@@ -73,9 +73,11 @@ docker info --format '{{.ServerVersion}}'
 ```
 
 `docker --version` alone only proves that the client exists. Treat a missing
-Docker executable, missing Compose plugin, or failed `docker info` as a hard
-preflight failure. Pause and tell the user which prerequisite is missing so
-they can install or start/initialize Docker first. Do not install Docker,
+Docker executable, missing Compose plugin, failed `docker info`, or a Compose
+version older than 2.20.0 as a hard preflight failure. Parse the reported
+Compose version and require 2.20.0 or newer. Pause and tell the user which
+prerequisite is missing or too old so they can install or start/initialize
+Docker first. Do not install Docker,
 start a daemon, run Compose, run bootstrap, open the setup URL, or activate
 the integration on the user's behalf. After the user confirms Docker is ready,
 rerun all three checks. This preflight is not required for the standalone
@@ -284,7 +286,7 @@ npx @kritama/tama-kit bootstrap /path/to/provider \
   --tama-origin http://127.0.0.1:4001 \
   --allowed-origin http://127.0.0.1:3000 \
   --port 4001 \
-  --image ghcr.io/upmaru/tama:0.13.1 \
+  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection> \
   --skills manual \
   --dry-run --json
 ```
@@ -293,7 +295,12 @@ The MCP App command requires `--mcp-app`, a provider name unless an accepted
 contract or manifest already owns it, a provider origin reachable from both
 the host and Tama container, an exact HTTP loopback Tama origin matching
 `--port`, at least one exact allowed browser/MCP client origin, and a pinned
-Tama image in the supported range `>= 0.13.1 and < 0.14.0`. The provider origin
+Tama image. When an application-owned provider contract declares
+`supported_tama_versions`, choose a concrete pinned version in the intersection
+of that range and the bundled supported range `>= 0.13.1 and < 0.14.0`; if it
+does not, `0.13.1` is a valid default. Never use the example version when it is
+outside the provider range, and stop if no known pinned version lies in both
+ranges. The provider origin
 must not be `localhost`, `127.0.0.0/8`, `::1`, `0.0.0.0`, or `::`; use
 `http://host.docker.internal:<provider-port>` for a host-native provider.
 

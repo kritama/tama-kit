@@ -30,11 +30,12 @@ docker info --format '{{.ServerVersion}}'
 
 The first check confirms the Docker client, the second confirms the Compose
 plugin, and the third confirms that the daemon is initialized and reachable.
-If any check fails, pause and tell the user to install or start/initialize
-Docker first. Do not run bootstrap, Compose, the private setup URL, or
-activation until all three checks pass. After the user confirms Docker is
-ready, rerun the complete preflight. Never install or start Docker on the
-user's behalf.
+Parse the Compose version and require 2.20.0 or newer. If any check fails or
+the Compose version is too old, pause and tell the user to install or
+start/initialize Docker first. Do not run bootstrap, Compose, the private setup
+URL, or activation until the complete preflight passes. After the user
+confirms Docker is ready, rerun it. Never install or start Docker on the user's
+behalf.
 
 ## Validate Tama Kit bootstrap state first
 
@@ -133,7 +134,7 @@ npx @kritama/tama-kit bootstrap . \
   --tama-origin http://127.0.0.1:<tama-port> \
   --allowed-origin http://127.0.0.1:<client-port> \
   --port <tama-port> \
-  --image ghcr.io/upmaru/tama:0.13.1 \
+  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection> \
   --skills manual \
   --dry-run --json
 ```
@@ -143,7 +144,13 @@ public issuer and must be reachable by both host probes and the Tama container;
 do not use `localhost`, `127.0.0.1`, `::1`, `0.0.0.0`, or `::` for it. The Tama
 origin must be HTTP loopback and match `--port`. Supply every browser/MCP
 client origin with a repeated `--allowed-origin`; at least one is required.
-Use a pinned image in `>= 0.13.1 and < 0.14.0`.
+Use a concrete pinned image version in the intersection of the bundled range
+`>= 0.13.1 and < 0.14.0` and `supported_tama_versions` from the
+application-owned provider contract when present. If no provider range is
+present, `0.13.1` is a valid default within the bundled range. Never assume
+that `0.13.1` is valid when the provider contract narrows the range; if the
+ranges have no known pinned version in common, stop and report the
+incompatibility before running bootstrap.
 
 Review the JSON plan before writing. If accepted, repeat the exact command
 without `--dry-run` to stage prepared configuration. Add `--start` only when

@@ -41,7 +41,7 @@ test("Tama Kit CLI guidance repeats the bootstrap gate", () => {
   assert.match(tamaKitCli, /## Check Docker before continuing/u);
   assert.match(tamaKitCli, /docker compose version/u);
   assert.match(tamaKitCli, /docker info --format/u);
-  assert.match(tamaKitCli, /hard\npreflight failure/u);
+  assert.match(tamaKitCli, /hard preflight failure/u);
   assert.match(tamaKitCli, /bootstrap --mcp-app --dry-run --json/u);
   assert.match(tamaKitCli, /Do not require a Tama source checkout/u);
   assert.match(tamaKitCli, /in-app browser/u);
@@ -63,6 +63,6 @@ test("generated local instructions gate Docker runtime use", () => {
     assert.match(instructions, /docker --version/u);
     assert.match(instructions, /docker compose version/u);
     assert.match(instructions, /docker info --format/u);
-    assert.match(instructions, /install or start\/initialize Docker/u);
+    assert.match(instructions, /install or\s+start\/initialize Docker/u);
   }
 });

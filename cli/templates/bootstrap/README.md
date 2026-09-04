@@ -14,7 +14,8 @@ docker compose version
 docker info --format '{{.ServerVersion}}'
 ```
 
-If any check fails, install or start/initialize Docker before continuing.
+If any check fails, or Compose is older than 2.20.0, install or
+start/initialize Docker before continuing.
 
 ```bash
 {{COMPOSE_UP_COMMAND}}

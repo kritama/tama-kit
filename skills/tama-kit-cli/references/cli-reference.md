@@ -58,8 +58,11 @@ All provider-specific flags require `--mcp-app`.
 | `--migrate-provider-identity` | Deliberately migrate persisted provider identity. Requires an explicit `--provider-name`, a verified loader for the new fragment, and prepared provider mode. It cannot be combined with `--activate`. |
 
 For this Tama Kit contract revision, the bundled supported Tama range is
-`>= 0.13.1 and < 0.14.0`; confirm it against the installed version before
-choosing a tag. A typical local plan is:
+`>= 0.13.1 and < 0.14.0`. If an application-owned provider contract declares
+`supported_tama_versions`, choose a concrete pinned image version in the
+intersection of that range and the provider range. If it does not, `0.13.1` is
+a valid default. Stop when no known pinned version lies in both ranges. A
+typical local plan is:
 
 ```bash
 npx @kritama/tama-kit bootstrap /path/to/provider \
@@ -69,8 +72,8 @@ npx @kritama/tama-kit bootstrap /path/to/provider \
   --tama-origin http://127.0.0.1:4001 \
   --allowed-origin http://127.0.0.1:3000 \
   --port 4001 \
-  --image ghcr.io/upmaru/tama:0.13.1 \
-  --skills local \
+  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection> \
+  --skills manual \
   --dry-run --json
 ```
 
