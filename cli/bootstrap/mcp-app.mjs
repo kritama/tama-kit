@@ -615,9 +615,13 @@ export function planMcpApp(input) {
       );
   if (localHttps && requestedProviderOrigin !== null) {
     const asserted = normalizeMcpAppOrigin(requestedProviderOrigin, "--provider-origin");
-    if (asserted !== providerOrigin) {
+    const expectedAssertion =
+      options.migrateLocalHttps && persisted?.providerOrigin
+        ? persisted.providerOrigin
+        : providerOrigin;
+    if (asserted !== expectedAssertion) {
       throw usageError(
-        `--provider-origin is a migration assertion and must equal the derived local HTTPS provider origin ${providerOrigin}`,
+        `--provider-origin is a migration assertion and must equal ${expectedAssertion}`,
       );
     }
   }
@@ -693,12 +697,14 @@ export function planMcpApp(input) {
   let tamaOrigin;
   if (localHttps) {
     tamaOrigin = localHttps.tamaOrigin;
+    const expectedAssertion =
+      options.migrateLocalHttps && existingTamaOrigin ? existingTamaOrigin : tamaOrigin;
     if (
       requestedTamaOrigin &&
-      normalizeMcpAppOrigin(requestedTamaOrigin, "--tama-origin") !== tamaOrigin
+      normalizeMcpAppOrigin(requestedTamaOrigin, "--tama-origin") !== expectedAssertion
     ) {
       throw usageError(
-        `--tama-origin is a migration assertion and must equal the derived local HTTPS Tama origin ${tamaOrigin}`,
+        `--tama-origin is a migration assertion and must equal ${expectedAssertion}`,
       );
     }
   } else if (requestedTamaOrigin) {

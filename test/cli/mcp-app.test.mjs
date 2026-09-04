@@ -1471,10 +1471,54 @@ test("local HTTPS migration removes legacy Tama-derived MCP App identities", () 
       requested: true,
       activate: false,
       migrateLocalHttps: true,
+      providerOrigin: "http://host.docker.internal:4000",
+      tamaOrigin: "http://127.0.0.1:4001",
       allowedOrigins: ["https://app.localhost"],
     },
     mcpAppPrepared: preparedFor(root),
   });
+
+  for (const assertion of [
+    { providerOrigin: "http://host.docker.internal:5000" },
+    { tamaOrigin: "http://127.0.0.1:5001" },
+  ]) {
+    assert.throws(
+      () =>
+        createBootstrapPlan({
+          cwd: root,
+          targetPath: root,
+          image: PINNED_TAMA_IMAGE,
+          mcpApp: {
+            requested: true,
+            activate: false,
+            migrateLocalHttps: true,
+            providerOrigin: "http://host.docker.internal:4000",
+            tamaOrigin: "http://127.0.0.1:4001",
+            allowedOrigins: ["https://app.localhost"],
+            ...assertion,
+          },
+          mcpAppPrepared: preparedFor(root),
+        }),
+      /migration assertion/u,
+    );
+  }
+
+  const contract = validContract();
+  const contractPath = writeContract(root, contract);
+  assert.doesNotThrow(() =>
+    createBootstrapPlan({
+      cwd: root,
+      targetPath: root,
+      image: PINNED_TAMA_IMAGE,
+      mcpApp: {
+        requested: true,
+        activate: false,
+        migrateLocalHttps: true,
+        allowedOrigins: ["https://app.localhost"],
+      },
+      mcpAppPrepared: preparedFor(root, { contractPath, contractDocument: contract }),
+    }),
+  );
   applyOperations(migrated.operations);
 
   const environment = parseEnv(readFileSync(environmentPath, "utf8"));
