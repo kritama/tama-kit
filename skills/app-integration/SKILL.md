@@ -115,7 +115,7 @@ npx @kritama/tama-kit bootstrap . \
   --allowed-origin http://127.0.0.1:<client-port> \
   --port <tama-port> \
   --image ghcr.io/upmaru/tama:0.13.1 \
-  --skills local \
+  --skills manual \
   --dry-run --json
 ```
 

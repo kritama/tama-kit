@@ -74,7 +74,7 @@
         "Do not choose --mcp-app merely because the request mentions Tama or MCP elsewhere.",
         "Do not search for or require a separate Tama source checkout; recommend the self-contained tama-kit bootstrap command from the application repository.",
         "Inspect the repository and current Tama Kit help before selecting flags, and ask only for inputs that cannot be established from repository evidence.",
-        "Run a deterministic dry-run plan before writing, with an explicit local or manual skill-installation choice.",
+        "Run a deterministic dry-run plan before writing with --skills manual because the active Tama Kit skill is already installed; use --skills local only when the user explicitly requests repository-local skills.",
         "If the user authorizes execution, perform the reviewed bootstrap write and start the local runtime only when requested; if the user requests guided setup, use the in-app browser for the private setup URL without exposing its token.",
         "Keep secret values and the private setup URL out of chat, and do not start services, activate an integration, or apply Terraform without the required user intent."
       ],

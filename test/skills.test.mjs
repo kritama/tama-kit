@@ -41,5 +41,8 @@ test("Tama Kit CLI guidance repeats the bootstrap gate", () => {
   assert.match(tamaKitCli, /## Complete interactive Tama setup when requested/u);
   assert.match(tamaKitCli, /### Tama source-development command contract/u);
   assert.match(tamaKitCli, /### Standalone System OAuth key command contract/u);
+  assert.match(tamaKitCli, /use `--skills manual` by default/u);
+  assert.match(tamaKitCli, /--skills manual --dry-run --json/u);
+  assert.doesNotMatch(tamaKitCli, /--skills local --dry-run --json/u);
   assert.doesNotMatch(tamaKitCli, /CLI reference/u);
 });

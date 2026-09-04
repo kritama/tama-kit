@@ -62,9 +62,11 @@ appropriate `tama-kit bootstrap` command from the application repository.
 ## Plan bootstrap, then write
 
 For `bootstrap` workflows, use `--dry-run --json` first. Since JSON mode cannot
-prompt, always make the agent-skill choice explicit with `--skills local` or
-`--skills manual`. Recommend `local` when the user wants future agents in this
-repository to have Tama Kit's skills; respect an existing recorded choice.
+prompt, always make the agent-skill choice explicit. Because this skill is
+already active, use `--skills manual` by default; do not reinstall or copy the
+skill into the repository. Use `--skills local` only when the user explicitly
+wants future agents in this repository to have a repository-local copy. Respect
+an existing recorded choice.
 
 Do not carry these flags into other workflows. `dev setup` has its own
 `--dry-run`, `--prepare-only`, and `--json` sequence, while
@@ -94,19 +96,20 @@ Use these commands from the application repository. Replace
 
 ```bash
 npx @kritama/tama-kit bootstrap /path/to/app \
-  --skills local --dry-run --json
+  --skills manual --dry-run --json
 
 npx @kritama/tama-kit bootstrap /path/to/app \
-  --skills local --json
+  --skills manual --json
 ```
 
 Use `tama-kit` instead of `npx @kritama/tama-kit` when the executable is already
 installed. `--skills local` installs the Tama Kit skills into
-`.agents/skills/`; use `--skills manual` when the user wants external skill
-installation. `--json` is deterministic, does not prompt, and redacts secret
-values. `--dry-run` plans only; it never writes files or starts Compose. Add
-`--start` to the second command only when the user explicitly requests the
-runtime to start. `--start` and `--dry-run` cannot be combined.
+`.agents/skills/`; use `--skills manual` when the active agent already has this
+skill, which is the default for this workflow. `--json` is deterministic, does
+not prompt, and redacts secret values. `--dry-run` plans only; it never writes
+files or starts Compose. Add `--start` to the second command only when the user
+explicitly requests the runtime to start. `--start` and `--dry-run` cannot be
+combined.
 
 Optional standard flags are:
 
@@ -259,7 +262,7 @@ npx @kritama/tama-kit bootstrap /path/to/provider \
   --allowed-origin http://127.0.0.1:3000 \
   --port 4001 \
   --image ghcr.io/upmaru/tama:0.13.1 \
-  --skills local \
+  --skills manual \
   --dry-run --json
 ```
 
