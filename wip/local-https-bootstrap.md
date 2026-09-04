@@ -147,6 +147,7 @@ renderers. It should own at least:
 
 ```text
 provider public origin          https://app.localhost
+Tama canonical host             PHX_HOST=tama.app.localhost
 Tama public origin              https://tama.app.localhost
 protected resource              https://tama.app.localhost/mcp/app
 allowed client origins          https://app.localhost by default
@@ -171,11 +172,17 @@ tama-kit bootstrap . --mcp-app --provider-name memovee --start
 The provider name may still be confirmed interactively when safely detected.
 Default the allowed client origin to the provider public origin; retain
 repeated `--allowed-origin` only for additional real clients. Use focused
-advanced inputs such as `--local-domain`, `--provider-port`, and an optional
-HTTPS port instead of requiring callers to provide `--provider-origin`,
+advanced inputs such as `--local-domain` and `--provider-port` instead of
+requiring callers to provide `--provider-origin`,
 `--tama-origin`, and a matching Tama host port for the standard local case.
 Existing explicit origin flags may remain for deliberate custom topology and
 the 0.4.3 migration, but they must not drive Caddy's private upstream routing.
+
+For this first implementation, keep the public HTTPS port fixed at 443 so
+Tama's production `PHX_HOST` is sufficient to derive its complete public
+origin. A later custom HTTPS-port feature would require a separate canonical
+public-origin input; it must not reintroduce several independently editable
+Tama URLs.
 
 For MCP App mode, Caddy reaches Tama through the Compose network, so Tama does
 not need a published host port. Keep `--port` and direct HTTP access for the
@@ -239,9 +246,23 @@ provider introspection           https://app.localhost/auth/introspections
 Tama JWKS                        https://tama.app.localhost/.well-known/jwks.json
 ```
 
+Render `PHX_HOST=tama.app.localhost` once, then derive every Tama-owned public
+value from `https://${PHX_HOST}`: endpoint origin, `/mcp/app` resource,
+introspection client ID, public JWKS URL, protected-resource metadata, health,
+setup, and Caddy host. Do not independently persist or prompt for those values.
+If a retained 0.4.3 input or contract field supplies one, treat it as a
+migration assertion and reject it when it differs from the derived value.
+
+Provider-owned values remain separate: `https://app.localhost`, its JWKS and
+introspection endpoints, and the allowed browser/MCP client origins cannot be
+derived from Tama's `PHX_HOST`. Tama Kit writes the Tama-derived resource,
+introspection client ID, and Tama JWKS URL into the provider fragment so
+Memovee does not need to know or load the `PHX_HOST` variable itself.
+
 The existing explicit `--provider-origin`, `--tama-origin`, and repeated
-`--allowed-origin` inputs remain authoritative when supplied. They must agree
-with the selected local HTTPS topology rather than creating a second identity.
+`--allowed-origin` inputs remain available for migration or deliberate custom
+topology. A supplied Tama origin is an assertion against the origin derived
+from `PHX_HOST`, not a second independently authoritative value.
 
 Preflight must prove that both default names resolve to IPv4 or IPv6 loopback
 on the host. If the host resolver does not honor subdomains of `.localhost`,
@@ -341,8 +362,8 @@ The actual template must also:
 Check the selected host HTTPS port before startup. Publish only port 443 by
 default; port 80 and HTTP-to-HTTPS redirects are not required for this local
 topology. Do not stop, replace, or reconfigure an unrelated local proxy that
-already owns the selected port. A configurable HTTPS port may be supported,
-but it becomes part of every exact public origin.
+already owns the selected port. Defer configurable public HTTPS ports; the
+canonical Tama origin in this release is `https://${PHX_HOST}` on port 443.
 
 ## Provider requirements
 
@@ -556,8 +577,9 @@ workflow. A generic standard-bootstrap runtime test is not sufficient.
    topology type.
 2. Separate public provider and Tama identities from Caddy's private upstream
    addresses.
-3. Derive exact URLs, default allowed origin, certificate names, and health URL
-   from that one validated topology.
+3. Render one Tama `PHX_HOST`, derive every Tama-owned public URL from
+   `https://${PHX_HOST}`, and derive the separate provider URLs and default
+   allowed origin from the provider hostname.
 4. Make the common MCP App command default-driven while keeping explicit
    custom origins isolated from private routing.
 5. Persist only non-secret topology state in the manifest and local contract.
@@ -623,6 +645,9 @@ workflow. A generic standard-bootstrap runtime test is not sufficient.
   repository instructions for the new topology.
 - The ordinary MCP App bootstrap does not require callers to manually align
   provider origin, Tama origin, allowed origin, and a published Tama port.
+- Every Tama-owned public URL and the Caddy Tama host derive from one
+  `PHX_HOST`; a conflicting retained `--tama-origin` or contract value fails
+  validation instead of creating configuration drift.
 - No normal-path verifier rewrites the Host header or resolves
   `host.docker.internal` as a public OAuth authority; host and container probes
   both use the exact HTTPS origins.
