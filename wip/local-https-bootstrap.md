@@ -1,0 +1,446 @@
+# Local HTTPS Bootstrap
+
+Status: proposed on `feature/local-https-bootstrap`
+
+## Summary
+
+Extend `tama-kit bootstrap --mcp-app` with a production-compatible local HTTPS
+topology. Tama Kit should generate a Caddy reverse-proxy service, create a
+locally trusted certificate with mkcert, and use exact HTTPS origins that are
+reachable by browser clients, the host-native provider, and the containerized
+Tama runtime.
+
+This closes a runtime gap released in Tama Kit 0.4.3. That release can generate
+a syntactically valid MCP App configuration that the official Tama server image
+cannot start: the image runs with the production environment, while the
+generated resource and authorization-server endpoints use local HTTP.
+
+## Proven failure
+
+The Memovee bootstrap produced this topology:
+
+```text
+provider origin:  http://host.docker.internal:4000
+Tama resource:    http://127.0.0.1:4001/mcp/app
+Tama image:       ghcr.io/upmaru/tama:0.13.1-server
+```
+
+The generated Compose mapping was correct (`4001:4000`), but Tama never kept
+the host port open because the container entered a restart loop. Tama 0.13.1
+reported:
+
+```text
+invalid Tama MCP app configuration: resource
+```
+
+The official server image runs in `prod`. Tama 0.13.1 permits HTTP MCP App
+endpoints only for loopback hosts in `dev` and `test`; production configuration
+requires HTTPS. Even an explicit production opt-in for loopback would not make
+the current provider origin valid because `host.docker.internal` is a Docker
+transport address, not a loopback OAuth issuer.
+
+The failure is therefore a topology incompatibility, not a port mapping,
+PostgreSQL, image-tag, or generated-file-layout problem.
+
+## Goal
+
+A fresh MCP App bootstrap should produce one exact public origin per service:
+
+```text
+https://app.localhost                 provider OAuth issuer
+https://tama.app.localhost            Tama public origin
+https://tama.app.localhost/mcp/app    protected resource
+```
+
+The default uses names below `.localhost`, whose address queries are defined
+to resolve to the host loopback interface. This avoids public-domain
+collisions and normally avoids host-file or local-DNS changes. The exact names
+remain configurable for advanced setups, but public suffixes such as `.dev`
+and `.build` require operator-managed DNS and can collide with registered
+domains. Do not use `.local`; it is reserved for multicast DNS and is not a
+reliable host-to-container application namespace.
+
+Both the host and containers must use the same public origins. Docker routing
+must not leak into OAuth identifiers.
+
+```text
+Browser / host client
+        |
+        | HTTPS app.localhost or tama.app.localhost
+        v
+   Caddy container
+      |        |
+      | HTTP   | HTTP
+      v        v
+host provider  Tama container
+   :4000          :4000
+```
+
+When Tama calls provider JWKS or introspection endpoints, `app.localhost`
+resolves to Caddy through an explicit Compose network alias. Caddy then reaches
+the host-native provider through `host.docker.internal:4000`. The public issuer
+remains `https://app.localhost`; the transport-only host-gateway address is
+never written into metadata, token claims, or public contracts.
+
+## Decisions
+
+1. Use Caddy as the generated local reverse proxy and TLS termination layer.
+2. Use mkcert as the local CA and leaf-certificate generator. Do not generate
+   an untrusted one-off self-signed leaf certificate.
+3. Keep the provider host-native and Tama containerized. This feature does not
+   require containerizing the provider application.
+4. Give the provider and Tama distinct HTTPS hostnames under one configurable
+   local base name.
+5. Use the same public origins from the host and from containers. Docker-only
+   transport names are upstream details, not OAuth identities.
+6. Keep Caddy-to-provider and Caddy-to-Tama upstream traffic on the local host
+   or Compose network. TLS is required at the public boundary; internal proxy
+   hops may remain HTTP.
+7. Install the mkcert root certificate into the Tama container trust store so
+   provider JWKS and introspection requests succeed through HTTPS.
+8. Preserve existing Tama and provider key material during an ordinary 0.4.3
+   topology upgrade. Changing domains must not rotate OAuth or introspection
+   keys implicitly.
+9. Require explicit authority before modifying a host trust store. The default
+   `.localhost` topology does not require a hosts-file edit. Bootstrap may
+   generate and validate the required artifacts, but it must not silently
+   invoke privilege escalation.
+10. Keep standard non-MCP bootstrap unchanged unless local HTTPS is explicitly
+    requested. MCP App bootstrap must use a topology accepted by the selected
+    production Tama image.
+11. Do not weaken Tama's production URL policy as part of this feature.
+12. Add an MCP App runtime gate. The existing generic runtime gate does not
+    exercise `prepared` configuration and therefore did not catch this issue.
+
+## Domain and DNS model
+
+The command needs one stable domain input from which it can derive both hosts.
+The exact flag name will be finalized during implementation; the intended
+shape is:
+
+```bash
+tama-kit bootstrap . \
+  --mcp-app \
+  --local-domain app.localhost \
+  --port 4001 \
+  --image ghcr.io/upmaru/tama:0.13.1-server \
+  --start
+```
+
+Derived values:
+
+```text
+provider origin                  https://app.localhost
+Tama origin                      https://tama.app.localhost
+Tama MCP App resource            https://tama.app.localhost/mcp/app
+Tama introspection client ID     https://tama.app.localhost/mcp/app/introspection
+provider JWKS                    https://app.localhost/.well-known/jwks.json
+provider introspection           https://app.localhost/auth/introspections
+Tama JWKS                        https://tama.app.localhost/.well-known/jwks.json
+```
+
+The existing explicit `--provider-origin`, `--tama-origin`, and repeated
+`--allowed-origin` inputs remain authoritative when supplied. They must agree
+with the selected local HTTPS topology rather than creating a second identity.
+
+Preflight must prove that both default names resolve to IPv4 or IPv6 loopback
+on the host. If the host resolver does not honor subdomains of `.localhost`,
+fail with structured remediation rather than silently editing `/etc/hosts`.
+
+The Caddy service receives Compose network aliases for the same names so Tama
+resolves `app.localhost` to Caddy rather than to its own loopback interface.
+Before writing, fail on domain collisions, invalid DNS names, unsupported IP
+literals, duplicate hostnames, or a selected domain that resolves somewhere
+outside the intended local topology. A custom non-`.localhost` domain requires
+operator-managed host DNS or hosts-file entries and explicit acknowledgement
+of public-name collision risk.
+
+Do not automatically edit `/etc/hosts` or manage a machine-wide wildcard DNS
+resolver in this release.
+
+## Certificate and trust model
+
+Preflight must establish:
+
+- mkcert is installed and executable;
+- its local CA exists or the user explicitly authorizes `mkcert -install`;
+- the requested provider and Tama names are present in the leaf certificate;
+- generated private-key destinations are new, ignored, untracked,
+  non-symlink paths with owner-only permissions;
+- Caddy can read the mounted certificate without broadening host permissions;
+  and
+- the Tama container trusts the mkcert root certificate.
+
+Suggested generated layout:
+
+```text
+tama/
+├── Caddyfile                         # managed and safe to commit
+├── compose.yaml                     # includes Caddy and Tama services
+├── tls/
+│   ├── local.pem                    # local leaf certificate; ignored
+│   ├── local-key.pem                # private leaf key; ignored, mode 0600
+│   └── rootCA.pem                   # public local CA certificate; ignored
+└── ...existing Tama files
+```
+
+Do not copy mkcert's root CA private key into the repository or any container.
+Only the public root certificate may be mounted or copied into a derived local
+Tama image. Leaf private keys must never appear in JSON output, logs, generated
+documentation, diagnostic commands, or agent prompts.
+
+The implementation must determine and test the supported trust mechanism for
+the pinned Tama server image. Prefer a small generated local image layer that
+installs the public CA with the image's native CA update mechanism. Do not
+assume that mounting a PEM file or setting a generic environment variable makes
+Erlang/OTP, Req, and Finch trust it.
+
+Caddy's internal CA is not the default design. It still requires explicit host
+and container trust distribution, while mkcert gives Tama Kit a known local CA
+workflow. Supporting `tls internal` may be considered later as a separate
+backend.
+
+## Caddy behavior
+
+Generate a minimal managed Caddy configuration with two exact hosts:
+
+```caddyfile
+app.localhost {
+  tls /etc/tama-kit/tls/local.pem /etc/tama-kit/tls/local-key.pem
+  reverse_proxy host.docker.internal:4000
+}
+
+tama.app.localhost {
+  tls /etc/tama-kit/tls/local.pem /etc/tama-kit/tls/local-key.pem
+  reverse_proxy tama:4000
+}
+```
+
+The actual template must also:
+
+- preserve the incoming `Host` and HTTPS forwarding information expected by
+  the provider and Tama;
+- reject unintended hostnames rather than serving a catch-all route;
+- avoid an admin interface exposed on the host;
+- use a pinned supported Caddy image rather than an unconstrained tag;
+- mount certificate material read-only;
+- bind published proxy ports only to local interfaces unless the user
+  explicitly chooses broader exposure;
+- include bounded health checks; and
+- avoid logging authorization headers, cookies, query strings containing setup
+  tokens, or request bodies.
+
+Check host ports 80 and 443 before startup. Do not stop, replace, or reconfigure
+an unrelated local proxy that already owns either port. A configurable HTTPS
+port may be supported, but it becomes part of every exact public origin.
+
+## Provider requirements
+
+The provider must advertise and issue tokens from the exact external issuer,
+for example `https://app.localhost`, while continuing to listen on its existing
+host port for Caddy's upstream connection.
+
+Provider loader verification must prove that the application loads the managed
+fragment containing the HTTPS issuer and resource. Framework-specific proxy
+settings remain application-owned. Tama Kit may report required trusted-proxy
+or external-URL configuration, but must not edit arbitrary application source.
+
+The provider must never derive its OAuth issuer from an untrusted incoming
+`Host` or `X-Forwarded-*` header. The generated issuer remains explicit.
+
+## Generated files and ownership
+
+Continue to keep Tama assets below `tama/`:
+
+- `tama/Caddyfile` and any generated local-image Dockerfile are non-secret,
+  managed files;
+- `tama/tls/` is machine-local and ignored;
+- `tama/.tama.env` retains Tama-owned secrets;
+- `tama/.<provider>.integration.env` retains provider-owned secrets; and
+- `tama/contracts/mcp-app-provider-v1.json` records only non-secret public
+  topology and loader evidence.
+
+Extend `tama/.tama-kit.json` with enough non-secret state to make reruns
+deterministic: selected domains, HTTPS port, certificate SAN set, proxy image,
+and trust mechanism. Do not store certificate private keys, CA private keys,
+passwords, tokens, or private JWK members in the manifest.
+
+All managed writes remain transactional and drift-aware. A failure after
+certificate creation must clean up only files created by that transaction and
+must never delete an unrelated replacement.
+
+## Existing 0.4.3 projects
+
+Tama Kit 0.4.3 has been published, so this feature requires an explicit safe
+upgrade path rather than pretending the HTTP topology never existed.
+
+For a manifest that records the 0.4.3 HTTP MCP App topology:
+
+1. Detect and report the incompatible public origins before attempting to
+   start Tama.
+2. Plan the HTTPS domains, Caddy files, certificate files, trust installation,
+   Compose changes, provider fragment changes, Tama environment changes, local
+   contract changes, and generated documentation as one reviewable operation.
+3. Preserve valid OAuth signing keys, overlap sets, Tama introspection keys,
+   setup credentials, database credentials, and unrelated environment entries.
+4. Treat the domain change as an explicit public-identity migration. Do not
+   silently change an issuer or resource during an ordinary rerun.
+5. Require the provider loader and external URL configuration to be ready
+   before marking the migration prepared.
+6. Recreate affected containers after the environment and trust changes; a
+   process restart alone does not reload Compose `env_file` values.
+
+Projects without MCP App configuration do not need migration.
+
+## Secret-safe diagnostics
+
+Diagnostics must use allowlisted fields. Never print all of
+`docker inspect .Config.Env`, dump dotenv files, or include complete container
+configuration in errors. Safe diagnostics include service state, exit code,
+health status, published ports, image reference, and selected non-secret mode
+or origin variables.
+
+Redact generated values from bounded Compose logs before returning them. Test
+redaction against setup tokens, database passwords, signing keys, private JWKs,
+TLS private keys, client credentials, and values embedded inside longer log
+lines.
+
+## CLI behavior
+
+Dry-run JSON remains deterministic and secret-free. It may report:
+
+- requested and resolved public hostnames;
+- HTTPS and upstream ports;
+- whether mkcert, host trust, host resolution, container trust, and Docker are
+  ready;
+- planned managed and private paths;
+- whether privileged host actions still require operator approval; and
+- whether the result is configuration-only, prepared, or live-verified.
+
+A dry run must not install a CA, edit the hosts file, generate reusable private
+keys, start Caddy, or start Tama.
+
+A write may generate repository-local certificates after prerequisites and
+permissions are accepted. Host trust-store or hosts-file mutation requires a
+separate explicit confirmation immediately before the privileged action. JSON
+and non-interactive runs fail with structured prerequisites rather than
+prompting or invoking `sudo`.
+
+`--start` starts the generated Caddy, Tama, and Tama PostgreSQL services only
+after host resolution and trust checks pass. `--activate` retains its existing
+authority boundary and cannot bypass HTTPS or readiness failures.
+
+## Verification
+
+Static verification must cover:
+
+- domain parsing, normalization, derivation, collision handling, and manifest
+  persistence;
+- exact HTTPS issuer, resource, JWKS, introspection, client-ID, and allowed
+  origin rendering;
+- Caddyfile and Compose rendering with safe quoting;
+- network aliases and host-gateway upstream wiring;
+- mkcert discovery, SAN inspection, renewal/reuse, failure behavior, and
+  command-argument safety;
+- TLS private-file permissions, ignores, tracked-file refusal, symlink and
+  ancestor replacement races, and rollback identity checks;
+- CA public-certificate installation without copying the CA private key;
+- 0.4.3 HTTP-topology migration with all application secrets preserved;
+- managed-file drift and conflicting existing proxy services;
+- dry-run determinism and absence of secret material; and
+- allowlisted, redacted failure diagnostics.
+
+The runtime gate must use the official pinned Tama server image and a minimal
+provider fixture. It must prove:
+
+1. Caddy serves a certificate valid for both public names.
+2. The host trusts both HTTPS endpoints.
+3. Tama in `prepared` mode starts successfully under the production release
+   environment.
+4. Tama reaches the provider's HTTPS metadata, JWKS, and authenticated
+   introspection endpoints through Caddy.
+5. Prepared mode publishes Tama's public key but does not advertise or expose
+   `/mcp/app`.
+6. Enabled verification succeeds only after the provider is enabled.
+7. The protected resource rejects anonymous and wrong-audience requests.
+8. No private key, token, assertion, password, setup URL, or client secret is
+   emitted by bootstrap or diagnostics.
+
+This new MCP App runtime gate is required in CI and in the npm publishing
+workflow. A generic standard-bootstrap runtime test is not sufficient.
+
+## Non-goals
+
+- Public production certificate issuance or ACME automation.
+- Managing public DNS, wildcard DNS daemons, Kubernetes ingress, or cloud load
+  balancers.
+- Turning Caddy into a general-purpose proxy for unrelated application routes.
+- Editing `/etc/hosts`, installing system packages, or silently invoking
+  privilege escalation.
+- Weakening Tama's production HTTPS validation.
+- Combining provider and Tama credentials.
+- Rotating existing OAuth/JWK or application secrets merely because the local
+  domain changes.
+- Supporting multiple TLS backends in the first implementation.
+
+## Implementation outline
+
+### Phase 1: Model the topology
+
+1. Add explicit local-domain and HTTPS topology types.
+2. Separate public provider origin from the host-gateway upstream address.
+3. Derive exact provider and Tama URLs from one validated topology.
+4. Persist only non-secret topology state in the manifest and local contract.
+
+### Phase 2: Certificates and host prerequisites
+
+1. Add mkcert discovery and version/capability checks.
+2. Plan certificate SANs and private paths without creating them during dry
+   run.
+3. Generate leaf material safely and copy only the public root CA certificate.
+4. Detect host trust and hostname resolution; produce explicit remediation or
+   an approved privileged step.
+
+### Phase 3: Caddy and container trust
+
+1. Add managed Caddyfile and Compose templates.
+2. Add exact Compose network aliases and host-gateway upstream routing.
+3. Install the public local CA into a derived Tama runtime layer using a method
+   verified against the selected image.
+4. Add health and readiness checks for Caddy and Tama HTTPS endpoints.
+
+### Phase 4: MCP App integration and migration
+
+1. Render all Tama and provider variables from HTTPS public origins.
+2. Add an explicit 0.4.3 HTTP-to-HTTPS topology migration that preserves
+   secrets.
+3. Update local contract, manifest, generated instructions, skills, README,
+   CLI reference, help, and JSON output.
+4. Keep provider preparation and activation as separate checkpoints.
+
+### Phase 5: Verification and delivery
+
+1. Add unit, integration, security, migration, and diagnostic-redaction tests.
+2. Add a production-image MCP App runtime gate to CI and npm publishing.
+3. Reproduce the original Memovee failure, apply the new bootstrap, and prove
+   host and container HTTPS access.
+4. Stop accepting changes at the release candidate cutoff; only confirmed
+   blockers found by the agreed review round enter the release branch.
+
+## Acceptance criteria
+
+- A fresh Memovee MCP App bootstrap starts Caddy, Tama PostgreSQL, and the
+  official Tama server image without a restart loop.
+- `https://tama.app.localhost/` is reachable from the host with a trusted
+  certificate.
+- Tama accepts `https://tama.app.localhost/mcp/app` in prepared mode and can
+  reach the provider through `https://app.localhost`.
+- OAuth metadata, token claims, resource metadata, JWKS, and introspection use
+  exact public HTTPS origins; no Docker-only hostname appears in public
+  identity.
+- An existing 0.4.3 generated project can explicitly migrate without rotating
+  valid provider or Tama signing material.
+- Dry-run, JSON, logs, and diagnostics disclose no secrets.
+- Standard non-MCP bootstrap behavior remains unchanged.
+- Full tests, package validation, the generic runtime gate, and the new MCP App
+  production-runtime gate pass on the exact review head.
