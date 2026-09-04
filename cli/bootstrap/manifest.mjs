@@ -133,6 +133,61 @@ function parsePersistedProvider(value, manifestPath) {
       { path: manifestPath },
     );
   }
+  const localHttps = provider.localHttps;
+  if (localHttps !== undefined) {
+    if (!localHttps || typeof localHttps !== "object" || Array.isArray(localHttps)) {
+      throw ownershipError(
+        `Tama Kit manifest contains an invalid local HTTPS topology: ${manifestPath}`,
+        {
+          path: manifestPath,
+        },
+      );
+    }
+    const topology = /** @type {Record<string, unknown>} */ (localHttps);
+    const required = [
+      "profile",
+      "localDomain",
+      "providerHost",
+      "tamaHost",
+      "providerOrigin",
+      "tamaOrigin",
+      "providerPort",
+      "tamaPort",
+      "httpsPort",
+      "certificateNames",
+      "caddyImage",
+      "trustMechanism",
+      "allowedOrigins",
+    ];
+    if (
+      required.some((key) => !(key in topology)) ||
+      topology.profile !== "mcp-app-local-https" ||
+      typeof topology.localDomain !== "string" ||
+      typeof topology.providerHost !== "string" ||
+      typeof topology.tamaHost !== "string" ||
+      typeof topology.providerOrigin !== "string" ||
+      typeof topology.tamaOrigin !== "string" ||
+      !Number.isInteger(topology.providerPort) ||
+      !Number.isInteger(topology.tamaPort) ||
+      topology.httpsPort !== 443 ||
+      !Array.isArray(topology.certificateNames) ||
+      topology.certificateNames.some((name) => typeof name !== "string") ||
+      typeof topology.caddyImage !== "string" ||
+      typeof topology.trustMechanism !== "string" ||
+      !Array.isArray(topology.allowedOrigins) ||
+      topology.allowedOrigins.length === 0 ||
+      topology.allowedOrigins.length > 32 ||
+      topology.allowedOrigins.some((origin) => typeof origin !== "string" || origin.length === 0) ||
+      new Set(topology.allowedOrigins).size !== topology.allowedOrigins.length
+    ) {
+      throw ownershipError(
+        `Tama Kit manifest contains an invalid local HTTPS topology: ${manifestPath}`,
+        {
+          path: manifestPath,
+        },
+      );
+    }
+  }
   return {
     identity: {
       name: provider.name,
@@ -156,6 +211,9 @@ function parsePersistedProvider(value, manifestPath) {
           tamaOrigin: /** @type {string} */ (provider.tamaOrigin),
           allowedOrigins: /** @type {string[]} */ (provider.allowedOrigins),
         }
+      : {}),
+    ...(localHttps !== undefined
+      ? { localHttps: /** @type {import("../types.mjs").LocalHttpsTopology} */ (localHttps) }
       : {}),
   };
 }
@@ -492,6 +550,7 @@ export function createManagedFilePlanner(root, tamaDirectory, skillMode, mcpAppP
                     allowedOrigins: provider.allowedOrigins,
                   }
                 : {}),
+              ...(provider.localHttps ? { localHttps: provider.localHttps } : {}),
             },
           }
         : {}),

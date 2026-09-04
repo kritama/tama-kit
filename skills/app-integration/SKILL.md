@@ -140,23 +140,38 @@ Do not try to change an existing recorded `local` mode to `manual`:
 npx @kritama/tama-kit bootstrap . \
   --mcp-app \
   --provider-name <provider-name> \
-  --provider-origin http://host.docker.internal:<provider-port> \
-  --tama-origin http://127.0.0.1:<tama-port> \
-  --allowed-origin http://127.0.0.1:<client-port> \
-  --port <tama-port> \
   --image ghcr.io/upmaru/tama:<pinned-version-in-intersection>-server \
   --skills <resolved-skill-mode> \
   --dry-run --json
 ```
 
-Replace placeholders with repository evidence. The provider origin is the
-public issuer and must be reachable by both host probes and the Tama container;
-do not use `localhost`, `127.0.0.1`, `::1`, `0.0.0.0`, or `::` for it. The Tama
-origin must be HTTP loopback and match `--port`. Supply each browser/MCP client
-origin with a repeated `--allowed-origin`; at least one and at most 32 unique
-origins are allowed. Loopback client origins may use HTTP, but every
-non-loopback allowed origin must use HTTPS. If more than 32 distinct origins
-are required, stop and narrow the set before running bootstrap.
+Fresh MCP App bootstrap derives the production-compatible local HTTPS topology:
+`https://app.localhost` for the host-native provider and
+`https://tama.app.localhost/mcp/app` for Tama. Caddy is the public entry point;
+`host.docker.internal:<provider-port>` and `tama:4000` are private upstreams,
+not OAuth identities. Use `--local-domain` and `--provider-port` for deliberate
+customization. The default allowed client origin is the provider origin; repeat
+`--allowed-origin` only for additional clients. `--provider-origin` and
+`--tama-origin` are migration assertions in this topology.
+
+Existing 0.4.3 HTTP projects require an explicit `--migrate-local-https` write.
+The migration preserves OAuth and application secrets and does not silently
+rotate keys. A custom non-`.localhost` domain requires operator-managed DNS;
+Tama Kit does not edit `/etc/hosts`. For that migration only, the retained
+transport assertion may look like `--provider-origin http://host.docker.internal:<provider-port>`;
+it is never the advertised issuer.
+
+Before a write or runtime use, verify Docker Compose. Before `--start`, also
+verify the daemon. Before writing local HTTPS certificates, ensure `mkcert` is
+installed and explicitly authorize `mkcert -install` when its local CA is
+missing. The write creates ignored `tama/tls/` material and a derived local
+Tama image that trusts only the public CA certificate.
+
+Supply each browser/MCP client origin with a repeated `--allowed-origin`; at
+least one and at most 32 unique origins are allowed. Loopback client origins
+may use HTTP, but every non-loopback allowed origin must use HTTPS. If more
+than 32 distinct origins are required, stop and narrow the set before running
+bootstrap.
 Use a concrete pinned version in the intersection of the bundled range
 `>= 0.13.1 and < 0.14.0` and `supported_tama_versions` from the
 application-owned provider contract when present, then select the official
@@ -170,19 +185,24 @@ Review the JSON plan before writing. If accepted, repeat the exact command
 without `--dry-run` to stage prepared configuration. Add `--start` only when
 the user requests that Tama start. `--activate` requires both `--mcp-app` and
 `--start`; do not add it during preparation. Supported provider-specific
-options are `--provider-name`, `--provider-origin`, `--tama-origin`, repeated
-`--allowed-origin`, `--provider-prefix`, `--provider-env-file`,
-`--mcp-app-contract`, `--activate`, and `--migrate-provider-identity`.
+options are `--provider-name`, `--local-domain`, `--provider-port`,
+`--install-local-ca`, `--migrate-local-https`, `--provider-origin`,
+`--tama-origin`, repeated `--allowed-origin`, `--provider-prefix`,
+`--provider-env-file`, `--mcp-app-contract`, `--activate`, and
+`--migrate-provider-identity`.
 
-After a successful write, verify that `tama/.tama.env` and the provider fragment
+After a successful write, verify that `tama/.tama.env`, the provider fragment,
+and `tama/tls/`
 are ignored and untracked, that the generated local contract exists, and that
-the provider loader consumes the reported fragment. If the user explicitly
-asks for guided Tama setup, start the managed Compose runtime if necessary,
-wait for its health endpoint, load `tama/.tama.env` without echoing it, and open the
-reported private `/setup/root?token=...` URL in the in-app browser. Walk the
-user through creating the root user, signing in, and creating provisioner
-credentials. If browser control is unavailable, use `tama/README.md` without
-reproducing the token. Never ask the user to paste credentials into chat.
+the provider loader consumes the reported fragment. Verify both public names
+with `curl --cacert tama/tls/rootCA.pem` after Caddy starts; do not test or
+advertise the private upstreams as OAuth origins. If the user explicitly
+asks for guided Tama setup, use the HTTPS base URL from the private environment
+and the reported private `/setup/root?token=...` URL without echoing its token.
+Never ask the user to paste credentials into chat.
+If browser control is available, use the in-app browser for the private setup
+URL; otherwise direct the user to `tama/README.md` without reproducing its
+token.
 
 ## Close authorized readiness gaps
 

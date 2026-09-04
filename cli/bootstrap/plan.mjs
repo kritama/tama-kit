@@ -8,6 +8,12 @@ import { BOOTSTRAP_PATHS, BOOTSTRAP_SCHEMA_VERSION, DEFAULTS } from "./constants
 import { inspectProject } from "./detect-project.mjs";
 import { planEnvironment, readEnvironmentValues, resolveEnvironmentPort } from "./environment.mjs";
 import { planGitignore, validateSecretFilesUntracked } from "./gitignore.mjs";
+import {
+  localHttpsPaths,
+  renderLocalCaDockerfile,
+  resolveLocalHttpsTopology,
+  usesLocalHttpsTopology,
+} from "./local-https.mjs";
 import { createManagedFilePlanner, readMcpAppProvider } from "./manifest.mjs";
 import { persistedTamaOrigin, planMcpApp, resolveMcpAppState } from "./mcp-app.mjs";
 import {
@@ -74,6 +80,7 @@ function persistedMcpDocView(persisted, root) {
     providerSigningKeyId: "",
     introspectionSigningKeyId: "",
     operations: [],
+    localHttps: persisted.localHttps ?? null,
   };
 }
 
@@ -112,6 +119,14 @@ function mcpAppReadmeGuidance(mcpApp) {
     "",
     `The exact provider issuer is \`${mcpApp.providerOrigin}\`; the exact Tama resource is \`${mcpApp.resource}\`. Browser/MCP clients are limited to: ${mcpApp.allowedOrigins.map((origin) => `\`${origin}\``).join(", ")}.`,
     "",
+    ...(mcpApp.localHttps
+      ? [
+          `Caddy is the public HTTPS entry point at \`${mcpApp.localHttps.providerOrigin}\` and \`${mcpApp.localHttps.tamaOrigin}\`. The private upstreams (${mcpApp.localHttps.providerUpstream} and ${mcpApp.localHttps.tamaUpstream}) are Docker routing details and must not be used as OAuth identities.`,
+          `The provider remains host-native in MIX_ENV=dev; Tama runs in the official release image with MIX_ENV=prod and trusts the public mkcert CA through the generated derived image.`,
+          `Verify the public runtime with \`curl --cacert tama/tls/rootCA.pem ${mcpApp.localHttps.healthUrl}\` after starting Compose.`,
+          "",
+        ]
+      : []),
     "Activation is staged. Run bootstrap with `--start --activate` to verify prepared state and enable Tama. Tama Kit does not restart the host-native provider: set the provider mode variable to `enabled`, restart the provider, then rerun the same command. An enabled checkpoint is reported only after both live services pass verification.",
   ].join("\n");
 }
@@ -162,6 +177,31 @@ export function createBootstrapPlan(options) {
     ...(persistedMcpApp ? [persistedMcpApp.identity.environmentFile] : []),
   ];
   validateSecretFilesUntracked(inspection.root, [...new Set(secretFiles)]);
+  const localHttpsTopology =
+    mcpAppPrepared && options.mcpApp && usesLocalHttpsTopology(options.mcpApp, persistedMcpApp)
+      ? resolveLocalHttpsTopology({
+          localDomain: options.mcpApp.localDomain ?? persistedMcpApp?.localHttps?.localDomain,
+          providerPort: options.mcpApp.providerPort ?? persistedMcpApp?.localHttps?.providerPort,
+          allowedOrigins: mcpAppPrepared.allowedOrigins ?? persistedMcpApp?.allowedOrigins,
+        })
+      : persistedMcpApp?.localHttps
+        ? resolveLocalHttpsTopology({
+            localDomain: persistedMcpApp.localHttps.localDomain,
+            providerPort: persistedMcpApp.localHttps.providerPort,
+            allowedOrigins: persistedMcpApp.allowedOrigins,
+          })
+        : null;
+  if (localHttpsTopology) {
+    const tlsPaths = localHttpsPaths(inspection.root);
+    validateSecretFilesUntracked(inspection.root, [
+      ...new Set([
+        ...secretFiles,
+        relative(inspection.root, tlsPaths.certificate),
+        relative(inspection.root, tlsPaths.privateKey),
+        relative(inspection.root, tlsPaths.rootCertificate),
+      ]),
+    ]);
+  }
   const mcpAppState = mcpAppPrepared
     ? resolveMcpAppState({
         root: inspection.root,
@@ -169,6 +209,7 @@ export function createBootstrapPlan(options) {
         contractPath: mcpAppPrepared.contractPath,
         contractDocument: mcpAppPrepared.contractDocument,
         selectedCompose: inspection.selectedCompose,
+        topology: localHttpsTopology,
       })
     : null;
   // A fresh MCP App run adopts the Tama port the accepted contract documents
@@ -176,14 +217,16 @@ export function createBootstrapPlan(options) {
   const mcpAppFreshPort = mcpAppPrepared
     ? (contractTamaPort(mcpAppPrepared.contractDocument, loadTamaContract()) ?? undefined)
     : undefined;
-  const port = resolveEnvironmentPort(inspection.root, options.port, mcpAppFreshPort);
+  const port = localHttpsTopology
+    ? localHttpsTopology.tamaPort
+    : resolveEnvironmentPort(inspection.root, options.port, mcpAppFreshPort);
   // A persisted MCP App integration binds the resource, the introspection
   // client id, and the provider fragment to the persisted Tama origin.
   // Planning a different port without --mcp-app would leave all of them on
   // the old origin, so the port change is rejected instead.
   const persistedTamaOriginValue =
     persistedMcpApp?.tamaOrigin ?? persistedTamaOrigin(inspection.root);
-  if (persistedTamaOriginValue !== null) {
+  if (persistedTamaOriginValue !== null && !localHttpsTopology) {
     let persistedPort;
     try {
       const persistedUrl = new URL(persistedTamaOriginValue);
@@ -268,7 +311,7 @@ export function createBootstrapPlan(options) {
   if (mcpAppPrepared && mcpAppState && options.mcpApp) {
     const result = planMcpApp({
       root: inspection.root,
-      options: options.mcpApp,
+      options: { ...options.mcpApp, localHttps: localHttpsTopology },
       identity: mcpAppPrepared.identity,
       state: mcpAppState,
       persisted: mcpAppPrepared.persisted,
@@ -282,6 +325,21 @@ export function createBootstrapPlan(options) {
     });
     mcpApp = result.plan;
     mcpAppEnvironment = result.environmentInput;
+    if (localHttpsTopology) {
+      const updatedContractOperation = managedFiles.plan(
+        mcpAppLocalContractFilename(inspection.root),
+        serializeMcpAppLocalContract(
+          /** @type {import("../types.mjs").McpAppLocalContract} */ (mcpApp.localContract),
+        ),
+      );
+      mcpApp.localContractOperation = updatedContractOperation;
+      mcpApp.operations[0] = updatedContractOperation;
+      if (mcpAppState) {
+        mcpAppState.localContract = /** @type {import("../types.mjs").McpAppLocalContract} */ (
+          mcpApp.localContract
+        );
+      }
+    }
   }
   // Ordinary reruns keep the persisted integration alive, so the managed
   // public documentation renders from the persisted state when this run does
@@ -299,35 +357,45 @@ export function createBootstrapPlan(options) {
             serviceOrigin: mcpAppDoc.providerOrigin,
             allowedOrigins: mcpAppDoc.allowedOrigins,
             introspectionClientId: mcpAppDoc.introspectionClientId,
+            localHttps: mcpAppDoc.localHttps ?? null,
           },
         }
       : undefined);
   const environment = planEnvironment(
     inspection.root,
-    options.port,
+    localHttpsTopology ? localHttpsTopology.tamaPort : options.port,
     environmentMcpApp,
     options.materializeSecrets ?? true,
-    mcpAppFreshPort,
+    localHttpsTopology ? localHttpsTopology.tamaPort : mcpAppFreshPort,
   );
   // The host-gateway mapping must survive ordinary reruns without --mcp-app:
   // the persisted integration (and tama/.tama.env) outlives the current plan, so
   // the mapping is derived from the persisted provider origin as well.
-  const providerUsesHostGateway = [
-    ...(mcpApp ? [mcpApp.providerOrigin] : []),
-    ...(persistedMcpApp?.providerOrigin ? [persistedMcpApp.providerOrigin] : []),
-  ].some((origin) => {
-    try {
-      return new URL(origin).hostname === "host.docker.internal";
-    } catch {
-      return false;
-    }
-  });
+  const providerUsesHostGateway =
+    Boolean(localHttpsTopology) ||
+    [
+      ...(mcpApp ? [mcpApp.providerOrigin] : []),
+      ...(persistedMcpApp?.providerOrigin ? [persistedMcpApp.providerOrigin] : []),
+    ].some((origin) => {
+      try {
+        return new URL(origin).hostname === "host.docker.internal";
+      } catch {
+        return false;
+      }
+    });
   const replacements = {
     PORT: environment.port,
     CONTAINER_PORT: DEFAULTS.containerPort,
     TAMA_IMAGE: tamaImage,
     POSTGRES_IMAGE: DEFAULTS.postgresImage,
     TAMA_EXTRA_HOSTS: providerUsesHostGateway ? TAMA_EXTRA_HOSTS_BLOCK : "",
+    CADDY_IMAGE: localHttpsTopology?.caddyImage ?? "",
+    HTTPS_PORT: localHttpsTopology?.httpsPort ?? "",
+    PROVIDER_HOST: localHttpsTopology?.providerHost ?? "",
+    TAMA_HOST: localHttpsTopology?.tamaHost ?? "",
+    PROVIDER_UPSTREAM: localHttpsTopology?.providerUpstream ?? "",
+    TAMA_UPSTREAM: localHttpsTopology?.tamaUpstream ?? "",
+    TAMA_LOCAL_IMAGE: `${tamaImage.replace(/[^a-zA-Z0-9_.-]+/gu, "-")}-local-ca`,
   };
 
   /** @type {FileOperation[]} */
@@ -336,6 +404,7 @@ export function createBootstrapPlan(options) {
       current:
         mcpApp?.provider.environmentFile ?? persistedMcpApp?.identity.environmentFile ?? null,
       persisted: persistedMcpApp?.identity.environmentFile ?? null,
+      localHttps: Boolean(localHttpsTopology),
     }),
     environment.operation,
     environment.postgresOperation,
@@ -345,14 +414,43 @@ export function createBootstrapPlan(options) {
       managedFiles.plan,
       join(inspection.root, BOOTSTRAP_PATHS.environmentExample),
       "tama-env.example",
-      { PORT: environment.port, MCP_APP_EXAMPLE: mcpAppExample(mcpAppDoc) },
+      {
+        PORT: environment.port,
+        PHX_HOST: mcpAppDoc?.localHttps?.tamaHost ?? "localhost",
+        TAMA_OAUTH_ISSUER:
+          mcpAppDoc?.localHttps?.tamaOrigin ?? `http://localhost:${environment.port}`,
+        TAMA_MCP_RESOURCE: mcpAppDoc?.localHttps
+          ? `${mcpAppDoc.localHttps.tamaOrigin}/mcp`
+          : `http://localhost:${environment.port}/mcp`,
+        TAMA_MCP_ALLOWED_ORIGINS:
+          mcpAppDoc?.localHttps?.allowedOrigins?.join(",") ??
+          `http://localhost:${environment.port}`,
+        TAMA_BASE_URL: mcpAppDoc?.localHttps?.tamaOrigin ?? `http://localhost:${environment.port}`,
+        MCP_APP_EXAMPLE: mcpAppExample(mcpAppDoc),
+      },
     ),
   );
+  if (localHttpsTopology) {
+    operations.push(
+      managedTemplate(managedFiles.plan, join(inspection.tamaDirectory, "Caddyfile"), "Caddyfile", {
+        PROVIDER_HOST: localHttpsTopology.providerHost,
+        TAMA_HOST: localHttpsTopology.tamaHost,
+        PROVIDER_UPSTREAM: localHttpsTopology.providerUpstream,
+        TAMA_UPSTREAM: localHttpsTopology.tamaUpstream,
+      }),
+    );
+    operations.push(
+      managedFiles.plan(
+        join(inspection.tamaDirectory, "tama-local-ca.Dockerfile"),
+        renderLocalCaDockerfile(tamaImage),
+      ),
+    );
+  }
   operations.push(
     managedTemplate(
       managedFiles.plan,
       join(inspection.root, BOOTSTRAP_PATHS.compose),
-      "compose.yaml",
+      localHttpsTopology ? "compose-mcp-app-https.yaml" : "compose.yaml",
       replacements,
     ),
   );
@@ -404,7 +502,11 @@ export function createBootstrapPlan(options) {
   operations.push(
     managedTemplate(managedFiles.plan, join(inspection.tamaDirectory, "README.md"), "README.md", {
       PORT: environment.port,
-      COMPOSE_UP_COMMAND: formatComposeUpCommand(projectComposePath),
+      TAMA_PUBLIC_URL: mcpAppDoc?.localHttps?.healthUrl ?? `http://localhost:${environment.port}/`,
+      COMPOSE_UP_COMMAND: formatComposeUpCommand(
+        projectComposePath,
+        mcpAppDoc?.localHttps ? "caddy" : "tama",
+      ),
       COMPOSE_PS_COMMAND: formatComposePsCommand(projectComposePath),
       MCP_APP_GUIDANCE: mcpAppReadmeGuidance(mcpAppDoc),
     }),
@@ -440,6 +542,7 @@ export function createBootstrapPlan(options) {
     operations,
     mcpApp,
     mcpAppVerification: null,
+    localHttps: localHttpsTopology,
   };
 }
 
@@ -516,6 +619,27 @@ export function publicPlan(plan) {
           tamaReachable: plan.mcpAppVerification?.tamaReachable ?? false,
           verified: plan.mcpAppVerification?.verified ?? false,
           probes: plan.mcpAppVerification?.probes ?? [],
+        }
+      : null,
+    localHttps: plan.localHttps
+      ? {
+          profile: plan.localHttps.profile,
+          localDomain: plan.localHttps.localDomain,
+          providerHost: plan.localHttps.providerHost,
+          tamaHost: plan.localHttps.tamaHost,
+          providerOrigin: plan.localHttps.providerOrigin,
+          tamaOrigin: plan.localHttps.tamaOrigin,
+          resource: plan.localHttps.resource,
+          healthUrl: plan.localHttps.healthUrl,
+          providerUpstream: plan.localHttps.providerUpstream,
+          tamaUpstream: plan.localHttps.tamaUpstream,
+          providerPort: plan.localHttps.providerPort,
+          tamaPort: plan.localHttps.tamaPort,
+          httpsPort: plan.localHttps.httpsPort,
+          certificateNames: plan.localHttps.certificateNames,
+          caddyImage: plan.localHttps.caddyImage,
+          trustMechanism: plan.localHttps.trustMechanism,
+          allowedOrigins: plan.localHttps.allowedOrigins,
         }
       : null,
   };

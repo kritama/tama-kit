@@ -18,6 +18,7 @@ export const DEFAULTS = Object.freeze({
   containerPort: 4000,
   tamaImage: "ghcr.io/upmaru/tama:latest",
   postgresImage: "pgvector/pgvector:0.8.6-pg15-bookworm",
+  caddyImage: "caddy:2.10.2-alpine",
   terraformVersion: ">= 1.0.0",
   providerVersion: "~> 0.6.3",
   globalModuleVersion: "0.5.6",

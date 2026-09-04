@@ -56,6 +56,30 @@
 /** @typedef {"local" | "manual"} AgentSkillMode */
 /** @typedef {"disabled" | "prepared" | "enabled"} McpAppMode */
 
+/** @typedef {object} LocalHttpsTopology
+ * @property {"mcp-app-local-https"} profile
+ * @property {string} localDomain
+ * @property {string} providerHost
+ * @property {string} tamaHost
+ * @property {string} providerOrigin
+ * @property {string} tamaOrigin
+ * @property {string} resource
+ * @property {string} introspectionClientId
+ * @property {string} providerJwksUri
+ * @property {string} providerIntrospectionEndpoint
+ * @property {string} tamaJwksUri
+ * @property {string} healthUrl
+ * @property {string} providerUpstream
+ * @property {string} tamaUpstream
+ * @property {number} providerPort
+ * @property {number} tamaPort
+ * @property {number} httpsPort
+ * @property {string[]} certificateNames
+ * @property {string} caddyImage
+ * @property {string} trustMechanism
+ * @property {string[]} allowedOrigins
+ */
+
 /**
  * @typedef {object} EnvironmentLoadingEvidence
  * @property {"verified" | "unverified"} status
@@ -75,6 +99,7 @@
  * @property {Record<string, string>} bindings
  * @property {{authorization_server_metadata: string, jwks: string, introspection: string}} public_endpoints
  * @property {{status: "verified" | "unverified", mechanism: "direnv" | "compose-env-file" | null, evidence_path: string | null}} environment_loading
+ * @property {{profile: "mcp-app-local-https", local_domain: string, provider_host: string, tama_host: string, provider_origin: string, tama_origin: string, resource: string, health_url: string, https_port: number, provider_port: number, certificate_names: string[], trust_mechanism: string, allowed_origins: string[]} | null} [topology]
  */
 
 /**
@@ -103,6 +128,7 @@
  * @property {string} [providerOrigin]
  * @property {string} [tamaOrigin]
  * @property {string[]} [allowedOrigins]
+ * @property {LocalHttpsTopology | null} [localHttps]
  */
 
 /**
@@ -124,6 +150,12 @@
  * @property {string} [providerOrigin]
  * @property {string} [tamaOrigin]
  * @property {string[]} [allowedOrigins]
+ * @property {string} [localDomain]
+ * @property {number} [providerPort]
+ * @property {number} [httpsPort]
+ * @property {boolean} [installLocalCa]
+ * @property {boolean} [migrateLocalHttps]
+ * @property {LocalHttpsTopology | null} [localHttps]
  * @property {boolean} activate
  * @property {McpAppMode} [targetMode]
  * @property {McpAppMode} [providerMode]
@@ -146,6 +178,7 @@
  * @property {string} serviceOrigin
  * @property {string[]} allowedOrigins
  * @property {string} introspectionClientId
+ * @property {LocalHttpsTopology | null} [localHttps]
  */
 
 /**
@@ -159,6 +192,7 @@
  * @property {string | null} contractPath
  * @property {Record<string, unknown> | null} contractDocument
  * @property {string[]} allowedOrigins
+ * @property {LocalHttpsTopology | null} [localHttps]
  */
 
 /**
@@ -209,6 +243,7 @@
  * @typedef {object} TerraformPlan
  * @property {"created" | "preserved"} foundation
  * @property {FileOperation[]} operations
+ * @property {LocalHttpsTopology | null} [localHttps]
  * @property {string | null} providerVersion
  * @property {string | null} globalModuleVersion
  */
@@ -234,6 +269,7 @@
  * @property {string} providerSigningKeyId
  * @property {string} introspectionSigningKeyId
  * @property {FileOperation[]} operations
+ * @property {LocalHttpsTopology | null} [localHttps]
  */
 
 /**
@@ -267,6 +303,7 @@
  * @property {FileOperation[]} operations
  * @property {McpAppPlan | null} mcpApp
  * @property {McpAppVerification | null} mcpAppVerification
+ * @property {LocalHttpsTopology | null} localHttps
  */
 
 /**
@@ -318,6 +355,7 @@
  * @property {{name: string, environmentPrefix: string, environmentFile: string, identitySource: string, contractPath: string | null, mode: McpAppMode, modeVariable: string, environmentLoading: "verified" | "unverified"} | null} provider
  * @property {{path: string, source: "generated" | "provider-contract", sourcePath: string | null, bindingSource: "contract" | "conventional", compatibilityIdentifier: string, environmentLoading: "verified" | "unverified", environmentLoadingMechanism: "direnv" | "compose-env-file" | null, environmentLoadingEvidencePath: string | null, action: WriteAction | DeleteAction | UnchangedAction} | null} providerContract
  * @property {PublicMcpApp | null} mcpApp
+ * @property {Record<string, unknown> | null} localHttps
  */
 
 /**

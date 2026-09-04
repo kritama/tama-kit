@@ -287,48 +287,42 @@ with activation.
 
 ### MCP App command contract
 
-For a provider without an application-owned contract, use this complete local
-development command and replace the example values with repository evidence:
+Fresh MCP App bootstrap uses a production-compatible local HTTPS topology:
 
 ```bash
 npx @kritama/tama-kit bootstrap /path/to/provider \
   --mcp-app \
   --provider-name acme \
-  --provider-origin http://host.docker.internal:4000 \
-  --tama-origin http://127.0.0.1:4001 \
-  --allowed-origin http://127.0.0.1:3000 \
-  --port 4001 \
   --image ghcr.io/upmaru/tama:<pinned-version-in-intersection>-server \
   --skills <resolved-skill-mode> \
   --dry-run --json
 ```
 
-The MCP App command requires `--mcp-app`, a provider name unless an accepted
-contract or manifest already owns it, a provider origin reachable from both
-the host and Tama container, an exact HTTP loopback Tama origin matching
-`--port`, at least one exact allowed browser/MCP client origin, and a pinned
-Tama image. Loopback allowed origins may use HTTP; every non-loopback allowed
-origin must use HTTPS. Supply at most 32 unique allowed origins; if the client
-set is larger, stop and narrow it before running bootstrap. When an
-application-owned provider contract declares `supported_tama_versions`, choose
-a concrete pinned version in the intersection of that range and the bundled
-supported range `>= 0.13.1 and < 0.14.0`, then use the official server image
-tag `<version>-server`. The floating `latest` tag is unsuffixed but is rejected
-for MCP App preparation. If no provider range exists, `0.13.1-server` is a
-valid default. Never use the example version when it is outside the provider
-range, and stop if no known pinned version lies in both ranges. The provider origin
-must not be `localhost`, `127.0.0.0/8`, `::1`, `0.0.0.0`, or `::`; use
-`http://host.docker.internal:<provider-port>` for a host-native provider.
+The default public identities are `https://app.localhost` for the host-native
+provider and `https://tama.app.localhost` for Tama's protected
+`/mcp/app` resource. Caddy is the only public entry point; its
+`host.docker.internal:<provider-port>` and `tama:4000` upstreams are private
+routing details and never OAuth identities. The provider remains
+`MIX_ENV=dev`, while the official Tama image remains `MIX_ENV=prod`.
+Use `--local-domain` and `--provider-port` for deliberate customization.
+`--provider-origin` and `--tama-origin` are advanced migration assertions.
+The default allowed client origin is the provider origin; repeat
+`--allowed-origin` only for additional clients.
+Loopback client origins may use HTTP, but every non-loopback allowed origin must use HTTPS;
+at most 32 unique allowed origins are supported.
 
-Supported MCP App flags are `--provider-name <name>`, `--provider-origin
-<origin>`, `--tama-origin <origin>`, repeated `--allowed-origin <origin>`,
+Supported MCP App flags are `--provider-name`, `--local-domain`, `--provider-port`,
+`--install-local-ca`, `--migrate-local-https`, `--provider-origin`,
+`--tama-origin`, repeated `--allowed-origin <origin>`,
 `--mcp-app-contract <path>`, `--provider-prefix <prefix>`,
 `--provider-env-file <path>`, `--activate`, and
 `--migrate-provider-identity`. Provider-specific flags require `--mcp-app`;
-`--activate` also requires `--start`; identity migration requires an explicit
-provider name, prepared mode, and verified loader, and cannot be combined with
-activation. Keep provider name, origin, allowed origins, image, and bindings
-unchanged on ordinary reruns.
+`--activate` also requires `--start`. Existing HTTP projects require an
+explicit `--migrate-local-https`; migration preserves OAuth and application
+secrets.
+Use the official server image tag `<version>-server` with a pinned version in
+the supported Tama range; the floating `latest` tag is not valid for MCP App
+preparation.
 
 After reviewing the dry run, repeat the exact command without `--dry-run` to
 write prepared configuration. Configure the provider to load the reported

@@ -184,7 +184,8 @@ export function readSetupUrl(root) {
       path: filename,
     });
   }
-  return `http://localhost:${port}/setup/root?token=${encodeURIComponent(setupToken)}`;
+  const baseUrl = values.get("TAMA_BASE_URL") ?? `http://localhost:${port}`;
+  return `${baseUrl}/setup/root?token=${encodeURIComponent(setupToken)}`;
 }
 
 /** @param {string} content @param {Record<string, string | number>} updates */
@@ -311,7 +312,8 @@ function validateRuntimeSecrets(values, filename) {
 }
 
 /** @param {Map<string, string>} values @param {string} filename @param {number} port */
-function validateEnvironment(values, filename, port) {
+/** @param {Map<string, string>} values @param {string} filename @param {number} port @param {import("../types.mjs").McpAppEnvironmentValidation | null | undefined} [validation] */
+function validateEnvironment(values, filename, port, validation = null) {
   if (
     Boolean(values.get("TAMA_OAUTH_PRIVATE_JWK")) !==
     Boolean(values.get("TAMA_OAUTH_PRIVATE_JWK_ID"))
@@ -350,11 +352,15 @@ function validateEnvironment(values, filename, port) {
     );
   }
 
-  const baseUrl = `http://localhost:${port}`;
+  const localHttps = validation?.localHttps ?? null;
+  const baseUrl = localHttps?.tamaOrigin ?? `http://localhost:${port}`;
   const expectedUrls = {
     TAMA_OAUTH_ISSUER: baseUrl,
     TAMA_MCP_RESOURCE: `${baseUrl}/mcp`,
     TAMA_BASE_URL: baseUrl,
+    ...(localHttps
+      ? { PHX_HOST: localHttps.tamaHost, TAMA_PORT: String(localHttps.tamaPort) }
+      : {}),
   };
   const mismatches = Object.entries(expectedUrls)
     .filter(([name, expected]) => values.get(name) !== expected)
@@ -363,7 +369,8 @@ function validateEnvironment(values, filename, port) {
     .get("TAMA_MCP_ALLOWED_ORIGINS")
     ?.split(",")
     .map((origin) => origin.trim());
-  if (!allowedOrigins?.includes(baseUrl)) {
+  const requiredAllowedOrigin = localHttps?.allowedOrigins?.[0] ?? baseUrl;
+  if (!allowedOrigins?.includes(requiredAllowedOrigin)) {
     mismatches.push("TAMA_MCP_ALLOWED_ORIGINS");
   }
   if (mismatches.length > 0) {
@@ -412,11 +419,6 @@ function newEnvironment(port, materializeSecrets) {
 /** @param {McpAppMode} mode @returns {string} */
 function mcpAppHeader(mode) {
   return `# MCP App integration (${mode}). Managed by Tama Kit for local development.`;
-}
-
-/** @param {Record<string, string>} variables @returns {string[]} */
-function mcpAppLines(variables) {
-  return Object.entries(variables).map(([name, value]) => `${name}=${value}`);
 }
 
 /**
@@ -613,12 +615,11 @@ export function planEnvironment(
     const port = requestedPort ?? freshDefaultPort ?? DEFAULTS.port;
     let content = newEnvironment(port, materializeSecrets);
     if (mcpApp) {
-      content =
-        content +
-        `\n${mcpAppHeader(mcpApp.validation.mode)}\n${mcpAppLines(mcpApp.variables).join("\n")}\n`;
+      content = updateEnvironment(content, mcpApp.variables);
+      content = `${content.trimEnd()}\n\n${mcpAppHeader(mcpApp.validation.mode)}\n`;
     }
     const values = parseEnvironment(content, filename);
-    validateEnvironment(values, filename, port);
+    validateEnvironment(values, filename, port, mcpApp?.validation);
     if (mcpApp) {
       validateMcpAppVariables(values, filename, mcpApp.validation);
     }
@@ -684,7 +685,7 @@ export function planEnvironment(
     content = updateEnvironment(content, mcpApp.variables);
   }
   const updatedValues = parseEnvironment(content, filename);
-  validateEnvironment(updatedValues, filename, port);
+  validateEnvironment(updatedValues, filename, port, mcpApp?.validation);
   if (mcpApp) {
     validateMcpAppVariables(updatedValues, filename, mcpApp.validation);
   }

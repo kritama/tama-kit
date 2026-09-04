@@ -1,7 +1,7 @@
 // @ts-check
 
 import { execFileSync, spawn } from "node:child_process";
-import { isIP } from "node:net";
+import { createConnection, isIP } from "node:net";
 
 import { prerequisiteError, startupError } from "../errors.mjs";
 
@@ -35,6 +35,36 @@ function hasErrorCode(error, code) {
 /** @param {unknown} error */
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** @param {string} host @param {number} port @returns {Promise<boolean>} */
+function canConnect(host, port) {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host, port });
+    /** @param {boolean} connected */
+    const finish = (connected) => {
+      socket.destroy();
+      resolve(connected);
+    };
+    socket.setTimeout(500, () => finish(false));
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+  });
+}
+
+/**
+ * Fails before Compose startup when an unrelated local listener owns the
+ * canonical HTTPS port. The bootstrap never stops or reconfigures that
+ * listener.
+ * @param {number} port
+ */
+export async function assertLocalHttpsPortAvailable(port) {
+  const [ipv4, ipv6] = await Promise.all([canConnect("127.0.0.1", port), canConnect("::1", port)]);
+  if (ipv4 || ipv6) {
+    throw startupError(
+      `local HTTPS port ${port} is already in use; stop or reconfigure the unrelated listener before starting Caddy`,
+    );
+  }
 }
 
 export function validateComposePrerequisite() {
@@ -240,10 +270,10 @@ export async function fetchWithTimeout(url, timeoutMs, fetchImpl = fetch) {
   }
 }
 
-/** @param {number} port @param {number} [timeoutMs] @returns {Promise<string>} */
-async function waitForHealth(port, timeoutMs = 60_000) {
+/** @param {BootstrapPlan} plan @param {number} [timeoutMs] @returns {Promise<string>} */
+async function waitForHealth(plan, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs;
-  const url = `http://localhost:${port}/`;
+  const url = plan.localHttps?.healthUrl ?? `http://localhost:${plan.port}/`;
   /** @type {Error | undefined} */
   let lastError;
   while (Date.now() < deadline) {
@@ -269,13 +299,20 @@ async function waitForHealth(port, timeoutMs = 60_000) {
  * @returns {Promise<string>}
  */
 export async function startCompose(plan, { quiet = false } = {}) {
+  if (plan.localHttps) {
+    await assertLocalHttpsPortAvailable(plan.localHttps.httpsPort);
+  }
   try {
-    await runProcess("docker", ["compose", "-f", plan.composeFile, "up", "-d", "tama"], {
-      cwd: plan.root,
-      stdio: quiet ? "ignore" : "inherit",
-    });
+    await runProcess(
+      "docker",
+      ["compose", "-f", plan.composeFile, "up", "-d", ...(plan.localHttps ? ["caddy"] : ["tama"])],
+      {
+        cwd: plan.root,
+        stdio: quiet ? "ignore" : "inherit",
+      },
+    );
   } catch (error) {
     throw startupError(`Docker Compose startup failed: ${errorMessage(error)}`);
   }
-  return waitForHealth(plan.port);
+  return waitForHealth(plan);
 }

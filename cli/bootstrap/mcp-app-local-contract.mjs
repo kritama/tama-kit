@@ -115,7 +115,9 @@ export function validateMcpAppLocalContract(document) {
   if (!isPlainObject(document)) {
     throw usageError("local MCP App contract must be a JSON object");
   }
-  exactKeys(document, TOP_LEVEL_KEYS, "document");
+  const topLevelKeys =
+    document.topology === undefined ? TOP_LEVEL_KEYS : [...TOP_LEVEL_KEYS, "topology"];
+  exactKeys(document, topLevelKeys, "document");
   if (document.schema_version !== "1") {
     throw usageError(
       `unsupported local MCP App contract schema_version: ${String(document.schema_version)}`,
@@ -131,6 +133,55 @@ export function validateMcpAppLocalContract(document) {
   }
   if (document.scope !== "local-development") {
     throw usageError("local MCP App contract scope must be local-development");
+  }
+
+  if (document.topology !== undefined && document.topology !== null) {
+    if (!isPlainObject(document.topology)) {
+      throw usageError("local MCP App contract topology must be an object or null");
+    }
+    const topology = document.topology;
+    const required = [
+      "profile",
+      "local_domain",
+      "provider_host",
+      "tama_host",
+      "provider_origin",
+      "tama_origin",
+      "resource",
+      "health_url",
+      "https_port",
+      "provider_port",
+      "certificate_names",
+      "trust_mechanism",
+      "allowed_origins",
+    ];
+    if (required.some((key) => !(key in topology))) {
+      throw usageError("local MCP App contract topology is incomplete");
+    }
+    if (
+      topology.profile !== "mcp-app-local-https" ||
+      typeof topology.local_domain !== "string" ||
+      typeof topology.provider_host !== "string" ||
+      typeof topology.tama_host !== "string" ||
+      typeof topology.provider_origin !== "string" ||
+      typeof topology.tama_origin !== "string" ||
+      typeof topology.resource !== "string" ||
+      typeof topology.health_url !== "string" ||
+      topology.https_port !== 443 ||
+      !Number.isInteger(topology.provider_port) ||
+      !Array.isArray(topology.certificate_names) ||
+      topology.certificate_names.some((name) => typeof name !== "string") ||
+      typeof topology.trust_mechanism !== "string" ||
+      !Array.isArray(topology.allowed_origins) ||
+      topology.allowed_origins.length === 0 ||
+      topology.allowed_origins.length > 32 ||
+      topology.allowed_origins.some(
+        (origin) => typeof origin !== "string" || origin.length === 0,
+      ) ||
+      new Set(topology.allowed_origins).size !== topology.allowed_origins.length
+    ) {
+      throw usageError("local MCP App contract topology contains invalid values");
+    }
   }
 
   if (!isPlainObject(document.source)) {
@@ -264,6 +315,7 @@ export function validateMcpAppLocalContract(document) {
  *   providerContractPath: string | null,
  *   providerContractDocument: Record<string, unknown> | null,
  *   environmentLoading: import("../types.mjs").EnvironmentLoadingEvidence,
+ *   topology?: import("../types.mjs").LocalHttpsTopology | null,
  * }} input
  */
 export function renderMcpAppLocalContract(input) {
@@ -303,6 +355,23 @@ export function renderMcpAppLocalContract(input) {
       mechanism: input.environmentLoading.mechanism,
       evidence_path: input.environmentLoading.evidencePath,
     },
+    topology: input.topology
+      ? {
+          profile: input.topology.profile,
+          local_domain: input.topology.localDomain,
+          provider_host: input.topology.providerHost,
+          tama_host: input.topology.tamaHost,
+          provider_origin: input.topology.providerOrigin,
+          tama_origin: input.topology.tamaOrigin,
+          resource: input.topology.resource,
+          health_url: input.topology.healthUrl,
+          https_port: input.topology.httpsPort,
+          provider_port: input.topology.providerPort,
+          certificate_names: [...input.topology.certificateNames],
+          trust_mechanism: input.topology.trustMechanism,
+          allowed_origins: [...input.topology.allowedOrigins],
+        }
+      : null,
   });
 }
 

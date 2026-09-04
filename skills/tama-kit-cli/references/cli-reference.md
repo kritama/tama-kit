@@ -20,11 +20,11 @@ decisions.
 | Flag | Use |
 | --- | --- |
 | `--compose <path>` | Select one existing Compose file when discovery is ambiguous. |
-| `--port <port>` | Select Tama's host port. The ordinary default is `4000`; MCP App topologies commonly need a different port from the host-native provider. |
+| `--port <port>` | Select Tama's host port for standard bootstrap. MCP App local HTTPS uses private container port `4000` and public HTTPS port `443`; this flag remains for standard or explicit legacy HTTP topology. |
 | `--image <reference>` | Override the Tama image. MCP App mode requires a pinned version inside the installed contract's supported range. |
 | `--skills local\|manual` | Copy Tama Kit skills to `.agents/skills/` or leave their installation external. Supply this explicitly with `--json`. |
 | `--dry-run` | Return a plan without writing or starting services. It cannot be combined with `--start`. |
-| `--start` | Start Compose and wait for Tama health after writing. |
+| `--start` | Start Compose and wait for the planned Tama health URL after writing. Local HTTPS starts Caddy, Tama, and PostgreSQL behind the public HTTPS names. |
 | `--json` | Emit deterministic machine-readable output without secret values or terminal progress. |
 | `--no-color` | Disable color in human output. |
 
@@ -56,9 +56,13 @@ All provider-specific flags require `--mcp-app`.
 | `--provider-name <name>` | Confirm the stable provider identity. Non-interactive runs must make a detected identity explicit unless the contract or persisted state owns it. |
 | `--provider-prefix <prefix>` | Override the derived provider environment-variable prefix. Keep it stable across reruns. |
 | `--provider-env-file <path>` | Override the derived private provider fragment path inside `tama/`. The provider must actually load this file. |
-| `--provider-origin <origin>` | Set the provider issuer/service origin. It must have no path, query, or fragment and must be reachable by both host probes and the Tama container. Do not use loopback or `0.0.0.0`; for a host-native HTTP provider, use `http://host.docker.internal:<provider-port>`. |
-| `--tama-origin <origin>` | Set Tama's exact public origin. For the generated local Compose service it must be HTTP loopback and use the selected `--port`. |
+| `--provider-origin <origin>` | Set or assert the provider issuer/service origin. Fresh local HTTPS derives `https://app.localhost`; the private `host.docker.internal:<provider-port>` upstream must never be used as the issuer. |
+| `--tama-origin <origin>` | Set or assert Tama's exact public origin. Fresh local HTTPS derives `https://tama.app.localhost`; retained legacy HTTP plans may use the selected loopback `--port`. |
 | `--allowed-origin <origin>` | Allow an exact browser/MCP client origin. Repeat for multiple origins. At least one is required; non-loopback origins must use HTTPS. Maximum 32 unique origins. |
+| `--local-domain <domain>` | Derive the local HTTPS provider and Tama hostnames. Defaults to `app.localhost`; `.local`, IP literals, and invalid DNS names are rejected. |
+| `--provider-port <port>` | Set the host-native provider's private Caddy upstream port. Defaults to `4000`; it is not part of the public OAuth issuer. |
+| `--install-local-ca` | Explicitly authorize `mkcert -install` when writing local HTTPS certificates. It never runs during dry-run. |
+| `--migrate-local-https` | Explicitly migrate a persisted 0.4.3 HTTP MCP App topology to the derived HTTPS topology while preserving keys and application secrets. |
 | `--activate` | Request live activation and verification. Requires both `--mcp-app` and `--start`. |
 | `--migrate-provider-identity` | Deliberately migrate persisted provider identity. Requires an explicit `--provider-name`, a verified loader for the new fragment, and prepared provider mode. It cannot be combined with `--activate`. |
 
@@ -75,14 +79,18 @@ plan is:
 npx @kritama/tama-kit bootstrap /path/to/provider \
   --mcp-app \
   --provider-name acme \
-  --provider-origin http://host.docker.internal:4000 \
-  --tama-origin http://127.0.0.1:4001 \
-  --allowed-origin http://127.0.0.1:3000 \
-  --port 4001 \
   --image ghcr.io/upmaru/tama:<pinned-version-in-intersection>-server \
   --skills <resolved-skill-mode> \
   --dry-run --json
 ```
+
+Fresh MCP App plans use `https://app.localhost` and
+`https://tama.app.localhost/mcp/app`, with Caddy as the public entry point.
+The provider remains development-native and Tama uses the production release
+image. Use `--local-domain` and `--provider-port` for deliberate customization;
+use the explicit origin flags only as migration assertions or for a retained
+legacy HTTP topology. Verify the HTTPS names with
+`curl --cacert tama/tls/rootCA.pem https://tama.app.localhost/` after starting.
 
 Repeat the accepted command without `--dry-run` to prepare files. Do not add
 activation implicitly.
