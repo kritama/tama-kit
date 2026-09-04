@@ -151,6 +151,7 @@
  * @property {string} [tamaOrigin]
  * @property {string[]} [allowedOrigins]
  * @property {string} [localDomain]
+ * @property {boolean} [acknowledgeLocalDomainRisk]
  * @property {number} [providerPort]
  * @property {number} [httpsPort]
  * @property {boolean} [installLocalCa]

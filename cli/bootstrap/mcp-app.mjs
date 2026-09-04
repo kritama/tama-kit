@@ -10,7 +10,11 @@ import {
   readEnvironmentValues,
   readRawEnvironmentLine,
 } from "./environment.mjs";
-import { resolveLocalHttpsTopology, usesLocalHttpsTopology } from "./local-https.mjs";
+import {
+  normalizeLocalDomain,
+  resolveLocalHttpsTopology,
+  usesLocalHttpsTopology,
+} from "./local-https.mjs";
 import { readMcpAppProvider } from "./manifest.mjs";
 import {
   contractLocalOrigin,
@@ -304,13 +308,15 @@ export async function prepareMcpApp({
   io,
 }) {
   const persisted = readMcpAppProvider(tamaDirectory);
-  const localHttps = usesLocalHttpsTopology(options, persisted);
-  const defaultTopology = localHttps
-    ? resolveLocalHttpsTopology({
-        localDomain: options.localDomain,
-        providerPort: options.providerPort,
-      })
-    : null;
+  if (
+    options.localDomain !== undefined &&
+    !normalizeLocalDomain(options.localDomain).endsWith(".localhost") &&
+    !options.acknowledgeLocalDomainRisk
+  ) {
+    throw usageError(
+      "a non-.localhost --local-domain can collide with public DNS; pass --acknowledge-local-domain-risk after verifying local-only resolution",
+    );
+  }
   const contract = discoverProviderContract(
     root,
     options.contractPath ?? persisted?.contractPath ?? undefined,
@@ -325,6 +331,13 @@ export async function prepareMcpApp({
     environmentFile: options.providerEnvironmentFile,
     identitySource: options.identitySource,
   });
+  const localHttps = usesLocalHttpsTopology(options, persisted, contract.document);
+  const defaultTopology = localHttps
+    ? resolveLocalHttpsTopology({
+        localDomain: options.localDomain,
+        providerPort: options.providerPort,
+      })
+    : null;
 
   if (options.migrateProviderIdentity) {
     if (!persisted) {
@@ -589,12 +602,13 @@ export function planMcpApp(input) {
     }
   }
 
-  const requestedProviderOrigin = options.providerOrigin ?? null;
+  const contractProviderOrigin = contractLocalOrigin(input.contractDocument, identity.name);
+  const requestedProviderOrigin = options.providerOrigin ?? contractProviderOrigin ?? null;
   const providerOrigin = localHttps
     ? localHttps.providerOrigin
     : normalizeMcpAppOrigin(
         requestedProviderOrigin ??
-          contractLocalOrigin(input.contractDocument, identity.name) ??
+          contractProviderOrigin ??
           contractLocalOrigin(tamaContract, identity.name) ??
           null,
         "--provider-origin",
@@ -651,13 +665,13 @@ export function planMcpApp(input) {
         `Pass --port to select a different Tama port`,
     );
   }
-  const existingTamaOrigin = persistedTamaOrigin(root);
+  const existingTamaOrigin = persisted?.tamaOrigin ?? persistedTamaOrigin(root);
   const defaultTamaOrigin =
     namedLocalOrigin(input.contractDocument, "tama_origin") ??
     namedLocalOrigin(tamaContract, "tama_origin") ??
     `http://127.0.0.1:${port}`;
   let persistedOriginForPort = existingTamaOrigin;
-  if (persistedOriginForPort) {
+  if (!localHttps && persistedOriginForPort) {
     const persistedUrl = new URL(persistedOriginForPort);
     const persistedPort =
       persistedUrl.port === ""
@@ -670,7 +684,12 @@ export function planMcpApp(input) {
       persistedOriginForPort = `${persistedUrl.protocol}//${persistedUrl.host}`;
     }
   }
-  const requestedTamaOrigin = options.tamaOrigin ?? persistedOriginForPort;
+  const contractTamaOrigin = namedLocalOrigin(input.contractDocument, "tama_origin");
+  const requestedTamaOrigin = localHttps
+    ? (options.tamaOrigin ??
+      (persisted?.localHttps ? persistedOriginForPort : null) ??
+      contractTamaOrigin)
+    : (options.tamaOrigin ?? persistedOriginForPort);
   let tamaOrigin;
   if (localHttps) {
     tamaOrigin = localHttps.tamaOrigin;
@@ -905,6 +924,25 @@ export function planMcpApp(input) {
     migratingIdentity && sourceContent !== null
       ? withoutEnvironmentVariables(sourceContent, Object.values(sourceRoles))
       : sourceContent;
+  const proxyPrefix = identity.environmentPrefix;
+  /** @type {Array<[string, string]>} */
+  const localHttpsProviderEntries = localHttps
+    ? [
+        [`${proxyPrefix}_TAMA_LOCAL_HTTPS_PROXY`, `${proxyPrefix}_TAMA_LOCAL_HTTPS_PROXY=enabled`],
+        [
+          `${proxyPrefix}_TAMA_LOCAL_HTTPS_EXTERNAL_ORIGIN`,
+          `${proxyPrefix}_TAMA_LOCAL_HTTPS_EXTERNAL_ORIGIN=${providerOrigin}`,
+        ],
+        [
+          `${proxyPrefix}_TAMA_LOCAL_HTTPS_BIND_IP`,
+          `${proxyPrefix}_TAMA_LOCAL_HTTPS_BIND_IP=0.0.0.0`,
+        ],
+        [
+          `${proxyPrefix}_TAMA_LOCAL_HTTPS_UPSTREAM_PORT`,
+          `${proxyPrefix}_TAMA_LOCAL_HTTPS_UPSTREAM_PORT=${localHttps.providerPort}`,
+        ],
+      ]
+    : [];
   const fragmentContent = providerFragmentContent(
     fragmentBase,
     new Map([
@@ -926,6 +964,7 @@ export function planMcpApp(input) {
         roles.introspection_jwks_uri,
         `${roles.introspection_jwks_uri}=${tamaOrigin}${providerEndpoints.jwks}`,
       ],
+      ...localHttpsProviderEntries,
     ]),
   );
   const fragmentOperation = manageFile(fragmentPath, fragmentContent, {
@@ -955,16 +994,20 @@ export function planMcpApp(input) {
   /** @type {Record<string, string>} */
   const variables = {
     TAMA_MCP_APP_MODE: mode,
-    TAMA_MCP_APP_RESOURCE: resource,
     TAMA_MCP_APP_ALLOWED_ORIGINS: allowedOrigins.join(","),
     TAMA_MCP_APP_AUTHORIZATION_SERVER: providerOrigin,
     TAMA_MCP_APP_JWKS_URI: `${providerOrigin}${providerEndpoints.jwks}`,
     TAMA_MCP_APP_INTROSPECTION_ENDPOINT: `${providerOrigin}${providerEndpoints.introspection}`,
     TAMA_MCP_APP_SIGNING_ALGORITHMS: "RS256",
-    TAMA_MCP_APP_INTROSPECTION_CLIENT_ID: introspectionClientId,
     TAMA_MCP_APP_INTROSPECTION_SIGNING_ALGORITHM: "RS256",
     TAMA_MCP_APP_INTROSPECTION_SIGNING_KEY_ID: introspectionSigningKeyId,
     TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY: `'${introspectionPrivateJwk}'`,
+    ...(localHttps
+      ? {}
+      : {
+          TAMA_MCP_APP_RESOURCE: resource,
+          TAMA_MCP_APP_INTROSPECTION_CLIENT_ID: introspectionClientId,
+        }),
     ...(existingTamaPublicKeys === undefined
       ? { [TAMA_INTROSPECTION_PUBLIC_KEYS_VARIABLE]: "[]" }
       : {}),

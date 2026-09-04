@@ -1,5 +1,6 @@
 // @ts-check
 
+import { existsSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { parseArgs } from "node:util";
 import { formatAgentSetupPrompt } from "../bootstrap/agent-prompt.mjs";
@@ -8,10 +9,19 @@ import { BOOTSTRAP_PATHS } from "../bootstrap/constants.mjs";
 import { inspectProject } from "../bootstrap/detect-project.mjs";
 import { readSetupUrl } from "../bootstrap/environment.mjs";
 import { validateSecretFilesIgnored } from "../bootstrap/gitignore.mjs";
-import { planLocalHttpsCertificates, resolveLocalHttpsNames } from "../bootstrap/local-https.mjs";
+import {
+  discoverMkcert,
+  localHttpsPaths,
+  planLocalHttpsCertificates,
+  resolveLocalHttpsNames,
+} from "../bootstrap/local-https.mjs";
 import { readAgentSkillMode, readMcpAppProvider } from "../bootstrap/manifest.mjs";
 import { prepareMcpApp } from "../bootstrap/mcp-app.mjs";
-import { createHttpHostMappedFetch, verifyMcpApp } from "../bootstrap/mcp-app-verify.mjs";
+import {
+  createHttpHostMappedFetch,
+  createLocalHttpsFetch,
+  verifyMcpApp,
+} from "../bootstrap/mcp-app-verify.mjs";
 import { createBootstrapPlan, publicPlan } from "../bootstrap/plan.mjs";
 import {
   probeComposeProviderEndpoint,
@@ -50,6 +60,7 @@ import { createProgressBar, paint, renderBox } from "../terminal.mjs";
  * @property {string} [providerEnvironmentFile]
  * @property {string} [providerOrigin]
  * @property {string} [localDomain]
+ * @property {boolean} acknowledgeLocalDomainRisk
  * @property {number} [providerPort]
  * @property {boolean} installLocalCa
  * @property {boolean} migrateLocalHttps
@@ -82,6 +93,7 @@ function usage() {
     "  --provider-origin <origin> Provider issuer origin (advanced/migration assertion)",
     "  --tama-origin <origin> Exact public Tama origin",
     "  --local-domain <name>  Local HTTPS base name (default: app.localhost)",
+    "  --acknowledge-local-domain-risk Allow an explicitly selected non-.localhost name",
     "  --provider-port <port> Host-native provider upstream port (default: 4000)",
     "  --install-local-ca     Explicitly authorize mkcert -install",
     "  --migrate-local-https  Explicitly migrate an existing HTTP MCP App topology",
@@ -152,6 +164,7 @@ function parse(argv) {
         "provider-origin": { type: "string" },
         "tama-origin": { type: "string" },
         "local-domain": { type: "string" },
+        "acknowledge-local-domain-risk": { type: "boolean", default: false },
         "provider-port": { type: "string" },
         "install-local-ca": { type: "boolean", default: false },
         "migrate-local-https": { type: "boolean", default: false },
@@ -180,6 +193,7 @@ function parse(argv) {
     parsed.values["provider-origin"] === undefined ? null : "--provider-origin",
     parsed.values["tama-origin"] === undefined ? null : "--tama-origin",
     parsed.values["local-domain"] === undefined ? null : "--local-domain",
+    parsed.values["acknowledge-local-domain-risk"] ? "--acknowledge-local-domain-risk" : null,
     parsed.values["provider-port"] === undefined ? null : "--provider-port",
     parsed.values["install-local-ca"] ? "--install-local-ca" : null,
     parsed.values["migrate-local-https"] ? "--migrate-local-https" : null,
@@ -224,6 +238,7 @@ function parse(argv) {
     providerOrigin: parsed.values["provider-origin"],
     tamaOrigin: parsed.values["tama-origin"],
     localDomain: parsed.values["local-domain"],
+    acknowledgeLocalDomainRisk: parsed.values["acknowledge-local-domain-risk"] ?? false,
     providerPort: parsePort(parsed.values["provider-port"]),
     installLocalCa: parsed.values["install-local-ca"] ?? false,
     migrateLocalHttps: parsed.values["migrate-local-https"] ?? false,
@@ -311,9 +326,9 @@ function resultEnvelope(plan, { dryRun, started, healthUrl }) {
           caddyImage: plan.localHttps.caddyImage,
           trustMechanism: plan.localHttps.trustMechanism,
           allowedOrigins: plan.localHttps.allowedOrigins,
-          certificateReady: plan.operations.some((operation) =>
-            operation.path.endsWith("tama/tls/local.pem"),
-          ),
+          certificateReady: Object.values(localHttpsPaths(plan.root))
+            .filter((path) => path.endsWith(".pem"))
+            .every(existsSync),
         }
       : null,
   };
@@ -399,6 +414,13 @@ function failedProbeSummary(verification) {
     .join("; ");
 }
 
+/** @param {BootstrapPlan} plan */
+function verificationFetch(plan) {
+  return plan.localHttps
+    ? createLocalHttpsFetch(readFileSync(localHttpsPaths(plan.root).rootCertificate))
+    : globalThis.fetch;
+}
+
 /** @param {BootstrapCommandOptions} options @returns {McpAppBootstrapOptions} */
 function mcpAppOptions(options) {
   return {
@@ -410,6 +432,7 @@ function mcpAppOptions(options) {
     providerOrigin: options.providerOrigin,
     tamaOrigin: options.tamaOrigin,
     localDomain: options.localDomain,
+    acknowledgeLocalDomainRisk: options.acknowledgeLocalDomainRisk,
     providerPort: options.providerPort,
     installLocalCa: options.installLocalCa,
     migrateLocalHttps: options.migrateLocalHttps,
@@ -658,7 +681,30 @@ async function executeBootstrap(argv, io) {
       if (plan.localHttps) {
         progress.update(2, "Checking local HTTPS prerequisites");
         await resolveLocalHttpsNames(plan.localHttps);
-        if (!options.installLocalCa && io.interactive && io.prompt) {
+        const tlsPaths = localHttpsPaths(plan.root);
+        const certificateNeedsGeneration = [
+          tlsPaths.certificate,
+          tlsPaths.privateKey,
+          tlsPaths.rootCertificate,
+        ].some((path) => !existsSync(path));
+        let localCaExists = false;
+        if (certificateNeedsGeneration) {
+          try {
+            discoverMkcert();
+            localCaExists = true;
+          } catch (error) {
+            if (!(error instanceof CLIError) || error.details?.prerequisite !== "mkcert-local-ca") {
+              throw error;
+            }
+          }
+        }
+        if (
+          certificateNeedsGeneration &&
+          !localCaExists &&
+          !options.installLocalCa &&
+          io.interactive &&
+          io.prompt
+        ) {
           const answer = (
             await io.prompt("Authorize mkcert -install to trust the local CA? [y/N] ")
           )
@@ -735,7 +781,7 @@ async function executeBootstrap(argv, io) {
           const verification = await verifyMcpApp({
             root: plan.root,
             plan: plan.mcpApp,
-            fetch: globalThis.fetch,
+            fetch: verificationFetch(plan),
             probeProviderFromContainer: async (endpoint) =>
               probeComposeProviderEndpoint(plan, endpoint),
             providerFetch,
@@ -818,7 +864,7 @@ async function executeBootstrap(argv, io) {
             const enabledVerification = await verifyMcpApp({
               root: tamaEnabledPlan.root,
               plan: tamaEnabledPlan.mcpApp,
-              fetch: globalThis.fetch,
+              fetch: verificationFetch(tamaEnabledPlan),
               probeProviderFromContainer: async (endpoint) =>
                 probeComposeProviderEndpoint(tamaEnabledPlan, endpoint),
               providerFetch,

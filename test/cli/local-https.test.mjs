@@ -1,13 +1,98 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+} from "node:fs";
+import { createServer } from "node:https";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import {
+  ensureMkcertLocalCa,
+  localHttpsPaths,
   normalizeLocalDomain,
+  planLocalHttpsCertificates,
   renderLocalCaDockerfile,
   renderLocalHttpsCaddyfile,
   resolveLocalHttpsNames,
   resolveLocalHttpsTopology,
   usesLocalHttpsTopology,
 } from "../../cli/bootstrap/local-https.mjs";
+import { createLocalHttpsFetch } from "../../cli/bootstrap/mcp-app-verify.mjs";
+
+function certificateFixture() {
+  const root = mkdtempSync(join(tmpdir(), "tama-kit-local-https-test-"));
+  const paths = localHttpsPaths(root);
+  mkdirSync(paths.directory, { recursive: true });
+  const rootKey = join(root, "root-key.pem");
+  const request = join(root, "leaf.csr");
+  execFileSync(
+    "openssl",
+    [
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-subj",
+      "/CN=Tama Kit Test Root",
+      "-keyout",
+      rootKey,
+      "-out",
+      paths.rootCertificate,
+      "-days",
+      "1",
+    ],
+    { stdio: "ignore" },
+  );
+  execFileSync(
+    "openssl",
+    [
+      "req",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-subj",
+      "/CN=app.localhost",
+      "-addext",
+      "subjectAltName=DNS:app.localhost,DNS:tama.app.localhost",
+      "-keyout",
+      paths.privateKey,
+      "-out",
+      request,
+    ],
+    { stdio: "ignore" },
+  );
+  execFileSync(
+    "openssl",
+    [
+      "x509",
+      "-req",
+      "-in",
+      request,
+      "-CA",
+      paths.rootCertificate,
+      "-CAkey",
+      rootKey,
+      "-CAcreateserial",
+      "-copy_extensions",
+      "copy",
+      "-out",
+      paths.certificate,
+      "-days",
+      "1",
+    ],
+    { stdio: "ignore" },
+  );
+  chmodSync(paths.privateKey, 0o600);
+  return { root, paths, rootKey };
+}
 
 test("local HTTPS topology derives stable public identities and private upstreams", () => {
   const topology = resolveLocalHttpsTopology({ providerPort: 4100 });
@@ -36,6 +121,13 @@ test("fresh MCP App runs use HTTPS while explicit origins retain the legacy path
     false,
   );
   assert.equal(usesLocalHttpsTopology({ requested: true, migrateLocalHttps: true }), true);
+  const legacy = { providerOrigin: "http://host.docker.internal:4000" };
+  assert.equal(usesLocalHttpsTopology({ requested: true, providerPort: 4100 }, legacy), false);
+  assert.equal(
+    usesLocalHttpsTopology({ requested: true, localDomain: "app.localhost" }, legacy),
+    false,
+  );
+  assert.equal(usesLocalHttpsTopology({ requested: true, migrateLocalHttps: true }, legacy), true);
 });
 
 test("local HTTPS names must resolve only to loopback addresses", async () => {
@@ -59,7 +151,7 @@ test("local HTTPS names must resolve only to loopback addresses", async () => {
 test("generated proxy and trust-layer templates keep public and private routing separate", () => {
   const topology = resolveLocalHttpsTopology();
   const caddyfile = renderLocalHttpsCaddyfile(topology);
-  const dockerfile = renderLocalCaDockerfile("ghcr.io/upmaru/tama:0.13.1-server");
+  const dockerfile = renderLocalCaDockerfile("ghcr.io/upmaru/tama:0.13.2-server");
 
   assert.match(caddyfile, /app\.localhost \{/u);
   assert.match(caddyfile, /tama\.app\.localhost \{/u);
@@ -68,5 +160,96 @@ test("generated proxy and trust-layer templates keep public and private routing 
   assert.match(caddyfile, /header_up Host \{host\}/u);
   assert.doesNotMatch(caddyfile, /:80/u);
   assert.match(dockerfile, /COPY tls\/rootCA\.pem/u);
+  assert.match(dockerfile, /USER tama\s*$/u);
   assert.doesNotMatch(dockerfile, /local-key|rootCA\.key|private/u);
+});
+
+test("an existing mkcert CA does not require or repeat trust-store installation", () => {
+  const existing = { path: "mkcert", caRoot: "/ca", rootCertificate: "/ca/rootCA.pem" };
+  let installs = 0;
+  assert.equal(
+    ensureMkcertLocalCa(false, {
+      discover: () => existing,
+      install: () => {
+        installs += 1;
+      },
+    }),
+    existing,
+  );
+  assert.equal(installs, 0);
+
+  let discoveries = 0;
+  assert.equal(
+    ensureMkcertLocalCa(true, {
+      discover: () => {
+        discoveries += 1;
+        if (discoveries === 1) throw new Error("missing CA");
+        return existing;
+      },
+      install: () => {
+        installs += 1;
+      },
+    }),
+    existing,
+  );
+  assert.equal(installs, 1);
+});
+
+test("certificate reuse validates file type, key permissions, key pairing, and issuer", () => {
+  const fixture = certificateFixture();
+  const topology = resolveLocalHttpsTopology();
+  const options = {
+    discoverLocalCa: () => ({
+      path: "mkcert",
+      caRoot: fixture.root,
+      rootCertificate: fixture.paths.rootCertificate,
+    }),
+  };
+  try {
+    assert.deepEqual(planLocalHttpsCertificates(fixture.root, topology, options).operations, []);
+
+    chmodSync(fixture.paths.privateKey, 0o644);
+    assert.throws(
+      () => planLocalHttpsCertificates(fixture.root, topology, options),
+      /private key must have mode 0600/u,
+    );
+    chmodSync(fixture.paths.privateKey, 0o600);
+
+    unlinkSync(fixture.paths.privateKey);
+    symlinkSync(fixture.rootKey, fixture.paths.privateKey);
+    assert.throws(
+      () => planLocalHttpsCertificates(fixture.root, topology, options),
+      /must be a regular file/u,
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("local HTTPS fetch trusts only the generated CA and keeps hostname verification", async () => {
+  const fixture = certificateFixture();
+  const server = createServer(
+    {
+      cert: readFileSync(fixture.paths.certificate),
+      key: readFileSync(fixture.paths.privateKey),
+    },
+    (_request, response) => response.end("ok"),
+  );
+  try {
+    await new Promise((resolve) => server.listen(0, resolve));
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const trustedFetch = createLocalHttpsFetch(readFileSync(fixture.paths.rootCertificate));
+    const response = await trustedFetch(new URL(`https://app.localhost:${address.port}/`));
+    assert.equal(await response.text(), "ok");
+    await assert.rejects(
+      trustedFetch(new URL(`https://localhost:${address.port}/`)),
+      /hostname|certificate|altname/i,
+    );
+  } finally {
+    await new Promise((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve(undefined))),
+    );
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
 });

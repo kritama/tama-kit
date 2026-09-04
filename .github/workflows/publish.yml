@@ -62,6 +62,30 @@ jobs:
       - name: Validate packaged bootstrap, Compose, Terraform, and runtime
         run: npm run validate:bootstrap:runtime
 
+      - name: Install local HTTPS certificate tooling
+        run: sudo apt-get update && sudo apt-get install --yes mkcert libnss3-tools
+
+      - name: Validate MCP App local HTTPS runtime
+        run: npm run validate:mcp-app:runtime
+
+      - name: Check out pinned Memovee provider
+        uses: actions/checkout@v6
+        with:
+          repository: kritama/memovee
+          ref: 86226866acdad963324adb275b76d565f520f27c
+          path: .runtime/memovee
+
+      - name: Set up Erlang and Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27.3.4.16"
+          elixir-version: "1.19.5"
+
+      - name: Validate Memovee dev and official Tama release together
+        env:
+          MEMOVEE_CHECKOUT: ${{ github.workspace }}/.runtime/memovee
+        run: npm run validate:memovee:runtime
+
       - name: Validate public submission metadata
         run: npm run validate:submission
 

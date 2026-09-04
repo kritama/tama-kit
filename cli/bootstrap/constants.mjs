@@ -17,6 +17,7 @@ export const DEFAULTS = Object.freeze({
   port: 4000,
   containerPort: 4000,
   tamaImage: "ghcr.io/upmaru/tama:latest",
+  mcpAppTamaImage: "ghcr.io/upmaru/tama:0.13.2-server",
   postgresImage: "pgvector/pgvector:0.8.6-pg15-bookworm",
   caddyImage: "caddy:2.10.2-alpine",
   terraformVersion: ">= 1.0.0",

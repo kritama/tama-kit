@@ -150,7 +150,8 @@ Fresh MCP App bootstrap derives the production-compatible local HTTPS topology:
 `https://tama.app.localhost/mcp/app` for Tama. Caddy is the public entry point;
 `host.docker.internal:<provider-port>` and `tama:4000` are private upstreams,
 not OAuth identities. Use `--local-domain` and `--provider-port` for deliberate
-customization. The default allowed client origin is the provider origin; repeat
+customization; a non-`.localhost` name also requires
+`--acknowledge-local-domain-risk`. The default allowed client origin is the provider origin; repeat
 `--allowed-origin` only for additional clients. `--provider-origin` and
 `--tama-origin` are migration assertions in this topology.
 
@@ -173,11 +174,11 @@ may use HTTP, but every non-loopback allowed origin must use HTTPS. If more
 than 32 distinct origins are required, stop and narrow the set before running
 bootstrap.
 Use a concrete pinned version in the intersection of the bundled range
-`>= 0.13.1 and < 0.14.0` and `supported_tama_versions` from the
+`>= 0.13.2 and < 0.14.0` and `supported_tama_versions` from the
 application-owned provider contract when present, then select the official
 server image tag `<version>-server`. The floating `latest` tag is unsuffixed
 but is not valid for MCP App preparation. If no provider range is present,
-`0.13.1-server` is a valid default. Never assume version `0.13.1` is valid when
+`0.13.2-server` is a valid default. Never assume version `0.13.2` is valid when
 the provider contract narrows the range; if the ranges have no known pinned
 version in common, stop and report the incompatibility before bootstrap.
 
@@ -185,7 +186,8 @@ Review the JSON plan before writing. If accepted, repeat the exact command
 without `--dry-run` to stage prepared configuration. Add `--start` only when
 the user requests that Tama start. `--activate` requires both `--mcp-app` and
 `--start`; do not add it during preparation. Supported provider-specific
-options are `--provider-name`, `--local-domain`, `--provider-port`,
+options are `--provider-name`, `--local-domain`,
+`--acknowledge-local-domain-risk`, `--provider-port`,
 `--install-local-ca`, `--migrate-local-https`, `--provider-origin`,
 `--tama-origin`, repeated `--allowed-origin`, `--provider-prefix`,
 `--provider-env-file`, `--mcp-app-contract`, `--activate`, and

@@ -80,35 +80,33 @@ npx @kritama/tama-kit bootstrap --start
 
 Use `--mcp-app` from the provider application's repository. Contract-aware
 providers can commit `priv/contracts/tama-mcp-app-bootstrap-v1.json`; other
-providers must supply an explicit name and origin. Non-interactive runs also
-require the exact browser/MCP client origins. The integration requires a Tama
-image pinned to a stable release inside the supported range (the floating
-default tag is rejected):
+providers must supply an explicit name. Fresh integrations use local HTTPS,
+derive the exact provider and Tama origins, default the client origin to the
+provider, and select the pinned compatible `0.13.2-server` image:
 
 ```bash
 npx @kritama/tama-kit bootstrap --mcp-app \
   --provider-name acme \
-  --provider-origin http://host.docker.internal:4000 \
-  --tama-origin http://127.0.0.1:4001 \
-  --allowed-origin http://127.0.0.1:3000 \
-  --port 4001 \
-  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection>-server
+  --install-local-ca
 ```
 
 Choose a concrete pinned image version in the intersection of Tama Kit's
-bundled range `>= 0.13.1 and < 0.14.0` and the application-owned contract's
+bundled range `>= 0.13.2 and < 0.14.0` and the application-owned contract's
 `supported_tama_versions` when that contract is present. Versioned official
 images use the `<version>-server` tag form; `latest` remains unsuffixed. If no
-provider range is declared, `0.13.1-server` is a valid default. Do not use
-`0.13.1-server` when the provider contract excludes version `0.13.1`.
+provider range is declared, `0.13.2-server` is a valid default. Do not use
+`0.13.2-server` when the provider contract excludes version `0.13.2`.
 
-The provider origin must be one origin reachable from both the host-native
-provider and the Tama container. `host.docker.internal` adds the managed
-host-gateway mapping; Tama Kit does not rewrite OAuth endpoints to a different
-transport origin. Public origins are exact identifiers, so `localhost`,
-`127.0.0.1`, and `::1` are not interchangeable.
+The default public identities are `https://app.localhost` and
+`https://tama.app.localhost`; Caddy connects privately to the host-native
+provider through `host.docker.internal` and to Tama through the Compose
+network. Those transport names are never OAuth identities. The generated
+provider fragment also explicitly opts a compatible provider into its
+Caddy-reachable development listener and exact external HTTPS origin.
 Allowed client origins may use HTTP only on loopback; every non-loopback
 allowed origin must use HTTPS. Supply at most 32 unique allowed origins.
+A custom non-`.localhost` name additionally requires
+`--acknowledge-local-domain-risk` after its local DNS behavior is verified.
 
 The same command also manages
 `tama/contracts/mcp-app-provider-v1.json`, a non-secret local contract that
@@ -124,11 +122,7 @@ Activation is deliberately two-step:
 ```bash
 npx @kritama/tama-kit bootstrap --mcp-app \
   --provider-name acme \
-  --provider-origin http://host.docker.internal:4000 \
-  --tama-origin http://127.0.0.1:4001 \
-  --allowed-origin http://127.0.0.1:3000 \
-  --port 4001 \
-  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection>-server --start --activate
+  --start --activate
 ```
 
 The first run verifies prepared state and enables/restarts Tama, then reports

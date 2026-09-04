@@ -67,11 +67,11 @@ All provider-specific flags require `--mcp-app`.
 | `--migrate-provider-identity` | Deliberately migrate persisted provider identity. Requires an explicit `--provider-name`, a verified loader for the new fragment, and prepared provider mode. It cannot be combined with `--activate`. |
 
 For this Tama Kit contract revision, the bundled supported Tama range is
-`>= 0.13.1 and < 0.14.0`. If an application-owned provider contract declares
+`>= 0.13.2 and < 0.14.0`. If an application-owned provider contract declares
 `supported_tama_versions`, choose a concrete pinned version in the intersection
 of that range and the provider range, then use the official server image tag
 `<version>-server`. The floating `latest` tag is unsuffixed but is rejected for
-MCP App preparation. If no provider range exists, `0.13.1-server` is a valid
+MCP App preparation. If no provider range exists, `0.13.2-server` is a valid
 default. Stop when no known pinned version lies in both ranges. A typical local
 plan is:
 

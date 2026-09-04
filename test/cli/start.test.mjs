@@ -1,6 +1,25 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
+import { managedComposeServiceExists } from "../../cli/bootstrap/start.mjs";
+
+test("managed Compose service detection distinguishes reruns from unrelated listeners", () => {
+  const plan = { root: "/tmp/example", composeFile: "/tmp/example/tama/compose.yaml" };
+  const calls = [];
+  const exists = managedComposeServiceExists(plan, "caddy", (command, args, options) => {
+    calls.push({ command, args, options });
+    return "managed-container-id\n";
+  });
+
+  assert.equal(exists, true);
+  assert.deepEqual(calls[0].args, ["compose", "-f", plan.composeFile, "ps", "-q", "caddy"]);
+  assert.equal(
+    managedComposeServiceExists(plan, "caddy", () => {
+      throw new Error("Docker unavailable");
+    }),
+    false,
+  );
+});
 
 test("fetch timeout keeps a top-level await alive until the request is aborted", () => {
   const moduleUrl = new URL("../../cli/bootstrap/start.mjs", import.meta.url).href;

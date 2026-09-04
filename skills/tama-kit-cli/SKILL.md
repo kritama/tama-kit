@@ -304,14 +304,17 @@ provider and `https://tama.app.localhost` for Tama's protected
 `host.docker.internal:<provider-port>` and `tama:4000` upstreams are private
 routing details and never OAuth identities. The provider remains
 `MIX_ENV=dev`, while the official Tama image remains `MIX_ENV=prod`.
-Use `--local-domain` and `--provider-port` for deliberate customization.
+Use `--local-domain` and `--provider-port` for deliberate customization. A
+non-`.localhost` name also requires `--acknowledge-local-domain-risk` after
+local-only DNS resolution is verified.
 `--provider-origin` and `--tama-origin` are advanced migration assertions.
 The default allowed client origin is the provider origin; repeat
 `--allowed-origin` only for additional clients.
 Loopback client origins may use HTTP, but every non-loopback allowed origin must use HTTPS;
 at most 32 unique allowed origins are supported.
 
-Supported MCP App flags are `--provider-name`, `--local-domain`, `--provider-port`,
+Supported MCP App flags are `--provider-name`, `--local-domain`,
+`--acknowledge-local-domain-risk`, `--provider-port`,
 `--install-local-ca`, `--migrate-local-https`, `--provider-origin`,
 `--tama-origin`, repeated `--allowed-origin <origin>`,
 `--mcp-app-contract <path>`, `--provider-prefix <prefix>`,

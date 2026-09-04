@@ -89,17 +89,23 @@ function mcpAppExample(mcpApp) {
   if (!mcpApp) {
     return "";
   }
+  const derivedIdentities = mcpApp.localHttps
+    ? []
+    : [
+        `TAMA_MCP_APP_RESOURCE=${mcpApp.resource}`,
+        `TAMA_MCP_APP_INTROSPECTION_CLIENT_ID=${mcpApp.introspectionClientId}`,
+      ];
   return [
     "",
     "# MCP App public configuration. Private JWK material is intentionally omitted.",
     `TAMA_MCP_APP_MODE=${mcpApp.lifecycle}`,
-    `TAMA_MCP_APP_RESOURCE=${mcpApp.resource}`,
+    ...derivedIdentities.slice(0, 1),
     `TAMA_MCP_APP_AUTHORIZATION_SERVER=${mcpApp.providerOrigin}`,
     `TAMA_MCP_APP_JWKS_URI=${mcpApp.providerOrigin}/.well-known/jwks.json`,
     `TAMA_MCP_APP_INTROSPECTION_ENDPOINT=${mcpApp.providerOrigin}/auth/introspections`,
     "TAMA_MCP_APP_INTROSPECTION_SIGNING_ALGORITHM=RS256",
     "TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS=[]",
-    `TAMA_MCP_APP_INTROSPECTION_CLIENT_ID=${mcpApp.introspectionClientId}`,
+    ...derivedIdentities.slice(1),
     `TAMA_MCP_APP_ALLOWED_ORIGINS=${mcpApp.allowedOrigins.join(",")}`,
   ].join("\n");
 }
@@ -146,11 +152,7 @@ function managedTemplate(planManagedFile, filename, templateName, replacements) 
 export function createBootstrapPlan(options) {
   const inspection = inspectProject(options);
   const skillMode = options.skillMode ?? "manual";
-  const tamaImage = options.image ?? DEFAULTS.tamaImage;
-  const invalidOfficialTag = invalidOfficialTamaImageTag(tamaImage);
-  if (invalidOfficialTag) {
-    throw usageError(invalidOfficialTag);
-  }
+  let tamaImage = options.image ?? DEFAULTS.tamaImage;
   const mcpAppPrepared = options.mcpApp?.requested ? (options.mcpAppPrepared ?? null) : null;
   if (options.mcpApp?.requested && mcpAppPrepared === null) {
     throw usageError(
@@ -160,6 +162,13 @@ export function createBootstrapPlan(options) {
   // A persisted provider fragment holds the provider's private signing key,
   // so it is a tracked-secret failure on every run, not only --mcp-app runs.
   const persistedMcpApp = readMcpAppProvider(inspection.tamaDirectory);
+  if (options.image === undefined && (mcpAppPrepared !== null || persistedMcpApp !== null)) {
+    tamaImage = DEFAULTS.mcpAppTamaImage;
+  }
+  const invalidOfficialTag = invalidOfficialTamaImageTag(tamaImage);
+  if (invalidOfficialTag) {
+    throw usageError(invalidOfficialTag);
+  }
   if (
     mcpAppPrepared &&
     resolve(inspection.root, mcpAppPrepared.identity.environmentFile) ===
@@ -178,7 +187,9 @@ export function createBootstrapPlan(options) {
   ];
   validateSecretFilesUntracked(inspection.root, [...new Set(secretFiles)]);
   const localHttpsTopology =
-    mcpAppPrepared && options.mcpApp && usesLocalHttpsTopology(options.mcpApp, persistedMcpApp)
+    mcpAppPrepared &&
+    options.mcpApp &&
+    usesLocalHttpsTopology(options.mcpApp, persistedMcpApp, mcpAppPrepared.contractDocument)
       ? resolveLocalHttpsTopology({
           localDomain: options.mcpApp.localDomain ?? persistedMcpApp?.localHttps?.localDomain,
           providerPort: options.mcpApp.providerPort ?? persistedMcpApp?.localHttps?.providerPort,

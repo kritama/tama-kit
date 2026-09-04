@@ -43,6 +43,7 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:{{HTTPS_PORT}}:{{HTTPS_PORT}}"
+      - "[::1]:{{HTTPS_PORT}}:{{HTTPS_PORT}}"
     extra_hosts:
       - host.docker.internal:host-gateway
     networks:
@@ -54,7 +55,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./tls:/etc/tama-kit/tls:ro
     healthcheck:
-      test: ["CMD", "wget", "--no-check-certificate", "--spider", "--timeout=5", "https://localhost:{{HTTPS_PORT}}/"]
+      test: ["CMD", "wget", "--no-check-certificate", "--spider", "--timeout=5", "https://{{TAMA_HOST}}:{{HTTPS_PORT}}/"]
       interval: 5s
       timeout: 6s
       start_period: 5s

@@ -435,7 +435,11 @@ function validateMcpAppVariables(values, filename, validation) {
     });
   }
 
-  if (values.get("TAMA_MCP_APP_RESOURCE") !== validation.resource) {
+  const configuredResource = values.get("TAMA_MCP_APP_RESOURCE");
+  if (
+    (!validation.localHttps && configuredResource !== validation.resource) ||
+    (configuredResource !== undefined && configuredResource !== validation.resource)
+  ) {
     throw ownershipError(
       `${filename} TAMA_MCP_APP_RESOURCE must be exactly ${validation.resource}`,
       { path: filename, variable: "TAMA_MCP_APP_RESOURCE" },
@@ -490,7 +494,11 @@ function validateMcpAppVariables(values, filename, validation) {
     );
   }
 
-  if (values.get("TAMA_MCP_APP_INTROSPECTION_CLIENT_ID") !== validation.introspectionClientId) {
+  const configuredClientId = values.get("TAMA_MCP_APP_INTROSPECTION_CLIENT_ID");
+  if (
+    (!validation.localHttps && configuredClientId !== validation.introspectionClientId) ||
+    (configuredClientId !== undefined && configuredClientId !== validation.introspectionClientId)
+  ) {
     throw ownershipError(
       `${filename} TAMA_MCP_APP_INTROSPECTION_CLIENT_ID must be ${validation.introspectionClientId}`,
       { path: filename, variable: "TAMA_MCP_APP_INTROSPECTION_CLIENT_ID" },

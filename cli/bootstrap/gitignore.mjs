@@ -339,7 +339,7 @@ export function planGitignore(root, mcpAppFragments = { current: null, persisted
     planIgnoreFile(
       join(root, BOOTSTRAP_PATHS.tamaDirectory, ".gitignore"),
       tamaLines.join("\n"),
-      [TAMA_MANAGED_BLOCK],
+      [TAMA_MANAGED_BLOCK, LOCAL_HTTPS_IGNORE_BLOCK],
       removalPatterns,
     ),
   ];

@@ -70,6 +70,7 @@ const VARIABLE_FORMATS = Object.freeze([
   "bounded-identifier",
   "private-json-jwk",
   "public-json-jwk-array",
+  "hostname",
 ]);
 const TOP_LEVEL_KEYS = Object.freeze([
   "schema_version",
@@ -92,6 +93,9 @@ const VARIABLE_KEYS = Object.freeze([
   "format",
   "exact_path",
   "same_origin_as",
+  "derived_from",
+  "derived_template",
+  "migration_assertion",
   "max_bytes",
   "max_items",
   "initial_value",
@@ -358,6 +362,45 @@ function validateVariables(value, modes) {
       (typeof rawSpec.same_origin_as !== "string" || !Object.hasOwn(value, rawSpec.same_origin_as))
     ) {
       throw usageError(`MCP App contract variable ${name}.same_origin_as is not declared`);
+    }
+    if (
+      rawSpec.derived_from !== undefined &&
+      (typeof rawSpec.derived_from !== "string" || !Object.hasOwn(value, rawSpec.derived_from))
+    ) {
+      throw usageError(`MCP App contract variable ${name}.derived_from is not declared`);
+    }
+    if (
+      rawSpec.derived_template !== undefined &&
+      (typeof rawSpec.derived_template !== "string" ||
+        !safeString(rawSpec.derived_template) ||
+        typeof rawSpec.derived_from !== "string" ||
+        !rawSpec.derived_template.includes(`{${rawSpec.derived_from}}`))
+    ) {
+      throw usageError(
+        `MCP App contract variable ${name}.derived_template must reference its declared source`,
+      );
+    }
+    if (
+      rawSpec.migration_assertion !== undefined &&
+      typeof rawSpec.migration_assertion !== "boolean"
+    ) {
+      throw usageError(`MCP App contract variable ${name}.migration_assertion must be a boolean`);
+    }
+    const derived = rawSpec.derived_from !== undefined || rawSpec.derived_template !== undefined;
+    if (derived && (rawSpec.derived_from === undefined || rawSpec.derived_template === undefined)) {
+      throw usageError(
+        `MCP App contract derived variable ${name} must declare both derived_from and derived_template`,
+      );
+    }
+    if (derived && (rawSpec.required !== false || rawSpec.migration_assertion !== true)) {
+      throw usageError(
+        `MCP App contract derived variable ${name} must be optional and marked as a migration assertion`,
+      );
+    }
+    if (!derived && rawSpec.migration_assertion !== undefined) {
+      throw usageError(
+        `MCP App contract variable ${name}.migration_assertion requires a derived source and template`,
+      );
     }
     for (const field of ["max_bytes", "max_items"]) {
       if (
@@ -748,7 +791,9 @@ export function validateMcpAppContract(document) {
   validateVariables(document.variables, modes);
   validatePublicEndpoints(document.public_endpoints);
   validateAvailability(document.availability, modes);
-  validateLocalDevelopment(document.local_development);
+  if (document.local_development !== undefined) {
+    validateLocalDevelopment(document.local_development);
+  }
   validateLocalLoopback(document.local_loopback);
   const provider = validateProvider(document.provider);
   if (provider !== null) {

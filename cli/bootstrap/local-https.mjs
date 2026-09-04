@@ -1,6 +1,7 @@
 // @ts-check
 
 import { execFileSync } from "node:child_process";
+import { createPrivateKey, X509Certificate } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { isIP } from "node:net";
@@ -99,18 +100,27 @@ export function resolveLocalHttpsTopology(input = {}) {
  * supplied. This keeps 0.4.3 projects migratable without making the legacy
  * transport the default again.
  */
-/** @param {import("../types.mjs").McpAppBootstrapOptions | null | undefined} options @param {import("../types.mjs").PersistedMcpAppProvider | null} [persisted] */
-export function usesLocalHttpsTopology(options, persisted = null) {
-  const explicitlyLegacyClient = (options?.allowedOrigins ?? []).some(
-    (origin) => typeof origin === "string" && origin.startsWith("http://"),
+/** @param {import("../types.mjs").McpAppBootstrapOptions | null | undefined} options @param {import("../types.mjs").PersistedMcpAppProvider | null} [persisted] @param {Record<string, unknown> | null} [contractDocument] */
+export function usesLocalHttpsTopology(options, persisted = null, contractDocument = null) {
+  const explicitlyLegacyClient = [
+    ...(options?.allowedOrigins ?? []),
+    options?.providerOrigin,
+    options?.tamaOrigin,
+  ].some((origin) => typeof origin === "string" && origin.startsWith("http://"));
+  const localDevelopment = contractDocument?.local_development;
+  const contractOrigins =
+    localDevelopment && typeof localDevelopment === "object" && !Array.isArray(localDevelopment)
+      ? Object.values(/** @type {Record<string, unknown>} */ (localDevelopment)).filter(
+          (value) => typeof value === "string",
+        )
+      : [];
+  const explicitlyLegacyContract = contractOrigins.some((origin) =>
+    /** @type {string} */ (origin).startsWith("http://"),
   );
-  return Boolean(
-    persisted?.localHttps ||
-      options?.migrateLocalHttps ||
-      (!explicitlyLegacyClient && options?.localDomain !== undefined) ||
-      options?.providerPort !== undefined ||
-      (!options?.providerOrigin && !options?.tamaOrigin && !persisted?.providerOrigin),
-  );
+  if (persisted?.localHttps) return true;
+  if (options?.migrateLocalHttps) return true;
+  if (persisted?.providerOrigin) return false;
+  return !explicitlyLegacyClient && !explicitlyLegacyContract;
 }
 
 /** @param {{localDomain: string, certificateNames: string[]}} topology */
@@ -175,20 +185,30 @@ export function discoverMkcert() {
   const rootCertificate = join(caRoot, "rootCA.pem");
   if (!existsSync(rootCertificate) || !lstatSync(rootCertificate).isFile()) {
     throw prerequisiteError(
-      "mkcert has no local CA certificate; explicitly authorize `mkcert -install` before bootstrap",
-      { caRoot },
+      "mkcert has no local CA certificate; explicitly authorize --install-local-ca",
+      { caRoot, prerequisite: "mkcert-local-ca" },
     );
   }
   return { path: "mkcert", caRoot, rootCertificate };
 }
 
-/** @param {boolean} authorized */
-export function ensureMkcertLocalCa(authorized) {
-  if (!authorized) {
-    return discoverMkcert();
+/**
+ * @param {boolean} authorized
+ * @param {{discover?: typeof discoverMkcert, install?: () => void}} [implementation]
+ */
+export function ensureMkcertLocalCa(
+  authorized,
+  { discover = discoverMkcert, install = () => run("mkcert", ["-install"]) } = {},
+) {
+  try {
+    return discover();
+  } catch (error) {
+    if (!authorized) {
+      throw error;
+    }
   }
-  run("mkcert", ["-install"]);
-  return discoverMkcert();
+  install();
+  return discover();
 }
 
 /** @param {string} certificate @param {string[]} names */
@@ -210,25 +230,95 @@ export function certificateHasNames(certificate, names) {
   }
 }
 
+/** @param {string} path @param {number | null} expectedMode */
+function assertRegularTlsFile(path, expectedMode) {
+  let metadata;
+  try {
+    metadata = lstatSync(path);
+  } catch {
+    throw ownershipError(`local HTTPS TLS material cannot be inspected: ${path}`, { path });
+  }
+  if (metadata.isSymbolicLink() || !metadata.isFile()) {
+    throw ownershipError(`local HTTPS TLS material must be a regular file: ${path}`, { path });
+  }
+  if (expectedMode !== null && (metadata.mode & 0o777) !== expectedMode) {
+    throw ownershipError(`local HTTPS private key must have mode 0600: ${path}`, {
+      path,
+      mode: (metadata.mode & 0o777).toString(8),
+    });
+  }
+}
+
+/** @param {ReturnType<typeof localHttpsPaths>} paths @param {string[]} names */
+function assertReusableTlsMaterial(paths, names) {
+  assertRegularTlsFile(paths.certificate, null);
+  assertRegularTlsFile(paths.privateKey, 0o600);
+  assertRegularTlsFile(paths.rootCertificate, null);
+  try {
+    const leaf = new X509Certificate(readFileSync(paths.certificate));
+    const root = new X509Certificate(readFileSync(paths.rootCertificate));
+    const privateKey = createPrivateKey(readFileSync(paths.privateKey));
+    const now = Date.now();
+    if (Date.parse(leaf.validFrom) > now || Date.parse(leaf.validTo) <= now) {
+      throw new Error("leaf certificate is not currently valid");
+    }
+    if (Date.parse(root.validFrom) > now || Date.parse(root.validTo) <= now) {
+      throw new Error("root certificate is not currently valid");
+    }
+    if (!names.every((name) => leaf.checkHost(name) !== undefined)) {
+      throw new Error("leaf certificate SANs do not match the requested names");
+    }
+    if (!leaf.checkPrivateKey(privateKey)) {
+      throw new Error("leaf certificate does not match the private key");
+    }
+    if (!root.verify(root.publicKey)) {
+      throw new Error("stored root certificate is not self-signed");
+    }
+    if (!leaf.verify(root.publicKey)) {
+      throw new Error("leaf certificate was not issued by the stored root");
+    }
+  } catch (error) {
+    throw ownershipError(
+      `local HTTPS certificate paths exist but are not a valid reusable chain: ${error instanceof Error ? error.message : String(error)}`,
+      { paths: [paths.certificate, paths.privateKey, paths.rootCertificate] },
+    );
+  }
+}
+
 /**
  * Returns certificate operations for a write. Existing matching material is
  * reused; a mismatched existing destination is rejected instead of silently
  * replacing an operator-owned key.
  * @param {string} root
  * @param {import("../types.mjs").LocalHttpsTopology} topology
- * @param {{allowGeneration?: boolean, installLocalCa?: boolean}} [options]
+ * @param {{allowGeneration?: boolean, installLocalCa?: boolean, discoverLocalCa?: typeof discoverMkcert, ensureLocalCa?: typeof ensureMkcertLocalCa}} [options]
  */
 export function planLocalHttpsCertificates(
   root,
   topology,
-  { allowGeneration = true, installLocalCa = false } = {},
+  {
+    allowGeneration = true,
+    installLocalCa = false,
+    discoverLocalCa = discoverMkcert,
+    ensureLocalCa = ensureMkcertLocalCa,
+  } = {},
 ) {
   const paths = localHttpsPaths(root);
   if (!allowGeneration) {
     return { paths, operations: [] };
   }
   const existing = [paths.certificate, paths.privateKey, paths.rootCertificate].every(existsSync);
-  if (existing && certificateHasNames(paths.certificate, topology.certificateNames)) {
+  if (existing) {
+    const mkcert = discoverLocalCa();
+    assertReusableTlsMaterial(paths, topology.certificateNames);
+    if (
+      readFileSync(paths.rootCertificate, "utf8") !== readFileSync(mkcert.rootCertificate, "utf8")
+    ) {
+      throw ownershipError(
+        "the stored local HTTPS root is not the currently trusted mkcert root; move the TLS files aside and regenerate them",
+        { path: paths.rootCertificate },
+      );
+    }
     return { paths, operations: [] };
   }
   if ([paths.certificate, paths.privateKey, paths.rootCertificate].some(existsSync)) {
@@ -237,7 +327,7 @@ export function planLocalHttpsCertificates(
       { paths: [paths.certificate, paths.privateKey, paths.rootCertificate] },
     );
   }
-  const mkcert = ensureMkcertLocalCa(installLocalCa);
+  const mkcert = ensureLocalCa(installLocalCa);
   const temporary = mkdtempSync(join(tmpdir(), "tama-kit-mkcert-"));
   const cert = join(temporary, "local.pem");
   const key = join(temporary, "local-key.pem");
@@ -305,6 +395,7 @@ export function renderLocalCaDockerfile(tamaImage) {
     "USER root",
     "COPY tls/rootCA.pem /usr/local/share/ca-certificates/tama-kit-local.crt",
     "RUN if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; elif command -v apk >/dev/null 2>&1; then apk add --no-cache ca-certificates && update-ca-certificates; else echo 'unsupported Tama image CA trust mechanism' >&2; exit 1; fi",
+    "USER tama",
     "",
   ].join("\n");
 }

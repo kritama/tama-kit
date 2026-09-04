@@ -1,7 +1,7 @@
 {
   "schema_version": "1",
   "compatibility_identifier": "tama-mcp-app-bootstrap-v1",
-  "supported_tama_versions": ">= 0.13.1 and < 0.14.0",
+  "supported_tama_versions": ">= 0.13.2 and < 0.14.0",
   "lifecycle": {
     "default_production_mode": "disabled",
     "modes": ["disabled", "prepared", "enabled"],
@@ -14,10 +14,19 @@
       "values": ["disabled", "prepared", "enabled"],
       "x-sensitive": false
     },
-    "TAMA_MCP_APP_RESOURCE": {
+    "PHX_HOST": {
       "required_in": ["prepared", "enabled"],
+      "format": "hostname",
+      "max_bytes": 253,
+      "x-sensitive": false
+    },
+    "TAMA_MCP_APP_RESOURCE": {
+      "required": false,
       "format": "absolute-uri",
       "exact_path": "/mcp/app",
+      "derived_from": "PHX_HOST",
+      "derived_template": "https://{PHX_HOST}/mcp/app",
+      "migration_assertion": true,
       "max_bytes": 2048,
       "x-sensitive": false
     },
@@ -56,8 +65,11 @@
       "x-sensitive": false
     },
     "TAMA_MCP_APP_INTROSPECTION_CLIENT_ID": {
-      "required_in": ["prepared", "enabled"],
+      "required": false,
       "format": "bounded-identifier",
+      "derived_from": "PHX_HOST",
+      "derived_template": "https://{PHX_HOST}/mcp/app/introspection",
+      "migration_assertion": true,
       "max_bytes": 2048,
       "x-sensitive": false
     },
@@ -110,15 +122,6 @@
       "resource": true,
       "server_child": true
     }
-  },
-  "local_development": {
-    "memovee_origin": "http://host.docker.internal:4000",
-    "tama_origin": "http://127.0.0.1:4001",
-    "resource": "http://127.0.0.1:4001/mcp/app",
-    "introspection_client_id": "http://127.0.0.1:4001/mcp/app/introspection",
-    "memovee_jwks_uri": "http://host.docker.internal:4000/.well-known/jwks.json",
-    "memovee_introspection_endpoint": "http://host.docker.internal:4000/auth/introspections",
-    "tama_jwks_uri": "http://127.0.0.1:4001/.well-known/jwks.json"
   },
   "local_loopback": {
     "allowed_environments": ["dev", "test"],

@@ -1,9 +1,12 @@
 // @ts-check
 
 import { execFileSync, spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { createConnection, isIP } from "node:net";
 
 import { prerequisiteError, startupError } from "../errors.mjs";
+import { localHttpsPaths } from "./local-https.mjs";
+import { createLocalHttpsFetch } from "./mcp-app-verify.mjs";
 
 /** @typedef {import("../types.mjs").BootstrapPlan} BootstrapPlan */
 
@@ -64,6 +67,28 @@ export async function assertLocalHttpsPortAvailable(port) {
     throw startupError(
       `local HTTPS port ${port} is already in use; stop or reconfigure the unrelated listener before starting Caddy`,
     );
+  }
+}
+
+/**
+ * Reports whether this exact Compose plan has a running service container.
+ * A running managed Caddy is allowed to retain port 443 across idempotent
+ * starts; a stopped container does not mask an unrelated listener.
+ * @param {{root: string, composeFile: string}} plan
+ * @param {string} service
+ * @param {typeof execFileSync} [execute]
+ */
+export function managedComposeServiceExists(plan, service, execute = execFileSync) {
+  try {
+    return (
+      execute("docker", ["compose", "-f", plan.composeFile, "ps", "-q", service], {
+        cwd: plan.root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim() !== ""
+    );
+  } catch {
+    return false;
   }
 }
 
@@ -256,7 +281,7 @@ export async function validateCompose(plan, { quiet = true, checkPrerequisite = 
 /**
  * @param {string} url
  * @param {number} timeoutMs
- * @param {typeof fetch} [fetchImpl]
+ * @param {(input: URL, init?: RequestInit) => Promise<Response>} [fetchImpl]
  * @returns {Promise<Response>}
  */
 export async function fetchWithTimeout(url, timeoutMs, fetchImpl = fetch) {
@@ -264,7 +289,7 @@ export async function fetchWithTimeout(url, timeoutMs, fetchImpl = fetch) {
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   timeout.ref();
   try {
-    return await fetchImpl(url, { redirect: "follow", signal: controller.signal });
+    return await fetchImpl(new URL(url), { redirect: "follow", signal: controller.signal });
   } finally {
     clearTimeout(timeout);
   }
@@ -274,11 +299,14 @@ export async function fetchWithTimeout(url, timeoutMs, fetchImpl = fetch) {
 async function waitForHealth(plan, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs;
   const url = plan.localHttps?.healthUrl ?? `http://localhost:${plan.port}/`;
+  const fetchImpl = plan.localHttps
+    ? createLocalHttpsFetch(readFileSync(localHttpsPaths(plan.root).rootCertificate))
+    : fetch;
   /** @type {Error | undefined} */
   let lastError;
   while (Date.now() < deadline) {
     try {
-      const response = await fetchWithTimeout(url, 2_000);
+      const response = await fetchWithTimeout(url, 2_000, fetchImpl);
       if (response.ok) {
         return url;
       }
@@ -299,7 +327,8 @@ async function waitForHealth(plan, timeoutMs = 60_000) {
  * @returns {Promise<string>}
  */
 export async function startCompose(plan, { quiet = false } = {}) {
-  if (plan.localHttps) {
+  const managedCaddyExists = plan.localHttps ? managedComposeServiceExists(plan, "caddy") : false;
+  if (plan.localHttps && !managedCaddyExists) {
     await assertLocalHttpsPortAvailable(plan.localHttps.httpsPort);
   }
   try {
