@@ -1,8 +1,9 @@
 // @ts-check
 
+import { existsSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { ownershipError, usageError } from "../errors.mjs";
-import { planRootCompose } from "./compose.mjs";
+import { planRootCompose, validateComposeDocument } from "./compose.mjs";
 import { formatComposePsCommand, formatComposeUpCommand } from "./compose-command.mjs";
 import { BOOTSTRAP_PATHS, BOOTSTRAP_SCHEMA_VERSION, DEFAULTS } from "./constants.mjs";
 import { inspectProject } from "./detect-project.mjs";
@@ -43,6 +44,48 @@ import { planTerraform } from "./terraform.mjs";
 
 const TAMA_EXTRA_HOSTS_BLOCK = "    extra_hosts:\n      - host.docker.internal:host-gateway\n";
 const TAMA_MCP_APP_RESOURCE_PATH = "/mcp/app";
+
+/**
+ * Manifests written before Tama images were recorded still have a managed
+ * runtime file containing the exact selected image. Read it once so the next
+ * plan can preserve and persist that selection instead of substituting a
+ * default.
+ *
+ * @param {string} root
+ * @param {PersistedMcpAppProvider} persisted
+ */
+function legacyMcpAppTamaImage(root, persisted) {
+  const filename = persisted.localHttps
+    ? join(root, BOOTSTRAP_PATHS.tamaDirectory, "tama-local-ca.Dockerfile")
+    : join(root, BOOTSTRAP_PATHS.compose);
+  if (!existsSync(filename)) {
+    throw ownershipError(`cannot recover the persisted MCP App Tama image: ${filename}`, {
+      path: filename,
+    });
+  }
+
+  let image;
+  if (persisted.localHttps) {
+    image = readFileSync(filename, "utf8").match(/^FROM\s+(\S+)\s*$/mu)?.[1];
+  } else {
+    const compose = validateComposeDocument(readFileSync(filename, "utf8"), filename);
+    const services =
+      compose.services && typeof compose.services === "object" && !Array.isArray(compose.services)
+        ? /** @type {Record<string, unknown>} */ (compose.services)
+        : null;
+    const tama =
+      services?.tama && typeof services.tama === "object" && !Array.isArray(services.tama)
+        ? /** @type {Record<string, unknown>} */ (services.tama)
+        : null;
+    image = typeof tama?.image === "string" ? tama.image : undefined;
+  }
+  if (!image || /\s/u.test(image)) {
+    throw ownershipError(`cannot recover the persisted MCP App Tama image: ${filename}`, {
+      path: filename,
+    });
+  }
+  return image;
+}
 
 /**
  * Builds the public MCP documentation view from the persisted integration so
@@ -152,7 +195,6 @@ function managedTemplate(planManagedFile, filename, templateName, replacements) 
 export function createBootstrapPlan(options) {
   const inspection = inspectProject(options);
   const skillMode = options.skillMode ?? "manual";
-  let tamaImage = options.image ?? DEFAULTS.tamaImage;
   const mcpAppPrepared = options.mcpApp?.requested ? (options.mcpAppPrepared ?? null) : null;
   if (options.mcpApp?.requested && mcpAppPrepared === null) {
     throw usageError(
@@ -161,10 +203,17 @@ export function createBootstrapPlan(options) {
   }
   // A persisted provider fragment holds the provider's private signing key,
   // so it is a tracked-secret failure on every run, not only --mcp-app runs.
-  const persistedMcpApp = readMcpAppProvider(inspection.tamaDirectory);
-  if (options.image === undefined && (mcpAppPrepared !== null || persistedMcpApp !== null)) {
-    tamaImage = DEFAULTS.mcpAppTamaImage;
+  let persistedMcpApp = readMcpAppProvider(inspection.tamaDirectory);
+  if (persistedMcpApp && !persistedMcpApp.tamaImage) {
+    persistedMcpApp = {
+      ...persistedMcpApp,
+      tamaImage: legacyMcpAppTamaImage(inspection.root, persistedMcpApp),
+    };
   }
+  const tamaImage =
+    options.image ??
+    persistedMcpApp?.tamaImage ??
+    (mcpAppPrepared !== null ? DEFAULTS.mcpAppTamaImage : DEFAULTS.tamaImage);
   const invalidOfficialTag = invalidOfficialTamaImageTag(tamaImage);
   if (invalidOfficialTag) {
     throw usageError(invalidOfficialTag);
@@ -214,14 +263,17 @@ export function createBootstrapPlan(options) {
     ]);
   }
   const mcpAppState = mcpAppPrepared
-    ? resolveMcpAppState({
-        root: inspection.root,
-        identity: mcpAppPrepared.identity,
-        contractPath: mcpAppPrepared.contractPath,
-        contractDocument: mcpAppPrepared.contractDocument,
-        selectedCompose: inspection.selectedCompose,
-        topology: localHttpsTopology,
-      })
+    ? {
+        ...resolveMcpAppState({
+          root: inspection.root,
+          identity: mcpAppPrepared.identity,
+          contractPath: mcpAppPrepared.contractPath,
+          contractDocument: mcpAppPrepared.contractDocument,
+          selectedCompose: inspection.selectedCompose,
+          topology: localHttpsTopology,
+        }),
+        tamaImage,
+      }
     : null;
   // A fresh MCP App run adopts the Tama port the accepted contract documents
   // so the container and the host-native provider never share a host port.
@@ -307,7 +359,7 @@ export function createBootstrapPlan(options) {
     inspection.root,
     inspection.tamaDirectory,
     skillMode,
-    mcpAppState,
+    mcpAppState ?? (persistedMcpApp ? { ...persistedMcpApp, tamaImage } : null),
   );
   const localContractOperation = mcpAppState
     ? managedFiles.plan(
@@ -374,7 +426,7 @@ export function createBootstrapPlan(options) {
       : undefined);
   const environment = planEnvironment(
     inspection.root,
-    localHttpsTopology ? localHttpsTopology.tamaPort : options.port,
+    localHttpsTopology ? undefined : options.port,
     environmentMcpApp,
     options.materializeSecrets ?? true,
     localHttpsTopology ? localHttpsTopology.tamaPort : mcpAppFreshPort,

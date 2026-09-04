@@ -129,6 +129,7 @@
  * @property {string} [tamaOrigin]
  * @property {string[]} [allowedOrigins]
  * @property {LocalHttpsTopology | null} [localHttps]
+ * @property {string} [tamaImage]
  */
 
 /**

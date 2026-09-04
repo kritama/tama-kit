@@ -120,6 +120,19 @@ function parsePersistedProvider(value, manifestPath) {
   const topologyValues = [provider.providerOrigin, provider.tamaOrigin, provider.allowedOrigins];
   const hasTopology = topologyValues.some((value) => value !== undefined);
   if (
+    provider.tamaImage !== undefined &&
+    (typeof provider.tamaImage !== "string" ||
+      provider.tamaImage.length === 0 ||
+      /\s/u.test(provider.tamaImage))
+  ) {
+    throw ownershipError(
+      `Tama Kit manifest contains an invalid MCP App Tama image: ${manifestPath}`,
+      {
+        path: manifestPath,
+      },
+    );
+  }
+  if (
     hasTopology &&
     (typeof provider.providerOrigin !== "string" ||
       typeof provider.tamaOrigin !== "string" ||
@@ -259,6 +272,7 @@ function parsePersistedProvider(value, manifestPath) {
     ...(localHttps !== undefined
       ? { localHttps: /** @type {import("../types.mjs").LocalHttpsTopology} */ (localHttps) }
       : {}),
+    ...(typeof provider.tamaImage === "string" ? { tamaImage: provider.tamaImage } : {}),
   };
 }
 
@@ -595,6 +609,7 @@ export function createManagedFilePlanner(root, tamaDirectory, skillMode, mcpAppP
                   }
                 : {}),
               ...(provider.localHttps ? { localHttps: provider.localHttps } : {}),
+              ...(provider.tamaImage ? { tamaImage: provider.tamaImage } : {}),
             },
           }
         : {}),

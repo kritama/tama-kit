@@ -1484,6 +1484,46 @@ test("local HTTPS migration removes legacy Tama-derived MCP App identities", () 
   assert.equal(environment.TAMA_OAUTH_ISSUER, "https://tama.app.localhost");
 });
 
+test("ordinary local HTTPS reruns preserve public URLs and the selected Tama image", () => {
+  const root = project();
+  const selectedImage = "ghcr.io/upmaru/tama:0.13.5-server";
+  const prepared = preparedFor(root);
+  prepared.allowedOrigins = ["https://app.localhost"];
+  const first = createBootstrapPlan({
+    cwd: root,
+    targetPath: root,
+    image: selectedImage,
+    mcpApp: { requested: true, activate: false },
+    mcpAppPrepared: prepared,
+  });
+  applyOperations(first.operations);
+
+  const rerun = createBootstrapPlan({ cwd: root, targetPath: root });
+  assert.equal(rerun.tamaImage, selectedImage);
+  assert.ok(
+    rerun.operations.every((operation) => operation.action === "unchanged"),
+    JSON.stringify(rerun.operations.map(({ action, path, reason }) => ({ action, path, reason }))),
+  );
+  const environment = parseEnv(readFileSync(join(root, "tama", ".tama.env"), "utf8"));
+  assert.equal(environment.TAMA_OAUTH_ISSUER, "https://tama.app.localhost");
+  assert.equal(environment.TAMA_MCP_RESOURCE, "https://tama.app.localhost/mcp");
+  assert.equal(environment.TAMA_BASE_URL, "https://tama.app.localhost");
+  assert.match(
+    readFileSync(join(root, "tama", "tama-local-ca.Dockerfile"), "utf8"),
+    new RegExp(`^FROM ${selectedImage.replaceAll(".", "\\.")}$`, "mu"),
+  );
+
+  const manifestPath = join(root, "tama", ".tama-kit.json");
+  const legacyManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  delete legacyManifest.mcpAppProvider.tamaImage;
+  writeFileSync(manifestPath, `${JSON.stringify(legacyManifest, null, 2)}\n`);
+  const upgraded = createBootstrapPlan({ cwd: root, targetPath: root });
+  assert.equal(upgraded.tamaImage, selectedImage);
+  applyOperations(upgraded.operations);
+  const upgradedManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  assert.equal(upgradedManifest.mcpAppProvider.tamaImage, selectedImage);
+});
+
 test("a matching provider contract updates provenance without rotating provider keys", async () => {
   const root = project();
   const firstPrepared = await prepareFor(root, {
