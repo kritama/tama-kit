@@ -65,6 +65,9 @@ export function resolveLocalHttpsTopology(input = {}) {
   if (httpsPort !== LOCAL_HTTPS_DEFAULT_PORT) {
     throw usageError("local HTTPS currently supports only port 443");
   }
+  if (providerPort === httpsPort) {
+    throw usageError("--provider-port must not use port 443; Caddy reserves it for local HTTPS");
+  }
   const providerHost = domain;
   const tamaHost = `${LOCAL_HTTPS_TAMA_HOST_PREFIX}${domain}`;
   const providerOrigin = `https://${providerHost}`;
@@ -209,17 +212,8 @@ export function ensureMkcertLocalCa(
 /** @param {string} certificate @param {string[]} names */
 export function certificateHasNames(certificate, names) {
   try {
-    const text = execFileSync(
-      "openssl",
-      ["x509", "-in", certificate, "-noout", "-ext", "subjectAltName"],
-      {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      },
-    );
-    return names.every((name) =>
-      new RegExp(`(?:DNS:)?${name.replace(/\./gu, "\\.")}(?:,|\\s|$)`, "u").test(text),
-    );
+    const parsed = new X509Certificate(readFileSync(certificate));
+    return names.every((name) => parsed.checkHost(name) !== undefined);
   } catch {
     return false;
   }

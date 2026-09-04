@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  certificateHasNames,
   ensureMkcertLocalCa,
   localHttpsPaths,
   normalizeLocalDomain,
@@ -105,6 +106,13 @@ test("local HTTPS topology derives stable public identities and private upstream
   assert.equal(topology.tamaUpstream, "http://tama:4000");
   assert.deepEqual(topology.certificateNames, ["app.localhost", "tama.app.localhost"]);
   assert.deepEqual(topology.allowedOrigins, ["https://app.localhost"]);
+});
+
+test("local HTTPS topology rejects a provider port reserved by Caddy", () => {
+  assert.throws(
+    () => resolveLocalHttpsTopology({ providerPort: 443 }),
+    /provider-port must not use port 443/u,
+  );
 });
 
 test("local domain validation rejects multicast DNS names and IP literals", () => {
@@ -236,6 +244,19 @@ test("certificate reuse validates file type, key permissions, key pairing, and i
       () => planLocalHttpsCertificates(fixture.root, topology, options),
       /must be a regular file/u,
     );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("certificate SAN validation uses Node's X509 parser", () => {
+  const fixture = certificateFixture();
+  try {
+    assert.equal(
+      certificateHasNames(fixture.paths.certificate, ["app.localhost", "tama.app.localhost"]),
+      true,
+    );
+    assert.equal(certificateHasNames(fixture.paths.certificate, ["missing.localhost"]), false);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
