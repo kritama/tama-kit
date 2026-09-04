@@ -106,7 +106,7 @@ host-gateway mapping; Tama Kit does not rewrite OAuth endpoints to a different
 transport origin. Public origins are exact identifiers, so `localhost`,
 `127.0.0.1`, and `::1` are not interchangeable.
 Allowed client origins may use HTTP only on loopback; every non-loopback
-allowed origin must use HTTPS.
+allowed origin must use HTTPS. Supply at most 32 unique allowed origins.
 
 The same command also manages
 `tama/contracts/mcp-app-provider-v1.json`, a non-secret local contract that
