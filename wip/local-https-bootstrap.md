@@ -10,6 +10,12 @@ locally trusted certificate with mkcert, and use exact HTTPS origins that are
 reachable by browser clients, the host-native provider, and the containerized
 Tama runtime.
 
+The supported Memovee topology is intentionally mixed-environment: the
+official Tama release container runs with `MIX_ENV=prod`, while the
+host-native Memovee application runs with `MIX_ENV=dev`. Planning, generated
+environment, health checks, and the release gate must preserve that split
+rather than assuming both services use the same Phoenix environment.
+
 This closes a runtime gap released in Tama Kit 0.4.3. That release can generate
 a syntactically valid MCP App configuration that the official Tama server image
 cannot start: the image runs with the production environment, while the
@@ -82,6 +88,14 @@ the host-native provider through `host.docker.internal:4000`. The public issuer
 remains `https://app.localhost`; the transport-only host-gateway address is
 never written into metadata, token claims, or public contracts.
 
+Runtime environment matrix:
+
+| Service | Runtime | Public TLS | Private listener |
+| --- | --- | --- | --- |
+| Memovee | host-native `MIX_ENV=dev` | Caddy at `https://app.localhost` | Phoenix HTTP on an explicitly Caddy-reachable development bind and port |
+| Tama | official release image, `MIX_ENV=prod` | Caddy at `https://tama.app.localhost` | Bandit HTTP on `tama:4000` inside Compose |
+| Caddy | generated Compose service | mkcert leaf certificate | Proxies to the two private HTTP upstreams |
+
 ## Decisions
 
 1. Use Caddy as the generated local reverse proxy and TLS termination layer.
@@ -114,6 +128,10 @@ never written into metadata, token claims, or public contracts.
 13. Update the bundled agent skills, generated repository instructions, and
     post-bootstrap handoff together with the CLI. No supported guidance may
     continue recommending the incompatible local HTTP topology.
+14. Treat the runtime environments independently. Do not require Memovee to
+    run a production release merely because Tama correctly runs in production,
+    and do not validate Tama with a development process that permits loopback
+    HTTP.
 
 ## Bootstrap and code simplification
 
@@ -332,6 +350,20 @@ The provider must advertise and issue tokens from the exact external issuer,
 for example `https://app.localhost`, while continuing to listen on its existing
 host port for Caddy's upstream connection.
 
+For the Memovee integration, the provider command remains `MIX_ENV=dev` (or
+the normal development command whose effective environment is `dev`). Tama Kit
+must not set or imply `MIX_ENV=prod`, require release-only database and secret
+inputs, or depend on Memovee's production-only endpoint configuration.
+Memovee's generated MCP App variables are loaded by `config/runtime.exs` in
+development, but its Caddy-reachable bind, external HTTPS URL, WebSocket
+origin, and trusted-proxy behavior require an explicit development-only proxy
+mode owned by Memovee.
+
+Caddy terminates TLS. Memovee continues serving private HTTP and must not be
+configured with the leaf key. The development proxy mode must preserve the
+ordinary loopback-only `MIX_ENV=dev` behavior when Tama Kit is not active and
+must not copy the entire production endpoint profile into development.
+
 Provider loader verification must prove that the application loads the managed
 fragment containing the HTTPS issuer and resource. Framework-specific proxy
 settings remain application-owned. Tama Kit may report required trusted-proxy
@@ -478,19 +510,25 @@ Static verification must cover:
 - allowlisted, redacted failure diagnostics.
 
 The runtime gate must use the official pinned Tama server image and a minimal
-provider fixture. It must prove:
+provider fixture. In addition, the cross-repository release gate must use a
+real Memovee checkout running with `MIX_ENV=dev`; neither gate may substitute a
+development Tama process or a production Memovee release. Together they must
+prove:
 
 1. Caddy serves a certificate valid for both public names.
 2. The host trusts both HTTPS endpoints.
 3. Tama in `prepared` mode starts successfully under the production release
    environment.
-4. Tama reaches the provider's HTTPS metadata, JWKS, and authenticated
+4. The provider remains in development, loads the generated fragment before
+   `mix phx.server` starts, and is reachable by Caddy without exposing a second
+   public OAuth identity.
+5. Tama reaches the provider's HTTPS metadata, JWKS, and authenticated
    introspection endpoints through Caddy.
-5. Prepared mode publishes Tama's public key but does not advertise or expose
+6. Prepared mode publishes Tama's public key but does not advertise or expose
    `/mcp/app`.
-6. Enabled verification succeeds only after the provider is enabled.
-7. The protected resource rejects anonymous and wrong-audience requests.
-8. No private key, token, assertion, password, setup URL, or client secret is
+7. Enabled verification succeeds only after the provider is enabled.
+8. The protected resource rejects anonymous and wrong-audience requests.
+9. No private key, token, assertion, password, setup URL, or client secret is
    emitted by bootstrap or diagnostics.
 
 This new MCP App runtime gate is required in CI and in the npm publishing
@@ -557,7 +595,8 @@ workflow. A generic standard-bootstrap runtime test is not sufficient.
 1. Add unit, integration, security, migration, and diagnostic-redaction tests.
 2. Add a production-image MCP App runtime gate to CI and npm publishing.
 3. Reproduce the original Memovee failure, apply the new bootstrap, and prove
-   host and container HTTPS access.
+   host and container HTTPS access with Memovee in `MIX_ENV=dev` and the
+   official Tama image in `MIX_ENV=prod`.
 4. Stop accepting changes at the release candidate cutoff; only confirmed
    blockers found by the agreed review round enter the release branch.
 
@@ -565,6 +604,8 @@ workflow. A generic standard-bootstrap runtime test is not sufficient.
 
 - A fresh Memovee MCP App bootstrap starts Caddy, Tama PostgreSQL, and the
   official Tama server image without a restart loop.
+- Memovee continues running host-native in `MIX_ENV=dev`; the bootstrap does
+  not require a production release or production-only configuration.
 - `https://tama.app.localhost/` is reachable from the host with a trusted
   certificate.
 - Tama accepts `https://tama.app.localhost/mcp/app` in prepared mode and can
@@ -587,4 +628,5 @@ workflow. A generic standard-bootstrap runtime test is not sufficient.
   both use the exact HTTPS origins.
 - Standard non-MCP bootstrap behavior remains unchanged.
 - Full tests, package validation, the generic runtime gate, and the new MCP App
-  production-runtime gate pass on the exact review head.
+  mixed-environment runtime gate (`Memovee=dev`, `Tama=prod`) pass on the exact
+  review head.
