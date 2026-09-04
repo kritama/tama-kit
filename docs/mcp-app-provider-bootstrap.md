@@ -71,6 +71,12 @@ content.
 
 ## Exact topology
 
+For the generated local HTTPS profile, Caddy publishes the provider at
+`https://app.localhost` and forwards to the provider's selected host-native
+port. The application owns that development listener and its external URL
+configuration; Tama Kit only supplies the semantic OAuth bindings and does
+not generate provider-specific proxy, bind-address, or upstream-port flags.
+
 `--provider-origin` is both the public OAuth issuer and the origin used by Tama
 for provider metadata, JWKS, and introspection. It must be reachable from the
 host and the Tama container. Any loopback provider origin is rejected —

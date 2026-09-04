@@ -28,6 +28,9 @@ const DEV_ROOT_MANAGED_BLOCK = [
 const SECRET_FILES = [BOOTSTRAP_PATHS.environment, BOOTSTRAP_PATHS.postgresEnvironment];
 const MCP_APP_IGNORE_HEADER = "# Tama Kit MCP App integration";
 const MCP_APP_IGNORE_HEADER_PATTERN = new RegExp(`^${MCP_APP_IGNORE_HEADER}$`, "u");
+const LOCAL_HTTPS_IGNORE_BLOCK = ["# Tama Kit local HTTPS certificate material", "/tls/"].join(
+  "\n",
+);
 
 /**
  * Matches the ignore line Tama Kit writes for one provider fragment, anchored
@@ -302,6 +305,7 @@ function planIgnoreFile(filename, managedBlock, legacyBlocks = [], removalPatter
  * @param {{
  *   current: string | null,
  *   persisted: string | null,
+ *   localHttps?: boolean,
  * }} [mcpAppFragments]
  *   The fragment the current run manages and the fragment a previous run
  *   persisted. Both lines may be removed; every other .integration.env line
@@ -328,11 +332,14 @@ export function planGitignore(root, mcpAppFragments = { current: null, persisted
       ...fragmentFiles.map((file) => fragmentLinePattern(file)),
     );
   }
+  if (mcpAppFragments.localHttps) {
+    tamaLines.push("", LOCAL_HTTPS_IGNORE_BLOCK);
+  }
   return [
     planIgnoreFile(
       join(root, BOOTSTRAP_PATHS.tamaDirectory, ".gitignore"),
       tamaLines.join("\n"),
-      [TAMA_MANAGED_BLOCK],
+      [TAMA_MANAGED_BLOCK, LOCAL_HTTPS_IGNORE_BLOCK],
       removalPatterns,
     ),
   ];

@@ -22,14 +22,14 @@ start/initialize Docker before continuing.
 {{COMPOSE_PS_COMMAND}}
 ```
 
-Tama is available at <http://localhost:{{PORT}}/>. To complete the supported
+Tama is available at <{{TAMA_PUBLIC_URL}}>. To complete the supported
 first-run setup, load the private environment and open the setup URL:
 
 ```bash
 set -a
 . ./tama/.tama.env
 set +a
-echo "http://localhost:${TAMA_PORT}/setup/root?token=${TAMA_SETUP_TOKEN}"
+echo "${TAMA_BASE_URL}/setup/root?token=${TAMA_SETUP_TOKEN}"
 ```
 
 Create the root user, sign in, then create provisioner credentials from the
