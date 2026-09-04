@@ -6,7 +6,11 @@ import { createServer } from "node:http";
 import { parseEnv } from "node:util";
 
 const fragment = process.argv[2];
+const providerPort = Number(process.argv[3]);
 if (!fragment) throw new Error("provider fragment path is required");
+if (!Number.isInteger(providerPort) || providerPort < 1 || providerPort > 65_535) {
+  throw new Error("provider fixture port must be an integer between 1 and 65535");
+}
 
 function environment() {
   return parseEnv(readFileSync(fragment, "utf8"));
@@ -93,8 +97,7 @@ const server = createServer(async (request, response) => {
   json(response, 404, { error: "not_found" });
 });
 
-const port = Number(environment().FIXTURE_TAMA_LOCAL_HTTPS_UPSTREAM_PORT);
-server.listen(port, "0.0.0.0", () => process.stdout.write(`ready:${port}\n`));
+server.listen(providerPort, "0.0.0.0", () => process.stdout.write(`ready:${providerPort}\n`));
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => server.close(() => process.exit(0)));
 }

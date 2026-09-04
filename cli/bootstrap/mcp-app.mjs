@@ -925,26 +925,22 @@ export function planMcpApp(input) {
       ? withoutEnvironmentVariables(sourceContent, Object.values(sourceRoles))
       : sourceContent;
   const proxyPrefix = identity.environmentPrefix;
-  /** @type {Array<[string, string]>} */
-  const localHttpsProviderEntries = localHttps
-    ? [
-        [`${proxyPrefix}_TAMA_LOCAL_HTTPS_PROXY`, `${proxyPrefix}_TAMA_LOCAL_HTTPS_PROXY=enabled`],
-        [
+  const sourceProxyPrefix = sourceIdentity.environmentPrefix;
+  const fragmentWithoutLegacyLocalHttpsVariables =
+    fragmentBase === null
+      ? null
+      : withoutEnvironmentVariables(fragmentBase, [
+          `${sourceProxyPrefix}_TAMA_LOCAL_HTTPS_PROXY`,
+          `${proxyPrefix}_TAMA_LOCAL_HTTPS_PROXY`,
+          `${sourceProxyPrefix}_TAMA_LOCAL_HTTPS_EXTERNAL_ORIGIN`,
           `${proxyPrefix}_TAMA_LOCAL_HTTPS_EXTERNAL_ORIGIN`,
-          `${proxyPrefix}_TAMA_LOCAL_HTTPS_EXTERNAL_ORIGIN=${providerOrigin}`,
-        ],
-        [
+          `${sourceProxyPrefix}_TAMA_LOCAL_HTTPS_BIND_IP`,
           `${proxyPrefix}_TAMA_LOCAL_HTTPS_BIND_IP`,
-          `${proxyPrefix}_TAMA_LOCAL_HTTPS_BIND_IP=0.0.0.0`,
-        ],
-        [
+          `${sourceProxyPrefix}_TAMA_LOCAL_HTTPS_UPSTREAM_PORT`,
           `${proxyPrefix}_TAMA_LOCAL_HTTPS_UPSTREAM_PORT`,
-          `${proxyPrefix}_TAMA_LOCAL_HTTPS_UPSTREAM_PORT=${localHttps.providerPort}`,
-        ],
-      ]
-    : [];
+        ]);
   const fragmentContent = providerFragmentContent(
-    fragmentBase,
+    fragmentWithoutLegacyLocalHttpsVariables,
     new Map([
       [roles.mode, `${roles.mode}=${providerMode}`],
       [roles.issuer, `${roles.issuer}=${providerOrigin}`],
@@ -964,7 +960,6 @@ export function planMcpApp(input) {
         roles.introspection_jwks_uri,
         `${roles.introspection_jwks_uri}=${tamaOrigin}${providerEndpoints.jwks}`,
       ],
-      ...localHttpsProviderEntries,
     ]),
   );
   const fragmentOperation = manageFile(fragmentPath, fragmentContent, {

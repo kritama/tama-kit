@@ -81,7 +81,7 @@ try {
 
   provider = spawn(
     process.execPath,
-    [join(repositoryRoot, "scripts/fixtures/mcp-app-provider.mjs"), fragment],
+    [join(repositoryRoot, "scripts/fixtures/mcp-app-provider.mjs"), fragment, String(providerPort)],
     {
       cwd: project,
       env: { ...process.env, NODE_EXTRA_CA_CERTS: join(project, "tama", "tls", "rootCA.pem") },

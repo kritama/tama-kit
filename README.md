@@ -100,9 +100,10 @@ provider range is declared, `0.13.2-server` is a valid default. Do not use
 The default public identities are `https://app.localhost` and
 `https://tama.app.localhost`; Caddy connects privately to the host-native
 provider through `host.docker.internal` and to Tama through the Compose
-network. Those transport names are never OAuth identities. The generated
-provider fragment also explicitly opts a compatible provider into its
-Caddy-reachable development listener and exact external HTTPS origin.
+network. Those transport names are never OAuth identities. The provider
+application remains responsible for listening on the selected private port
+and using the generated public issuer; Tama Kit does not add provider-specific
+proxy or listener controls.
 Allowed client origins may use HTTP only on loopback; every non-loopback
 allowed origin must use HTTPS. Supply at most 32 unique allowed origins.
 A custom non-`.localhost` name additionally requires

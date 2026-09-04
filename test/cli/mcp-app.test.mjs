@@ -1404,7 +1404,7 @@ test("bootstrap derives conventional bindings for providers without a contract",
   assert.equal(localContract.bindings.issuer, "ACME_OAUTH_ISSUER");
 });
 
-test("fresh local HTTPS plans persist provider proxy inputs and rerun without rewriting port 443", () => {
+test("fresh local HTTPS plans leave provider runtime behavior application-owned", () => {
   const root = project();
   const identity = {
     name: "memovee",
@@ -1420,11 +1420,16 @@ test("fresh local HTTPS plans persist provider proxy inputs and rerun without re
   assert.equal(first.mcpApp?.tamaOrigin, "https://tama.app.localhost");
   applyOperations(first.operations);
 
-  const fragment = parseEnv(readFileSync(join(root, "tama", ".memovee.integration.env"), "utf8"));
-  assert.equal(fragment.MEMOVEE_TAMA_LOCAL_HTTPS_PROXY, "enabled");
-  assert.equal(fragment.MEMOVEE_TAMA_LOCAL_HTTPS_EXTERNAL_ORIGIN, "https://app.localhost");
-  assert.equal(fragment.MEMOVEE_TAMA_LOCAL_HTTPS_BIND_IP, "0.0.0.0");
-  assert.equal(fragment.MEMOVEE_TAMA_LOCAL_HTTPS_UPSTREAM_PORT, "4000");
+  const fragmentPath = join(root, "tama", ".memovee.integration.env");
+  const fragment = parseEnv(readFileSync(fragmentPath, "utf8"));
+  for (const variable of [
+    "MEMOVEE_TAMA_LOCAL_HTTPS_PROXY",
+    "MEMOVEE_TAMA_LOCAL_HTTPS_EXTERNAL_ORIGIN",
+    "MEMOVEE_TAMA_LOCAL_HTTPS_BIND_IP",
+    "MEMOVEE_TAMA_LOCAL_HTTPS_UPSTREAM_PORT",
+  ]) {
+    assert.equal(Object.hasOwn(fragment, variable), false);
+  }
 
   const tama = parseEnv(readFileSync(join(root, "tama", ".tama.env"), "utf8"));
   assert.equal(tama.PHX_HOST, "tama.app.localhost");

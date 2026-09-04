@@ -72,7 +72,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: kritama/memovee
-          ref: 86226866acdad963324adb275b76d565f520f27c
+          ref: c17f0cc240da860d8fa422cd2f286857723e3df7
           path: .runtime/memovee
 
       - name: Set up Erlang and Elixir

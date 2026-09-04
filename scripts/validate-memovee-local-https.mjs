@@ -3,7 +3,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { createServer as createTcpServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
@@ -16,7 +15,7 @@ if (!process.env.MEMOVEE_CHECKOUT || !existsSync(join(project, "mix.exs"))) {
 const composeFile = join(project, "compose.yaml");
 const originalCompose = readFileSync(composeFile, "utf8");
 const fragment = join(project, "tama", ".memovee.integration.env");
-const providerPort = await availablePort();
+const providerPort = 4000;
 let provider;
 
 function execute(command, args, options = {}) {
@@ -25,21 +24,6 @@ function execute(command, args, options = {}) {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     ...options,
-  });
-}
-
-async function availablePort() {
-  return await new Promise((resolvePort, reject) => {
-    const socket = createTcpServer();
-    socket.once("error", reject);
-    socket.listen(0, "0.0.0.0", () => {
-      const address = socket.address();
-      if (!address || typeof address === "string") {
-        reject(new Error("could not allocate a Memovee upstream port"));
-        return;
-      }
-      socket.close((error) => (error ? reject(error) : resolvePort(address.port)));
-    });
   });
 }
 
