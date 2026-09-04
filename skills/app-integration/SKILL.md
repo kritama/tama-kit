@@ -144,7 +144,7 @@ npx @kritama/tama-kit bootstrap . \
   --tama-origin http://127.0.0.1:<tama-port> \
   --allowed-origin http://127.0.0.1:<client-port> \
   --port <tama-port> \
-  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection> \
+  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection>-server \
   --skills <resolved-skill-mode> \
   --dry-run --json
 ```
@@ -157,13 +157,14 @@ origin with a repeated `--allowed-origin`; at least one and at most 32 unique
 origins are allowed. Loopback client origins may use HTTP, but every
 non-loopback allowed origin must use HTTPS. If more than 32 distinct origins
 are required, stop and narrow the set before running bootstrap.
-Use a concrete pinned image version in the intersection of the bundled range
+Use a concrete pinned version in the intersection of the bundled range
 `>= 0.13.1 and < 0.14.0` and `supported_tama_versions` from the
-application-owned provider contract when present. If no provider range is
-present, `0.13.1` is a valid default within the bundled range. Never assume
-that `0.13.1` is valid when the provider contract narrows the range; if the
-ranges have no known pinned version in common, stop and report the
-incompatibility before running bootstrap.
+application-owned provider contract when present, then select the official
+server image tag `<version>-server`. The floating `latest` tag is unsuffixed
+but is not valid for MCP App preparation. If no provider range is present,
+`0.13.1-server` is a valid default. Never assume version `0.13.1` is valid when
+the provider contract narrows the range; if the ranges have no known pinned
+version in common, stop and report the incompatibility before bootstrap.
 
 Review the JSON plan before writing. If accepted, repeat the exact command
 without `--dry-run` to stage prepared configuration. Add `--start` only when

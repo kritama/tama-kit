@@ -64,10 +64,12 @@ All provider-specific flags require `--mcp-app`.
 
 For this Tama Kit contract revision, the bundled supported Tama range is
 `>= 0.13.1 and < 0.14.0`. If an application-owned provider contract declares
-`supported_tama_versions`, choose a concrete pinned image version in the
-intersection of that range and the provider range. If it does not, `0.13.1` is
-a valid default. Stop when no known pinned version lies in both ranges. A
-typical local plan is:
+`supported_tama_versions`, choose a concrete pinned version in the intersection
+of that range and the provider range, then use the official server image tag
+`<version>-server`. The floating `latest` tag is unsuffixed but is rejected for
+MCP App preparation. If no provider range exists, `0.13.1-server` is a valid
+default. Stop when no known pinned version lies in both ranges. A typical local
+plan is:
 
 ```bash
 npx @kritama/tama-kit bootstrap /path/to/provider \
@@ -77,7 +79,7 @@ npx @kritama/tama-kit bootstrap /path/to/provider \
   --tama-origin http://127.0.0.1:4001 \
   --allowed-origin http://127.0.0.1:3000 \
   --port 4001 \
-  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection> \
+  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection>-server \
   --skills <resolved-skill-mode> \
   --dry-run --json
 ```

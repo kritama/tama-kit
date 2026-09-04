@@ -35,7 +35,7 @@ function planFor(root, extra = {}) {
   return createBootstrapPlan({ cwd: root, targetPath: root, ...extra });
 }
 
-test("bootstrap help explains the allowed-origin HTTPS requirement and cap", async () => {
+test("bootstrap help explains allowed origins and official versioned image tags", async () => {
   const output = [];
   const exitCode = await run(["bootstrap", "--help"], {
     cwd: project(),
@@ -47,6 +47,21 @@ test("bootstrap help explains the allowed-origin HTTPS requirement and cap", asy
 
   assert.equal(exitCode, EXIT_CODES.SUCCESS);
   assert.match(output.join("\n"), /--allowed-origin.*HTTPS off loopback, max 32 unique/u);
+  assert.match(output.join("\n"), /official versions use <version>-server; latest is unsuffixed/u);
+});
+
+test("bootstrap rejects an unsuffixed official version before Docker", () => {
+  assert.throws(
+    () => planFor(project(), { image: "ghcr.io/upmaru/tama:0.13.1" }),
+    (error) =>
+      error instanceof CLIError &&
+      error.exitCode === EXIT_CODES.USAGE &&
+      /missing the required -server suffix/u.test(error.message),
+  );
+  assert.equal(
+    planFor(project(), { image: "ghcr.io/upmaru/tama:latest" }).tamaImage,
+    "ghcr.io/upmaru/tama:latest",
+  );
 });
 
 test("bootstrap creates a private, idempotent generic project scaffold", () => {
