@@ -35,6 +35,20 @@ function planFor(root, extra = {}) {
   return createBootstrapPlan({ cwd: root, targetPath: root, ...extra });
 }
 
+test("bootstrap help explains the allowed-origin HTTPS requirement", async () => {
+  const output = [];
+  const exitCode = await run(["bootstrap", "--help"], {
+    cwd: project(),
+    interactive: false,
+    color: false,
+    stdout: (message = "") => output.push(message),
+    stderr: () => {},
+  });
+
+  assert.equal(exitCode, EXIT_CODES.SUCCESS);
+  assert.match(output.join("\n"), /--allowed-origin.*HTTPS required off loopback/u);
+});
+
 test("bootstrap creates a private, idempotent generic project scaffold", () => {
   const root = project();
   const first = planFor(root);

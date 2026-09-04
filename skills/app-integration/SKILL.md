@@ -148,6 +148,8 @@ public issuer and must be reachable by both host probes and the Tama container;
 do not use `localhost`, `127.0.0.1`, `::1`, `0.0.0.0`, or `::` for it. The Tama
 origin must be HTTP loopback and match `--port`. Supply every browser/MCP
 client origin with a repeated `--allowed-origin`; at least one is required.
+Loopback client origins may use HTTP, but every non-loopback allowed origin
+must use HTTPS.
 Use a concrete pinned image version in the intersection of the bundled range
 `>= 0.13.1 and < 0.14.0` and `supported_tama_versions` from the
 application-owned provider contract when present. If no provider range is

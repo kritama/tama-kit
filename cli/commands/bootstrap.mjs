@@ -75,7 +75,7 @@ function usage() {
     "  --provider-env-file <path> Provider fragment file override",
     "  --provider-origin <origin> Provider issuer origin, reachable from the Tama container",
     "  --tama-origin <origin> Exact public Tama origin",
-    "  --allowed-origin <origin> Explicit allowed origin (repeatable)",
+    "  --allowed-origin <origin> Allowed client origin; HTTPS required off loopback (repeatable)",
     "  --migrate-provider-identity Migrate the persisted provider identity",
     "  --activate             Activate the integration after verification",
   ].join("\n");

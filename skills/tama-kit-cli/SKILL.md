@@ -298,7 +298,8 @@ The MCP App command requires `--mcp-app`, a provider name unless an accepted
 contract or manifest already owns it, a provider origin reachable from both
 the host and Tama container, an exact HTTP loopback Tama origin matching
 `--port`, at least one exact allowed browser/MCP client origin, and a pinned
-Tama image. When an application-owned provider contract declares
+Tama image. Loopback allowed origins may use HTTP; every non-loopback allowed
+origin must use HTTPS. When an application-owned provider contract declares
 `supported_tama_versions`, choose a concrete pinned version in the intersection
 of that range and the bundled supported range `>= 0.13.1 and < 0.14.0`; if it
 does not, `0.13.1` is a valid default. Never use the example version when it is

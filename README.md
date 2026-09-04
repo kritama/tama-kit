@@ -105,6 +105,8 @@ provider and the Tama container. `host.docker.internal` adds the managed
 host-gateway mapping; Tama Kit does not rewrite OAuth endpoints to a different
 transport origin. Public origins are exact identifiers, so `localhost`,
 `127.0.0.1`, and `::1` are not interchangeable.
+Allowed client origins may use HTTP only on loopback; every non-loopback
+allowed origin must use HTTPS.
 
 The same command also manages
 `tama/contracts/mcp-app-provider-v1.json`, a non-secret local contract that
