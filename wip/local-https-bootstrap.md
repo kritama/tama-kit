@@ -115,22 +115,101 @@ never written into metadata, token claims, or public contracts.
     post-bootstrap handoff together with the CLI. No supported guidance may
     continue recommending the incompatible local HTTP topology.
 
+## Bootstrap and code simplification
+
+Adding Caddy, certificate generation, and container trust introduces new
+infrastructure code, so this release is not expected to reduce total lines of
+code immediately. It should still reduce conceptual complexity: the common
+MCP App path gets one canonical topology instead of asking callers to assemble
+public OAuth identities from Docker transport addresses and host ports.
+
+Resolve one immutable local HTTPS topology early in planning and pass it to
+environment, Compose, contract, verification, documentation, JSON, and prompt
+renderers. It should own at least:
+
+```text
+provider public origin          https://app.localhost
+Tama public origin              https://tama.app.localhost
+protected resource              https://tama.app.localhost/mcp/app
+allowed client origins          https://app.localhost by default
+provider private upstream       http://host.docker.internal:<provider-port>
+Tama private upstream           http://tama:4000
+public health URL               https://tama.app.localhost/
+certificate names               app.localhost, tama.app.localhost
+```
+
+Public origins and private upstreams must have different fields and types.
+`host.docker.internal` must never satisfy a public-origin input merely because
+it is container-reachable. The manifest and local contract persist public
+identity and non-secret topology metadata; Caddy configuration owns private
+routing.
+
+The normal interactive command should be able to use the defaults:
+
+```bash
+tama-kit bootstrap . --mcp-app --provider-name memovee --start
+```
+
+The provider name may still be confirmed interactively when safely detected.
+Default the allowed client origin to the provider public origin; retain
+repeated `--allowed-origin` only for additional real clients. Use focused
+advanced inputs such as `--local-domain`, `--provider-port`, and an optional
+HTTPS port instead of requiring callers to provide `--provider-origin`,
+`--tama-origin`, and a matching Tama host port for the standard local case.
+Existing explicit origin flags may remain for deliberate custom topology and
+the 0.4.3 migration, but they must not drive Caddy's private upstream routing.
+
+For MCP App mode, Caddy reaches Tama through the Compose network, so Tama does
+not need a published host port. Keep `--port` and direct HTTP access for the
+standard non-MCP bootstrap profile; do not make Caddy and mkcert prerequisites
+for users who only need that simpler runtime. Model the two profiles explicitly
+and have shared output code consume a planned public health URL rather than
+constructing `http://localhost:<port>`.
+
+Once the 0.4.3 topology is detected and explicitly migrated, remove these from
+the normal MCP App path rather than preserving them alongside the new design:
+
+- accepting `host.docker.internal` as the advertised provider issuer;
+- rejecting loopback provider origins and then suggesting a Docker hostname as
+  the public replacement;
+- host-side HTTP requests that connect to a resolved Docker gateway while
+  rewriting the `Host` header;
+- Linux-specific provider-listener inspection used only to explain the old
+  host-gateway topology;
+- rewriting the public Tama origin when the published host port changes;
+- deciding whether Tama needs `extra_hosts` by scanning current and persisted
+  public origins; and
+- hard-coded direct-port health URLs in startup, README, human output, and the
+  copy/paste agent prompt.
+
+The Caddy service alone receives the host-gateway mapping for its private
+provider upstream. Tama reaches both public names through Caddy's Compose
+aliases. Verification can therefore use the exact HTTPS URLs from both the host
+and Tama container without a special host-mapped fetch transport.
+
+Do not collapse security boundaries in the name of cleanup. Provider contract
+validation, lifecycle transitions, transactional secret writes, trust-store
+approval, activation rollback, and live provider/Tama verification remain
+separate responsibilities.
+
 ## Domain and DNS model
 
-The command needs one stable domain input from which it can derive both hosts.
-The exact flag name will be finalized during implementation; the intended
-shape is:
+The command resolves one stable domain value from which it derives both hosts.
+It defaults to `app.localhost`; `--local-domain` is needed only for a deliberate
+custom name. The exact advanced flag names will be finalized during
+implementation; a customized invocation has this shape:
 
 ```bash
 tama-kit bootstrap . \
   --mcp-app \
-  --local-domain app.localhost \
-  --port 4001 \
+  --provider-name memovee \
+  --local-domain memovee.localhost \
+  --provider-port 4000 \
   --image ghcr.io/upmaru/tama:0.13.1-server \
   --start
 ```
 
-Derived values:
+Default derived values:
 
 ```text
 provider origin                  https://app.localhost
@@ -157,6 +236,14 @@ literals, duplicate hostnames, or a selected domain that resolves somewhere
 outside the intended local topology. A custom non-`.localhost` domain requires
 operator-managed host DNS or hosts-file entries and explicit acknowledgement
 of public-name collision risk.
+
+A feasibility probe against `ghcr.io/upmaru/tama:0.13.1-server` confirmed both
+sides of the resolver behavior: without a Docker alias, `app.localhost`
+resolved to container loopback; from a second container on an isolated Docker
+network, the same name resolved to the peer container carrying the
+`app.localhost` network alias. The production runtime gate must retain this
+cross-container assertion so an image or Docker resolver change cannot silently
+route Tama back to itself.
 
 Do not automatically edit `/etc/hosts` or manage a machine-wide wildcard DNS
 resolver in this release.
@@ -233,9 +320,11 @@ The actual template must also:
 - avoid logging authorization headers, cookies, query strings containing setup
   tokens, or request bodies.
 
-Check host ports 80 and 443 before startup. Do not stop, replace, or reconfigure
-an unrelated local proxy that already owns either port. A configurable HTTPS
-port may be supported, but it becomes part of every exact public origin.
+Check the selected host HTTPS port before startup. Publish only port 443 by
+default; port 80 and HTTP-to-HTTPS redirects are not required for this local
+topology. Do not stop, replace, or reconfigure an unrelated local proxy that
+already owns the selected port. A configurable HTTPS port may be supported,
+but it becomes part of every exact public origin.
 
 ## Provider requirements
 
@@ -425,10 +514,15 @@ workflow. A generic standard-bootstrap runtime test is not sufficient.
 
 ### Phase 1: Model the topology
 
-1. Add explicit local-domain and HTTPS topology types.
-2. Separate public provider origin from the host-gateway upstream address.
-3. Derive exact provider and Tama URLs from one validated topology.
-4. Persist only non-secret topology state in the manifest and local contract.
+1. Add explicit bootstrap profiles and one immutable local-domain/HTTPS
+   topology type.
+2. Separate public provider and Tama identities from Caddy's private upstream
+   addresses.
+3. Derive exact URLs, default allowed origin, certificate names, and health URL
+   from that one validated topology.
+4. Make the common MCP App command default-driven while keeping explicit
+   custom origins isolated from private routing.
+5. Persist only non-secret topology state in the manifest and local contract.
 
 ### Phase 2: Certificates and host prerequisites
 
@@ -486,6 +580,11 @@ workflow. A generic standard-bootstrap runtime test is not sufficient.
   provide actionable next commands without stale direct-port guidance.
 - A `--skills local` rerun refreshes affected managed skills and generated
   repository instructions for the new topology.
+- The ordinary MCP App bootstrap does not require callers to manually align
+  provider origin, Tama origin, allowed origin, and a published Tama port.
+- No normal-path verifier rewrites the Host header or resolves
+  `host.docker.internal` as a public OAuth authority; host and container probes
+  both use the exact HTTPS origins.
 - Standard non-MCP bootstrap behavior remains unchanged.
 - Full tests, package validation, the generic runtime gate, and the new MCP App
   production-runtime gate pass on the exact review head.
