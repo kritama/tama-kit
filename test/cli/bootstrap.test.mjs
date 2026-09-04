@@ -1634,6 +1634,10 @@ test("the next-step command includes and safely quotes the selected Compose file
     formatComposeUpCommand("/tmp/tama project's/deploy/compose.yaml"),
     "docker compose -f '/tmp/tama project'\\''s/deploy/compose.yaml' up -d tama",
   );
+  assert.equal(
+    formatComposeUpCommand("compose.yaml", "caddy", true),
+    "docker compose -f 'compose.yaml' up -d --build caddy",
+  );
 });
 
 test("the next-step command visibly escapes filename control characters", () => {

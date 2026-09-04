@@ -200,14 +200,9 @@ export function ensureMkcertLocalCa(
   authorized,
   { discover = discoverMkcert, install = () => run("mkcert", ["-install"]) } = {},
 ) {
-  try {
-    return discover();
-  } catch (error) {
-    if (!authorized) {
-      throw error;
-    }
+  if (authorized) {
+    install();
   }
-  install();
   return discover();
 }
 
@@ -309,7 +304,7 @@ export function planLocalHttpsCertificates(
   }
   const existing = [paths.certificate, paths.privateKey, paths.rootCertificate].every(existsSync);
   if (existing) {
-    const mkcert = discoverLocalCa();
+    const mkcert = ensureLocalCa(installLocalCa, { discover: discoverLocalCa });
     assertReusableTlsMaterial(paths, topology.certificateNames);
     if (
       readFileSync(paths.rootCertificate, "utf8") !== readFileSync(mkcert.rootCertificate, "utf8")
@@ -327,7 +322,7 @@ export function planLocalHttpsCertificates(
       { paths: [paths.certificate, paths.privateKey, paths.rootCertificate] },
     );
   }
-  const mkcert = ensureLocalCa(installLocalCa);
+  const mkcert = ensureLocalCa(installLocalCa, { discover: discoverLocalCa });
   const temporary = mkdtempSync(join(tmpdir(), "tama-kit-mkcert-"));
   const cert = join(temporary, "local.pem");
   const key = join(temporary, "local-key.pem");

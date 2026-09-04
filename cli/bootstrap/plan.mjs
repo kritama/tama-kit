@@ -569,6 +569,7 @@ export function createBootstrapPlan(options) {
       COMPOSE_UP_COMMAND: formatComposeUpCommand(
         projectComposePath,
         mcpAppDoc?.localHttps ? "caddy" : "tama",
+        Boolean(mcpAppDoc?.localHttps),
       ),
       COMPOSE_PS_COMMAND: formatComposePsCommand(projectComposePath),
       MCP_APP_GUIDANCE: mcpAppReadmeGuidance(mcpAppDoc),

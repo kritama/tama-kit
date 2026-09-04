@@ -330,6 +330,20 @@ async function waitForHealth(plan, timeoutMs = 60_000) {
 }
 
 /**
+ * @param {{composeFile: string, localHttps?: unknown}} plan
+ */
+export function composeUpArguments(plan) {
+  return [
+    "compose",
+    "-f",
+    plan.composeFile,
+    "up",
+    "-d",
+    ...(plan.localHttps ? ["--build", "caddy"] : ["tama"]),
+  ];
+}
+
+/**
  * @param {BootstrapPlan} plan
  * @param {{quiet?: boolean}} [options]
  * @returns {Promise<string>}
@@ -340,14 +354,10 @@ export async function startCompose(plan, { quiet = false } = {}) {
     await assertLocalHttpsPortAvailable(plan.localHttps.httpsPort);
   }
   try {
-    await runProcess(
-      "docker",
-      ["compose", "-f", plan.composeFile, "up", "-d", ...(plan.localHttps ? ["caddy"] : ["tama"])],
-      {
-        cwd: plan.root,
-        stdio: quiet ? "ignore" : "inherit",
-      },
-    );
+    await runProcess("docker", composeUpArguments(plan), {
+      cwd: plan.root,
+      stdio: quiet ? "ignore" : "inherit",
+    });
   } catch (error) {
     throw startupError(`Docker Compose startup failed: ${errorMessage(error)}`);
   }

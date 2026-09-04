@@ -2,9 +2,31 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
 import {
+  composeUpArguments,
   managedComposeServiceExists,
   probeComposeProviderEndpoint,
 } from "../../cli/bootstrap/start.mjs";
+
+test("local HTTPS startup rebuilds the derived CA image", () => {
+  const composeFile = "/tmp/example/compose.yaml";
+  assert.deepEqual(composeUpArguments({ composeFile, localHttps: {} }), [
+    "compose",
+    "-f",
+    composeFile,
+    "up",
+    "-d",
+    "--build",
+    "caddy",
+  ]);
+  assert.deepEqual(composeUpArguments({ composeFile, localHttps: null }), [
+    "compose",
+    "-f",
+    composeFile,
+    "up",
+    "-d",
+    "tama",
+  ]);
+});
 
 test("managed Compose service detection distinguishes reruns from unrelated listeners", () => {
   const plan = { root: "/tmp/example", composeFile: "/tmp/example/tama/compose.yaml" };

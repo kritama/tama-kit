@@ -10,7 +10,11 @@ import { BOOTSTRAP_PATHS } from "./constants.mjs";
  */
 export function formatAgentSetupPrompt(plan, { setupUrl } = {}) {
   const composeFile = relative(plan.root, plan.composeFile);
-  const composeUp = formatComposeUpCommand(composeFile, plan.localHttps ? "caddy" : "tama");
+  const composeUp = formatComposeUpCommand(
+    composeFile,
+    plan.localHttps ? "caddy" : "tama",
+    Boolean(plan.localHttps),
+  );
   const composePs = formatComposePsCommand(composeFile);
   const mcpAppGuidance = plan.mcpApp
     ? [

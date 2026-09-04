@@ -164,7 +164,7 @@ test("generated proxy and trust-layer templates keep public and private routing 
   assert.doesNotMatch(dockerfile, /local-key|rootCA\.key|private/u);
 });
 
-test("an existing mkcert CA does not require or repeat trust-store installation", () => {
+test("mkcert CA installation runs only when explicitly authorized", () => {
   const existing = { path: "mkcert", caRoot: "/ca", rootCertificate: "/ca/rootCA.pem" };
   let installs = 0;
   assert.equal(
@@ -183,7 +183,6 @@ test("an existing mkcert CA does not require or repeat trust-store installation"
     ensureMkcertLocalCa(true, {
       discover: () => {
         discoveries += 1;
-        if (discoveries === 1) throw new Error("missing CA");
         return existing;
       },
       install: () => {
@@ -193,6 +192,7 @@ test("an existing mkcert CA does not require or repeat trust-store installation"
     existing,
   );
   assert.equal(installs, 1);
+  assert.equal(discoveries, 1);
 });
 
 test("certificate reuse validates file type, key permissions, key pairing, and issuer", () => {
@@ -207,6 +207,21 @@ test("certificate reuse validates file type, key permissions, key pairing, and i
   };
   try {
     assert.deepEqual(planLocalHttpsCertificates(fixture.root, topology, options).operations, []);
+
+    let installs = 0;
+    assert.deepEqual(
+      planLocalHttpsCertificates(fixture.root, topology, {
+        ...options,
+        installLocalCa: true,
+        ensureLocalCa: (authorized) => {
+          assert.equal(authorized, true);
+          installs += 1;
+          return options.discoverLocalCa();
+        },
+      }).operations,
+      [],
+    );
+    assert.equal(installs, 1);
 
     chmodSync(fixture.paths.privateKey, 0o644);
     assert.throws(

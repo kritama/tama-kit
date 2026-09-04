@@ -46,9 +46,9 @@ function shellQuote(value) {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
-/** @param {string} composeFile @param {string} [service] */
-export function formatComposeUpCommand(composeFile, service = "tama") {
-  return `docker compose -f ${shellQuote(composeFile)} up -d ${shellQuote(service).slice(1, -1)}`;
+/** @param {string} composeFile @param {string} [service] @param {boolean} [build] */
+export function formatComposeUpCommand(composeFile, service = "tama", build = false) {
+  return `docker compose -f ${shellQuote(composeFile)} up -d${build ? " --build" : ""} ${shellQuote(service).slice(1, -1)}`;
 }
 
 /** @param {string} composeFile */

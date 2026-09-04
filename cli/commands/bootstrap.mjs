@@ -557,7 +557,15 @@ function printHuman(io, result, color, setupUrl) {
     io.stdout("");
     io.stdout(paint(color, "bold", "Next:"));
     io.stdout(
-      `  ${paint(color, "cyan", formatComposeUpCommand(composeReference, result.localHttps ? "caddy" : "tama"))}`,
+      `  ${paint(
+        color,
+        "cyan",
+        formatComposeUpCommand(
+          composeReference,
+          result.localHttps ? "caddy" : "tama",
+          Boolean(result.localHttps),
+        ),
+      )}`,
     );
     printSetupUrl(setupUrl);
   }
