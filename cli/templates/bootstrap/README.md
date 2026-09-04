@@ -5,6 +5,17 @@
 The project root owns the Docker Compose runtime. From the project root, start
 Tama and its PostgreSQL dependency with:
 
+Before starting it, verify that Docker and the Compose plugin are installed and
+that the daemon is initialized and reachable:
+
+```bash
+docker --version
+docker compose version
+docker info --format '{{.ServerVersion}}'
+```
+
+If any check fails, install or start/initialize Docker before continuing.
+
 ```bash
 {{COMPOSE_UP_COMMAND}}
 {{COMPOSE_PS_COMMAND}}

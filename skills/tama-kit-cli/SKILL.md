@@ -59,6 +59,29 @@ appropriate `tama-kit bootstrap` command from the application repository.
    Never ask the user to paste private JWKs, tokens, passwords, or the private
    Tama setup URL into chat.
 
+## Check Docker before continuing
+
+Before any local bootstrap, Compose start, guided setup, or MCP App activation,
+verify that Docker is installed, Compose is available, and the daemon is
+initialized and reachable. Run these checks without printing unrelated
+environment values:
+
+```bash
+docker --version
+docker compose version
+docker info --format '{{.ServerVersion}}'
+```
+
+`docker --version` alone only proves that the client exists. Treat a missing
+Docker executable, missing Compose plugin, or failed `docker info` as a hard
+preflight failure. Pause and tell the user which prerequisite is missing so
+they can install or start/initialize Docker first. Do not install Docker,
+start a daemon, run Compose, run bootstrap, open the setup URL, or activate
+the integration on the user's behalf. After the user confirms Docker is ready,
+rerun all three checks. This preflight is not required for the standalone
+`dev setup --prepare-only` or `oauth generate-key` workflows when they do not
+use Docker.
+
 ## Plan bootstrap, then write
 
 For `bootstrap` workflows, use `--dry-run --json` first. Since JSON mode cannot

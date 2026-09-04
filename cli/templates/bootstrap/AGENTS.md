@@ -9,6 +9,7 @@ These instructions apply to the generated Tama Terraform root.
 - Treat the Terraform source in this directory as the source of truth for the intended graph configuration.
 - Preserve exactly one owned global foundation and inspect installed provider and module versions before changing resources.
 - Load `../.tama.env` when local credentials are required. Never print, expose, or commit its values.
+- Before starting the local Compose runtime, verify `docker --version`, `docker compose version`, and `docker info --format '{{.ServerVersion}}'`. If any check fails, pause and let the user install or start/initialize Docker first; never install or start Docker on the user's behalf.
 - If the user explicitly asks for guided first-run setup, use the in-app browser for the private setup URL derived from `../.tama.env`; never repeat its token in chat or logs.
 - Run `terraform fmt -check -recursive` and `terraform validate` after changes when Terraform is available.
 - Review a Terraform plan for destructive changes. Never run `terraform apply` unless the user explicitly authorizes deployment.

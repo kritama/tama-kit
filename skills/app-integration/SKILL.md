@@ -17,6 +17,25 @@ switch to a separate Tama repository during application setup.
 Read [the OAuth contract](references/mcp-app-oauth.md) before changing provider
 authorization, tokens, introspection, lifecycle, or persistence.
 
+## Check Docker before continuing
+
+Before running MCP App bootstrap, starting Compose, guided setup, or
+activation, verify the local Docker prerequisites:
+
+```bash
+docker --version
+docker compose version
+docker info --format '{{.ServerVersion}}'
+```
+
+The first check confirms the Docker client, the second confirms the Compose
+plugin, and the third confirms that the daemon is initialized and reachable.
+If any check fails, pause and tell the user to install or start/initialize
+Docker first. Do not run bootstrap, Compose, the private setup URL, or
+activation until all three checks pass. After the user confirms Docker is
+ready, rerun the complete preflight. Never install or start Docker on the
+user's behalf.
+
 ## Validate Tama Kit bootstrap state first
 
 For any request to set up, adapt, provision, or activate an MCP App, make the

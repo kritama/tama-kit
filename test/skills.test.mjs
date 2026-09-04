@@ -16,6 +16,10 @@ test("MCP App guidance makes bootstrap validation the first provider-work gate",
   assert.ok(bootstrapGate < readiness);
   assert.match(appIntegration, /tama\/\.tama-kit\.json/u);
   assert.match(appIntegration, /intended Compose file/u);
+  assert.match(appIntegration, /## Check Docker before continuing/u);
+  assert.match(appIntegration, /docker compose version/u);
+  assert.match(appIntegration, /docker info --format/u);
+  assert.match(appIntegration, /pause and tell the user/u);
   assert.match(appIntegration, /bootstrap --mcp-app --dry-run --json/u);
   assert.match(appIntegration, /does not require a sibling Tama source checkout/u);
   assert.match(appIntegration, /provider-origin http:\/\/host\.docker\.internal/u);
@@ -34,6 +38,10 @@ test("Tama Kit CLI guidance repeats the bootstrap gate", () => {
   assert.ok(providerWorkflow < bootstrapState);
   assert.ok(bootstrapState < oauthReadiness);
   assert.match(tamaKitCli, /tama\/contracts\/mcp-app-provider-v1\.json/u);
+  assert.match(tamaKitCli, /## Check Docker before continuing/u);
+  assert.match(tamaKitCli, /docker compose version/u);
+  assert.match(tamaKitCli, /docker info --format/u);
+  assert.match(tamaKitCli, /hard\npreflight failure/u);
   assert.match(tamaKitCli, /bootstrap --mcp-app --dry-run --json/u);
   assert.match(tamaKitCli, /Do not require a Tama source checkout/u);
   assert.match(tamaKitCli, /in-app browser/u);
@@ -45,4 +53,16 @@ test("Tama Kit CLI guidance repeats the bootstrap gate", () => {
   assert.match(tamaKitCli, /--skills manual --dry-run --json/u);
   assert.doesNotMatch(tamaKitCli, /--skills local --dry-run --json/u);
   assert.doesNotMatch(tamaKitCli, /CLI reference/u);
+});
+
+test("generated local instructions gate Docker runtime use", () => {
+  const agents = readFileSync(resolve(ROOT, "cli/templates/bootstrap/AGENTS.md"), "utf8");
+  const readme = readFileSync(resolve(ROOT, "cli/templates/bootstrap/README.md"), "utf8");
+
+  for (const instructions of [agents, readme]) {
+    assert.match(instructions, /docker --version/u);
+    assert.match(instructions, /docker compose version/u);
+    assert.match(instructions, /docker info --format/u);
+    assert.match(instructions, /install or start\/initialize Docker/u);
+  }
 });

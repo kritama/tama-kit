@@ -8,6 +8,7 @@
       "expected_behavior": [
         "Validate the Tama Kit bootstrap state and required generated configuration files before inspecting or changing provider OAuth behavior; run and review an MCP App dry run first when bootstrap is absent or incomplete.",
         "Do not search for or require a separate Tama source checkout; use Tama Kit from the application repository.",
+        "Before bootstrap, Compose, guided setup, or activation, verify docker --version, docker compose version, and docker info; if any fails, pause and let the user install or start/initialize Docker first.",
         "Treat the application as the OAuth authorization server and Tama as the owner of the exact /mcp/app protected resource instead of implementing that endpoint in the application.",
         "Read or generate tama/contracts/mcp-app-provider-v1.json through Tama Kit, then use its semantic bindings and endpoint paths rather than inventing independent environment names.",
         "Implement lifecycle-gated metadata, public JWKS, authorization, token, revocation, registration when supported, and private-key-JWT-authenticated introspection with exact mcp.message resource binding.",
@@ -24,6 +25,7 @@
       "expected_behavior": [
         "Validate the Tama Kit bootstrap state and required generated configuration files before assessing provider readiness; run and review an MCP App dry run first when bootstrap is absent or incomplete.",
         "Do not search for or require a separate Tama source checkout; use Tama Kit from the application repository.",
+        "Before bootstrap, Compose, guided setup, or activation, verify docker --version, docker compose version, and docker info; if any fails, pause and let the user install or start/initialize Docker first.",
         "Inspect repository and runtime evidence for the exact Tama OAuth contract rather than assuming that any existing OAuth provider is compatible.",
         "Verify PKCE S256, fixed metadata and public JWKS paths, exact /mcp/app audience, mcp.message scope, application actor subjects, lifecycle behavior, persistence and revocation, and Tama-authenticated introspection.",
         "Reuse compatible provider capabilities and identify only evidence-backed gaps instead of rebuilding the OAuth server.",
@@ -40,6 +42,7 @@
       "expected_behavior": [
         "Validate the Tama Kit bootstrap state and required generated configuration files before assessing the OAuth prerequisite; run and review an MCP App dry run first when bootstrap is absent or incomplete.",
         "Do not search for or require a separate Tama source checkout; use Tama Kit from the application repository.",
+        "Before bootstrap, Compose, guided setup, or activation, verify docker --version, docker compose version, and docker info; if any fails, pause and let the user install or start/initialize Docker first.",
         "Clearly state that an application-side OAuth 2.1 provider integration is a prerequisite for usable Tama /mcp/app access.",
         "Explain that Tama Kit provisions configuration and trust material but cannot supply application authorization, actors, consent, persistence, token issuance, revocation, or introspection behavior.",
         "Summarize the required PKCE, metadata, public JWKS, exact /mcp/app audience, mcp.message scope, lifecycle, and Tama-authenticated introspection capabilities.",
@@ -56,6 +59,7 @@
       "expected_behavior": [
         "Validate the Tama Kit bootstrap state and required generated configuration files before inspecting or changing the partial OAuth implementation; run and review an MCP App dry run first when bootstrap is absent or incomplete.",
         "Do not search for or require a separate Tama source checkout; use Tama Kit from the application repository.",
+        "Before bootstrap, Compose, guided setup, or activation, verify docker --version, docker compose version, and docker info; if any fails, pause and let the user install or start/initialize Docker first.",
         "Classify the existing implementation as partial until exact Tama MCP App compatibility is established rather than treating generic OAuth as ready.",
         "Inspect PKCE S256, RS256 signing and public JWKS, exact /mcp/app audience, mcp.message scope, actor-derived subjects, lifecycle gates, persistence and revocation, private-key-JWT introspection, and provider reachability from Tama.",
         "Report concrete compatible capabilities and gaps before changing application behavior or provisioning activation.",
@@ -74,6 +78,7 @@
         "Do not choose --mcp-app merely because the request mentions Tama or MCP elsewhere.",
         "Do not search for or require a separate Tama source checkout; recommend the self-contained tama-kit bootstrap command from the application repository.",
         "Inspect the repository and current Tama Kit help before selecting flags, and ask only for inputs that cannot be established from repository evidence.",
+        "Before bootstrap, Compose, or guided setup, verify docker --version, docker compose version, and docker info; if any fails, pause and let the user install or start/initialize Docker first.",
         "Run a deterministic dry-run plan before writing with --skills manual because the active Tama Kit skill is already installed; use --skills local only when the user explicitly requests repository-local skills.",
         "If the user authorizes execution, perform the reviewed bootstrap write and start the local runtime only when requested; if the user requests guided setup, use the in-app browser for the private setup URL without exposing its token.",
         "Keep secret values and the private setup URL out of chat, and do not start services, activate an integration, or apply Terraform without the required user intent."
