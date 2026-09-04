@@ -5,6 +5,18 @@
 The project root owns the Docker Compose runtime. From the project root, start
 Tama and its PostgreSQL dependency with:
 
+Before starting it, verify that Docker and the Compose plugin are installed and
+that the daemon is initialized and reachable:
+
+```bash
+docker --version
+docker compose version
+docker info --format '{{.ServerVersion}}'
+```
+
+If any check fails, or Compose is older than 2.20.0, install or
+start/initialize Docker before continuing.
+
 ```bash
 {{COMPOSE_UP_COMMAND}}
 {{COMPOSE_PS_COMMAND}}
@@ -22,6 +34,10 @@ echo "http://localhost:${TAMA_PORT}/setup/root?token=${TAMA_SETUP_TOKEN}"
 
 Create the root user, sign in, then create provisioner credentials from the
 setup flow. Store those values in the project-root `.tama.env`:
+
+If you explicitly ask your coding agent to guide you through setup, it may open
+this private URL in the in-app browser. Do not paste the URL or its token into
+chat or logs.
 
 ```dotenv
 TAMA_CLIENT_ID=<provisioner-client-id>
