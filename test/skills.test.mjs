@@ -23,6 +23,8 @@ test("MCP App guidance makes bootstrap validation the first provider-work gate",
   assert.match(appIntegration, /bootstrap --mcp-app --dry-run --json/u);
   assert.match(appIntegration, /does not require a sibling Tama source checkout/u);
   assert.match(appIntegration, /provider-origin http:\/\/host\.docker\.internal/u);
+  assert.match(appIntegration, /reuse `--skills local`/u);
+  assert.match(appIntegration, /--skills <resolved-skill-mode>/u);
   assert.match(appIntegration, /`--activate` requires both/u);
   assert.match(appIntegration, /reported private `\/setup\/root\?token=\.\.\.` URL/u);
   assert.match(appIntegration, /in-app browser/u);
@@ -49,9 +51,9 @@ test("Tama Kit CLI guidance repeats the bootstrap gate", () => {
   assert.match(tamaKitCli, /## Complete interactive Tama setup when requested/u);
   assert.match(tamaKitCli, /### Tama source-development command contract/u);
   assert.match(tamaKitCli, /### Standalone System OAuth key command contract/u);
-  assert.match(tamaKitCli, /use `--skills manual` by default/u);
-  assert.match(tamaKitCli, /--skills manual --dry-run --json/u);
-  assert.doesNotMatch(tamaKitCli, /--skills local --dry-run --json/u);
+  assert.match(tamaKitCli, /existing `local` mode must remain `--skills local`/u);
+  assert.match(tamaKitCli, /--skills <resolved-skill-mode> --dry-run --json/u);
+  assert.doesNotMatch(tamaKitCli, /--skills manual --dry-run --json/u);
   assert.doesNotMatch(tamaKitCli, /CLI reference/u);
 });
 

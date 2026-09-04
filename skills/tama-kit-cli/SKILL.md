@@ -87,11 +87,14 @@ use Docker.
 ## Plan bootstrap, then write
 
 For `bootstrap` workflows, use `--dry-run --json` first. Since JSON mode cannot
-prompt, always make the agent-skill choice explicit. Because this skill is
-already active, use `--skills manual` by default; do not reinstall or copy the
-skill into the repository. Use `--skills local` only when the user explicitly
-wants future agents in this repository to have a repository-local copy. Respect
-an existing recorded choice.
+prompt, always make the agent-skill choice explicit. First inspect
+`tama/.tama-kit.json`. An existing `local` mode must remain `--skills local`;
+`--skills manual` does not uninstall managed repository-local skills and the
+CLI rejects that switch. Reuse a recorded `manual` mode unless the user
+explicitly requests installing repository-local skills. When no mode is
+recorded, use `--skills manual` by default because this skill is already active,
+unless the user explicitly wants future agents in the repository to receive a
+local copy.
 
 Do not carry these flags into other workflows. `dev setup` has its own
 `--dry-run`, `--prepare-only`, and `--json` sequence, while
@@ -121,20 +124,20 @@ Use these commands from the application repository. Replace
 
 ```bash
 npx @kritama/tama-kit bootstrap /path/to/app \
-  --skills manual --dry-run --json
+  --skills <resolved-skill-mode> --dry-run --json
 
 npx @kritama/tama-kit bootstrap /path/to/app \
-  --skills manual --json
+  --skills <resolved-skill-mode> --json
 ```
 
 Use `tama-kit` instead of `npx @kritama/tama-kit` when the executable is already
-installed. `--skills local` installs the Tama Kit skills into
-`.agents/skills/`; use `--skills manual` when the active agent already has this
-skill, which is the default for this workflow. `--json` is deterministic, does
-not prompt, and redacts secret values. `--dry-run` plans only; it never writes
-files or starts Compose. Add `--start` to the second command only when the user
-explicitly requests the runtime to start. `--start` and `--dry-run` cannot be
-combined.
+installed. Replace `<resolved-skill-mode>` with `local` when that mode is
+recorded in `tama/.tama-kit.json`. Otherwise use `manual` by default, or
+`local` when the user explicitly requests repository-local skills. `--json`
+is deterministic, does not prompt, and redacts secret values. `--dry-run`
+plans only; it never writes files or starts Compose. Add `--start` to the
+second command only when the user explicitly requests the runtime to start.
+`--start` and `--dry-run` cannot be combined.
 
 Optional standard flags are:
 
@@ -287,7 +290,7 @@ npx @kritama/tama-kit bootstrap /path/to/provider \
   --allowed-origin http://127.0.0.1:3000 \
   --port 4001 \
   --image ghcr.io/upmaru/tama:<pinned-version-in-intersection> \
-  --skills manual \
+  --skills <resolved-skill-mode> \
   --dry-run --json
 ```
 

@@ -30,12 +30,17 @@ decisions.
 
 Recommended agent sequence for a standard app:
 
+Resolve the skill mode from `tama/.tama-kit.json` first. A recorded `local`
+mode must remain `local`. Otherwise choose `manual` when the active agent
+already has Tama Kit's skills, or `local` when repository-local skills are
+explicitly requested.
+
 ```bash
 npx @kritama/tama-kit bootstrap /path/to/app \
-  --skills local --dry-run --json
+  --skills <resolved-skill-mode> --dry-run --json
 
 npx @kritama/tama-kit bootstrap /path/to/app \
-  --skills local --json
+  --skills <resolved-skill-mode> --json
 ```
 
 Add `--start` to the write command only when starting Docker services is part of
@@ -73,7 +78,7 @@ npx @kritama/tama-kit bootstrap /path/to/provider \
   --allowed-origin http://127.0.0.1:3000 \
   --port 4001 \
   --image ghcr.io/upmaru/tama:<pinned-version-in-intersection> \
-  --skills manual \
+  --skills <resolved-skill-mode> \
   --dry-run --json
 ```
 

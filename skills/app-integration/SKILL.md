@@ -124,7 +124,11 @@ the runtime consume the resulting bindings.
 ### Tama Kit command contract
 
 Run from the provider application's repository. Use `tama-kit` when installed,
-otherwise use `npx @kritama/tama-kit`:
+otherwise use `npx @kritama/tama-kit`. Resolve the skill mode from
+`tama/.tama-kit.json` before constructing the command: reuse `--skills local`
+when repository-local skills are already recorded, and otherwise use
+`--skills manual` unless the user explicitly requests repository-local skills.
+Do not try to change an existing recorded `local` mode to `manual`:
 
 ```bash
 npx @kritama/tama-kit bootstrap . \
@@ -135,7 +139,7 @@ npx @kritama/tama-kit bootstrap . \
   --allowed-origin http://127.0.0.1:<client-port> \
   --port <tama-port> \
   --image ghcr.io/upmaru/tama:<pinned-version-in-intersection> \
-  --skills manual \
+  --skills <resolved-skill-mode> \
   --dry-run --json
 ```
 
