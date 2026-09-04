@@ -33,7 +33,7 @@ the bundled `tama-kit-cli`, `app-integration`, `graph-builder`, and
 `graph-audit` skills into the repository's `.agents/skills/` directory or leave
 skill installation to the user. It preserves an existing global-foundation
 address and refuses ambiguous ownership rather than creating duplicate
-data-bearing resources.
+data-bearing resources. It does not require a separate Tama source checkout.
 
 Skip the prompt in scripts by selecting the skill mode explicitly:
 
@@ -54,8 +54,10 @@ the private browser setup without exposing credentials, runs Terraform
 initialization, formatting, validation, and planning, and requires explicit
 approval before `terraform apply`. Human output includes the complete private
 onboarding URL with its setup token so it can be opened or copied into the agent
-prompt. Treat that URL as a secret. JSON output exposes a token-redacted version
-as `agentPrompt`; dry-run output sets it to `null`.
+prompt. If the user explicitly requests guided setup and in-app browser control
+is available, the agent opens the URL there; otherwise it follows the local
+README instructions. Treat that URL as a secret. JSON output exposes a
+token-redacted version as `agentPrompt`; dry-run output sets it to `null`.
 
 Generated non-sensitive files are tracked by `tama/.tama-kit.json`. If a
 tracked file has been edited since the previous bootstrap, Tama Kit stops and
@@ -329,8 +331,9 @@ For an ambiguous application bootstrap request, it first asks whether the app
 is an MCP App provider before choosing flags.
 
 `app-integration` implements and provisions the application-owned OAuth
-authorization server for Tama's exact `/mcp/app` protected resource. It consumes
-the generated local contract, first verifies whether existing OAuth is ready,
+authorization server for Tama's exact `/mcp/app` protected resource. For setup
+requests it first validates the Tama Kit bootstrap artifacts and generated local
+contract, then verifies whether existing OAuth is ready,
 partial, or absent, preserves provider/Tama key custody, implements the
 disabled/prepared/enabled lifecycle when authorized, and verifies the staged
 activation handoff.

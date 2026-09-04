@@ -10,10 +10,43 @@ resource owned by Tama: `/mcp/app`. Implement the provider-side vertical slice
 and use Tama Kit to provision the cross-service local configuration. Do not
 implement `/mcp/app` inside the application; Tama owns that endpoint.
 
+Tama Kit provisions the local Tama runtime from the application repository; it
+does not require a sibling Tama source checkout. Do not search for, clone, or
+switch to a separate Tama repository during application setup.
+
 Read [the OAuth contract](references/mcp-app-oauth.md) before changing provider
 authorization, tokens, introspection, lifecycle, or persistence.
 
-## Assess provider readiness first
+## Validate Tama Kit bootstrap state first
+
+For any request to set up, adapt, provision, or activate an MCP App, make the
+Tama Kit bootstrap state the first repository gate. Do this before assessing or
+changing provider OAuth behavior:
+
+1. Read the repository instructions and Git status, then inspect the presence
+   and ownership of `tama/.tama-kit.json`, `tama/AGENTS.md`, `tama/README.md`,
+   `tama/contracts/mcp-app-provider-v1.json`, `.tama.env*`, and the optional
+   application-owned `priv/contracts/tama-mcp-app-bootstrap-v1.json`. Also
+   inspect the intended Compose file and `.gitignore` entries for managed and
+   private files.
+2. Classify the bootstrap state as complete, incomplete, or absent. The
+   application-owned contract is not a substitute for Tama Kit's generated
+   local projection, and private environment files must be checked only for
+   safe presence, ignore status, and loader wiring; never print their values.
+3. If bootstrap is absent or incomplete, stop provider implementation work and
+   run `tama-kit bootstrap --mcp-app --dry-run --json` with explicit
+   non-interactive inputs. Review the plan, then run the same command without
+   `--dry-run` when the setup request authorizes the local write.
+4. After the write, verify the generated manifest, `tama/` instructions, local
+   contract, private environment-file safety, and provider loader boundary
+   before proceeding. Stop on managed-file drift, tracked secrets, unsafe
+   paths, or conflicting topology.
+
+For a read-only compatibility assessment, perform the same state inspection but
+do not write files. Always report missing bootstrap artifacts before reporting
+provider readiness.
+
+## Assess provider readiness after the bootstrap gate
 
 Inspect the application before provisioning and classify it as ready, partial,
 or absent:
@@ -57,16 +90,58 @@ configuration-only and unverified.
 3. Inspect `priv/contracts/tama-mcp-app-bootstrap-v1.json` when present. It is
    application-owned runtime documentation; preserve its declared names and
    paths and never let Tama Kit rewrite it.
-4. If the local contract is absent, run the current Tama Kit MCP App bootstrap
+4. If the local contract is absent, run the Tama Kit MCP App bootstrap command
    as a JSON dry run and then an approved write to generate it. Establish the
    provider name, container-reachable provider origin, exact Tama origin,
    allowed client origins, and pinned compatible Tama image first. Use the
-   installed `tama-kit --help` as the flag authority.
+   exact command contract below; do not inspect Tama Kit source code.
 
 Do not invent environment names independently of the resolved contract. If the
 application uses custom names, express them in an application-owned provider
 contract or explicit bootstrap flags, regenerate the local contract, and make
 the runtime consume the resulting bindings.
+
+### Tama Kit command contract
+
+Run from the provider application's repository. Use `tama-kit` when installed,
+otherwise use `npx @kritama/tama-kit`:
+
+```bash
+npx @kritama/tama-kit bootstrap . \
+  --mcp-app \
+  --provider-name <provider-name> \
+  --provider-origin http://host.docker.internal:<provider-port> \
+  --tama-origin http://127.0.0.1:<tama-port> \
+  --allowed-origin http://127.0.0.1:<client-port> \
+  --port <tama-port> \
+  --image ghcr.io/upmaru/tama:0.13.1 \
+  --skills local \
+  --dry-run --json
+```
+
+Replace placeholders with repository evidence. The provider origin is the
+public issuer and must be reachable by both host probes and the Tama container;
+do not use `localhost`, `127.0.0.1`, `::1`, `0.0.0.0`, or `::` for it. The Tama
+origin must be HTTP loopback and match `--port`. Supply every browser/MCP
+client origin with a repeated `--allowed-origin`; at least one is required.
+Use a pinned image in `>= 0.13.1 and < 0.14.0`.
+
+Review the JSON plan before writing. If accepted, repeat the exact command
+without `--dry-run` to stage prepared configuration. Add `--start` only when
+the user requests that Tama start. `--activate` requires both `--mcp-app` and
+`--start`; do not add it during preparation. `--provider-prefix`,
+`--provider-env-file`, `--mcp-app-contract`, repeated `--allowed-origin`, and
+`--migrate-provider-identity` are the only provider-specific overrides.
+
+After a successful write, verify that `.tama.env` and the provider fragment
+are ignored and untracked, that the generated local contract exists, and that
+the provider loader consumes the reported fragment. If the user explicitly
+asks for guided Tama setup, start the managed Compose runtime if necessary,
+wait for its health endpoint, load `.tama.env` without echoing it, and open the
+reported private `/setup/root?token=...` URL in the in-app browser. Walk the
+user through creating the root user, signing in, and creating provisioner
+credentials. If browser control is unavailable, use `tama/README.md` without
+reproducing the token. Never ask the user to paste credentials into chat.
 
 ## Close authorized readiness gaps
 
