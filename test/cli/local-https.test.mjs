@@ -236,10 +236,12 @@ test("local HTTPS fetch trusts only the generated CA and keeps hostname verifica
     (_request, response) => response.end("ok"),
   );
   try {
-    await new Promise((resolve) => server.listen(0, resolve));
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
     assert.ok(address && typeof address === "object");
-    const trustedFetch = createLocalHttpsFetch(readFileSync(fixture.paths.rootCertificate));
+    const trustedFetch = createLocalHttpsFetch(readFileSync(fixture.paths.rootCertificate), {
+      connectHost: "127.0.0.1",
+    });
     const response = await trustedFetch(new URL(`https://app.localhost:${address.port}/`));
     assert.equal(await response.text(), "ok");
     await assert.rejects(

@@ -1050,6 +1050,11 @@ export function planMcpApp(input) {
     plan,
     environmentInput: {
       variables,
+      ...(localHttps && options.migrateLocalHttps
+        ? {
+            removeVariables: ["TAMA_MCP_APP_RESOURCE", "TAMA_MCP_APP_INTROSPECTION_CLIENT_ID"],
+          }
+        : {}),
       validation: {
         mode,
         resource,

@@ -128,9 +128,10 @@ export function createHttpHostMappedFetch(connectHost) {
  * passed as TLS servername; no global process trust or verification bypass is
  * used.
  * @param {string | Buffer} ca
+ * @param {{connectHost?: string}} [options]
  * @returns {VerifyFetch}
  */
-export function createLocalHttpsFetch(ca) {
+export function createLocalHttpsFetch(ca, options = {}) {
   /** @param {URL} input @param {RequestInit} init @param {number} redirects */
   const requestUrl = (input, init, redirects) =>
     new Promise((resolve, reject) => {
@@ -144,9 +145,10 @@ export function createLocalHttpsFetch(ca) {
       }
       const headers = new Headers(init.headers);
       headers.set("accept-encoding", "identity");
+      headers.set("host", input.host);
       const request = httpsRequest(
         {
-          hostname: input.hostname,
+          hostname: options.connectHost ?? input.hostname,
           port: input.port === "" ? "443" : input.port,
           path: `${input.pathname}${input.search}`,
           method: init.method ?? "GET",

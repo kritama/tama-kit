@@ -1446,6 +1446,44 @@ test("fresh local HTTPS plans leave provider runtime behavior application-owned"
   );
 });
 
+test("local HTTPS migration removes legacy Tama-derived MCP App identities", () => {
+  const root = project();
+  const legacy = planWithMcp(root, preparedFor(root), {
+    providerOrigin: "http://host.docker.internal:4000",
+    tamaOrigin: "http://127.0.0.1:4001",
+    allowedOrigins: ["http://127.0.0.1:3000"],
+  });
+  applyOperations(legacy.operations);
+
+  const environmentPath = join(root, "tama", ".tama.env");
+  const legacyEnvironment = parseEnv(readFileSync(environmentPath, "utf8"));
+  assert.equal(legacyEnvironment.TAMA_MCP_APP_RESOURCE, "http://127.0.0.1:4001/mcp/app");
+  assert.equal(
+    legacyEnvironment.TAMA_MCP_APP_INTROSPECTION_CLIENT_ID,
+    "http://127.0.0.1:4001/mcp/app/introspection",
+  );
+
+  const migrated = createBootstrapPlan({
+    cwd: root,
+    targetPath: root,
+    image: PINNED_TAMA_IMAGE,
+    mcpApp: {
+      requested: true,
+      activate: false,
+      migrateLocalHttps: true,
+      allowedOrigins: ["https://app.localhost"],
+    },
+    mcpAppPrepared: preparedFor(root),
+  });
+  applyOperations(migrated.operations);
+
+  const environment = parseEnv(readFileSync(environmentPath, "utf8"));
+  assert.equal(Object.hasOwn(environment, "TAMA_MCP_APP_RESOURCE"), false);
+  assert.equal(Object.hasOwn(environment, "TAMA_MCP_APP_INTROSPECTION_CLIENT_ID"), false);
+  assert.equal(environment.PHX_HOST, "tama.app.localhost");
+  assert.equal(environment.TAMA_OAUTH_ISSUER, "https://tama.app.localhost");
+});
+
 test("a matching provider contract updates provenance without rotating provider keys", async () => {
   const root = project();
   const firstPrepared = await prepareFor(root, {

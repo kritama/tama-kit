@@ -209,6 +209,26 @@ function updateEnvironment(content, updates) {
   return `${lines.join("\n")}\n`;
 }
 
+/** @param {string} content @param {string[]} names */
+function withoutEnvironmentVariables(content, names) {
+  const removed = new Set(names);
+  return content
+    .split(/\r?\n/u)
+    .filter((line) => {
+      const match = line.match(/^([A-Z][A-Z0-9_]*)=/u);
+      return !match || !removed.has(match[1]);
+    })
+    .join("\n");
+}
+
+/** @param {string} content @param {McpAppEnvironmentInput} mcpApp */
+function updateMcpAppEnvironment(content, mcpApp) {
+  return updateEnvironment(
+    withoutEnvironmentVariables(content, mcpApp.removeVariables ?? []),
+    mcpApp.variables,
+  );
+}
+
 /** @param {string | undefined} value @param {number} existingPort @param {number} port */
 function updateAllowedOrigins(value, existingPort, port) {
   const previousOrigin = `http://localhost:${existingPort}`;
@@ -623,7 +643,7 @@ export function planEnvironment(
     const port = requestedPort ?? freshDefaultPort ?? DEFAULTS.port;
     let content = newEnvironment(port, materializeSecrets);
     if (mcpApp) {
-      content = updateEnvironment(content, mcpApp.variables);
+      content = updateMcpAppEnvironment(content, mcpApp);
       content = `${content.trimEnd()}\n\n${mcpAppHeader(mcpApp.validation.mode)}\n`;
     }
     const values = parseEnvironment(content, filename);
@@ -690,7 +710,7 @@ export function planEnvironment(
     });
   }
   if (mcpApp) {
-    content = updateEnvironment(content, mcpApp.variables);
+    content = updateMcpAppEnvironment(content, mcpApp);
   }
   const updatedValues = parseEnvironment(content, filename);
   validateEnvironment(updatedValues, filename, port, mcpApp?.validation);

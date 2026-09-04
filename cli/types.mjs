@@ -168,6 +168,7 @@
 /**
  * @typedef {object} McpAppEnvironmentInput
  * @property {Record<string, string>} variables
+ * @property {string[]} [removeVariables]
  * @property {McpAppEnvironmentValidation} validation
  */
 
