@@ -17,25 +17,31 @@ switch to a separate Tama repository during application setup.
 Read [the OAuth contract](references/mcp-app-oauth.md) before changing provider
 authorization, tokens, introspection, lifecycle, or persistence.
 
-## Check Docker before continuing
+## Check Docker before writes or runtime use
 
-Before running MCP App bootstrap, starting Compose, guided setup, or
-activation, verify the local Docker prerequisites:
+The JSON dry run is a pure planning step and may run before Docker is installed
+or initialized. Before running MCP App bootstrap without `--dry-run`, verify
+the Docker client and Compose plugin:
 
 ```bash
 docker --version
 docker compose version
+```
+
+Parse the Compose version and require 2.20.0 or newer. Before starting or
+inspecting Compose services, opening guided setup, or activating the
+integration, also verify that the daemon is initialized and reachable:
+
+```bash
 docker info --format '{{.ServerVersion}}'
 ```
 
-The first check confirms the Docker client, the second confirms the Compose
-plugin, and the third confirms that the daemon is initialized and reachable.
-Parse the Compose version and require 2.20.0 or newer. If any check fails or
-the Compose version is too old, pause and tell the user to install or
-start/initialize Docker first. Do not run bootstrap, Compose, the private setup
-URL, or activation until the complete preflight passes. After the user
-confirms Docker is ready, rerun it. Never install or start Docker on the user's
-behalf.
+If a required check fails or the Compose version is too old, pause and tell the
+user to install or start/initialize Docker before the corresponding write or
+runtime operation. A failed daemon check must not block a dry run or a
+bootstrap write that does not start services. After the user confirms
+Docker is ready, rerun the checks required for the next operation. Never
+install or start Docker on the user's behalf.
 
 ## Validate Tama Kit bootstrap state first
 

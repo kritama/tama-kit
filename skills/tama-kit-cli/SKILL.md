@@ -59,30 +59,38 @@ appropriate `tama-kit bootstrap` command from the application repository.
    Never ask the user to paste private JWKs, tokens, passwords, or the private
    Tama setup URL into chat.
 
-## Check Docker before continuing
+## Check Docker before writes or runtime use
 
-Before any local bootstrap, Compose start, guided setup, or MCP App activation,
-verify that Docker is installed, Compose is available, and the daemon is
-initialized and reachable. Run these checks without printing unrelated
+The JSON dry run is a pure planning step and may run before Docker is installed
+or initialized. Before any bootstrap write, verify that the Docker client and
+Compose plugin are installed. Run these checks without printing unrelated
 environment values:
 
 ```bash
 docker --version
 docker compose version
+```
+
+Parse the reported Compose version and require 2.20.0 or newer. Before starting
+or inspecting Compose services, opening guided setup, or activating an MCP App
+integration, also verify that the daemon is initialized and reachable:
+
+```bash
 docker info --format '{{.ServerVersion}}'
 ```
 
 `docker --version` alone only proves that the client exists. Treat a missing
-Docker executable, missing Compose plugin, failed `docker info`, or a Compose
-version older than 2.20.0 as a hard preflight failure. Parse the reported
-Compose version and require 2.20.0 or newer. Pause and tell the user which
-prerequisite is missing or too old so they can install or start/initialize
-Docker first. Do not install Docker,
-start a daemon, run Compose, run bootstrap, open the setup URL, or activate
-the integration on the user's behalf. After the user confirms Docker is ready,
-rerun all three checks. This preflight is not required for the standalone
-`dev setup --prepare-only` or `oauth generate-key` workflows when they do not
-use Docker.
+Docker executable, missing Compose plugin, or a Compose version older than
+2.20.0 as a hard preflight failure for a bootstrap write. Treat failed
+`docker info` as a hard preflight failure only for operations that start or
+inspect services. It must not block a dry run or a bootstrap write that does
+not start services. Pause and tell the user which prerequisite is missing or
+too old so they can install or start/initialize Docker first. Do not install
+Docker, start a daemon, run Compose, open the setup URL, or activate the
+integration on the user's behalf. After the user confirms Docker is ready,
+rerun the checks required for the next operation. These checks are not
+required for the standalone `dev setup --prepare-only` or `oauth generate-key`
+workflows when they do not use Docker.
 
 ## Plan bootstrap, then write
 
