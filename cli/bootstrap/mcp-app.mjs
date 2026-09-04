@@ -528,8 +528,8 @@ export function planMcpApp(input) {
   if (unpinnedTag !== null) {
     throw usageError(
       `the MCP App integration requires a pinned Tama image, but ${tamaImage} uses the ` +
-        `unresolvable tag ${unpinnedTag}; pass --image with a version inside the supported ` +
-        `Tama range ${tamaContract.supported_tama_versions}`,
+        `unresolvable tag ${unpinnedTag}; pass --image with an official <version>-server ` +
+        `tag inside the supported Tama range ${tamaContract.supported_tama_versions}`,
     );
   }
 

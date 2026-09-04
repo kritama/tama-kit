@@ -248,7 +248,7 @@ function preparedFor(root, extra = {}) {
 
 // The MCP App integration requires a pinned Tama image, so every planned
 // integration in the suite uses one inside the bundled supported range.
-const PINNED_TAMA_IMAGE = "ghcr.io/upmaru/tama:0.13.1";
+const PINNED_TAMA_IMAGE = "ghcr.io/upmaru/tama:0.13.1-server";
 
 /**
  * @param {string} root
@@ -792,22 +792,36 @@ test("contractLocalOrigin reads the provider-keyed local development origin", ()
 test("unsupportedTamaImage checks semver tags against the contract range", () => {
   const range = loadTamaContract().supported_tama_versions;
   assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:latest", range), null);
-  assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1", range), null);
-  assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.5", range), null);
-  assert.match(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.0", range) ?? "", /0\.13\.0/u);
-  assert.match(unsupportedTamaImage("ghcr.io/upmaru/tama:0.12.0", range) ?? "", /0\.12\.0/u);
-  assert.match(unsupportedTamaImage("ghcr.io/upmaru/tama:0.14.0", range) ?? "", /0\.14\.0/u);
+  assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1-server", range), null);
+  assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.5-server", range), null);
+  assert.equal(unsupportedTamaImage("example.com/tama:0.13.1", range), null);
   assert.match(
-    unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1-rc.1", range) ?? "",
+    unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1", range) ?? "",
+    /missing the required -server suffix/u,
+  );
+  assert.match(
+    unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.0-server", range) ?? "",
+    /0\.13\.0-server/u,
+  );
+  assert.match(
+    unsupportedTamaImage("ghcr.io/upmaru/tama:0.12.0-server", range) ?? "",
+    /0\.12\.0-server/u,
+  );
+  assert.match(
+    unsupportedTamaImage("ghcr.io/upmaru/tama:0.14.0-server", range) ?? "",
+    /0\.14\.0-server/u,
+  );
+  assert.match(
+    unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1-rc.1-server", range) ?? "",
     /prerelease or build tag/u,
   );
   assert.match(
-    unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1+build.5", range) ?? "",
+    unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1+build.5-server", range) ?? "",
     /prerelease or build tag/u,
   );
-  assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1", null), null);
+  assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1-server", null), null);
   assert.throws(
-    () => unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1", "^0.14.0"),
+    () => unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1-server", "^0.14.0"),
     /comparison range/u,
   );
 });
@@ -1378,7 +1392,7 @@ test("bootstrap rejects Tama image tags outside the supported contract range", (
       createBootstrapPlan({
         cwd: root,
         targetPath: root,
-        image: "ghcr.io/upmaru/tama:0.12.0",
+        image: "ghcr.io/upmaru/tama:0.12.0-server",
         mcpApp: { requested: true, activate: false },
         mcpAppPrepared: preparedFor(root, { contractPath, contractDocument: contract }),
       }),
@@ -3322,7 +3336,7 @@ test("ordinary reruns enforce the persisted provider Tama version range", () => 
   const first = createBootstrapPlan({
     cwd: root,
     targetPath: root,
-    image: "ghcr.io/upmaru/tama:0.13.2",
+    image: "ghcr.io/upmaru/tama:0.13.2-server",
     port: 4001,
     mcpApp: {
       requested: true,
@@ -3529,7 +3543,7 @@ test("the bootstrap command plans the provider integration from explicit flags",
     "--port",
     "4001",
     "--image",
-    "ghcr.io/upmaru/tama:0.13.1",
+    "ghcr.io/upmaru/tama:0.13.1-server",
     "--provider-name",
     "acme",
     "--provider-origin",
@@ -3586,7 +3600,7 @@ test("the human bootstrap result warns when provider environment loading is unve
     "--port",
     "4001",
     "--image",
-    "ghcr.io/upmaru/tama:0.13.1",
+    "ghcr.io/upmaru/tama:0.13.1-server",
     "--provider-name",
     "acme",
     "--provider-origin",
@@ -3617,7 +3631,7 @@ test("the bootstrap command accepts --provider-env-file for the provider fragmen
     "--port",
     "4001",
     "--image",
-    "ghcr.io/upmaru/tama:0.13.1",
+    "ghcr.io/upmaru/tama:0.13.1-server",
     "--provider-name",
     "acme",
     "--provider-env-file",
@@ -3662,7 +3676,7 @@ test("the bootstrap command accepts --provider-env-file for the provider fragmen
     "--port",
     "4001",
     "--image",
-    "ghcr.io/upmaru/tama:0.13.1",
+    "ghcr.io/upmaru/tama:0.13.1-server",
     "--provider-name",
     "acme",
     "--provider-env-file",
@@ -3690,7 +3704,7 @@ test("MCP App JSON dry-runs are byte-for-byte deterministic and write no secrets
     "--port",
     "4001",
     "--image",
-    "ghcr.io/upmaru/tama:0.13.1",
+    "ghcr.io/upmaru/tama:0.13.1-server",
     "--provider-name",
     "acme",
     "--provider-origin",
@@ -3725,7 +3739,7 @@ test("the bootstrap command discovers the contract identity for --mcp-app", asyn
     "--port",
     "4001",
     "--image",
-    "ghcr.io/upmaru/tama:0.13.1",
+    "ghcr.io/upmaru/tama:0.13.1-server",
     "--allowed-origin",
     "http://127.0.0.1:3000",
   ]);

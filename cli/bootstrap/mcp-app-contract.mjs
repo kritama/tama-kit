@@ -581,12 +581,30 @@ export function loadTamaContract() {
 }
 
 /**
+ * Rejects the official version form that GHCR does not publish. Floating
+ * `latest` remains unsuffixed, while concrete server releases use
+ * `<version>-server`.
+ *
+ * @param {string} image
+ * @returns {string | null}
+ */
+export function invalidOfficialTamaImageTag(image) {
+  const separator = image.lastIndexOf(":");
+  const repository = separator > image.lastIndexOf("/") ? image.slice(0, separator) : image;
+  const tag = separator > image.lastIndexOf("/") ? image.slice(separator + 1) : "latest";
+  return repository === "ghcr.io/upmaru/tama" && /^v?\d+\.\d+\.\d+$/u.test(tag)
+    ? `versioned ghcr.io/upmaru/tama image tag ${tag} is missing the required -server suffix`
+    : null;
+}
+
+/**
  * Checks a Tama image tag against the contract's `supported_tama_versions`
- * range. The check is best-effort by design: non-semver tags such as
- * `latest` cannot be resolved offline, so they pass with no warning. Prerelease
- * and build tags do resolve, but SemVer orders them below the stable version
- * they decorate and the range grammar cannot express prerelease bounds, so
- * they are reported as outside the range.
+ * range. Official versioned server images use `<version>-server`; the deployment
+ * suffix is removed before comparison. The check is best-effort by design:
+ * non-semver tags such as `latest` cannot be resolved offline, so they pass
+ * with no warning. Other prerelease and build tags do resolve, but SemVer
+ * orders them below the stable version they decorate and the range grammar
+ * cannot express prerelease bounds, so they are reported as outside the range.
  *
  * @param {string} image
  * @param {unknown} supportedRange
@@ -594,19 +612,26 @@ export function loadTamaContract() {
  *   range, otherwise null
  */
 export function unsupportedTamaImage(image, supportedRange) {
+  const invalidOfficialTag = invalidOfficialTamaImageTag(image);
+  if (invalidOfficialTag) {
+    return invalidOfficialTag;
+  }
   if (typeof supportedRange !== "string" || supportedRange.length === 0) {
     return null;
   }
   validateSupportedVersionRange(supportedRange, "supported_tama_versions");
-  const tag = image.slice(image.lastIndexOf(":") + 1);
-  const version = parseSemver(tag);
+  const separator = image.lastIndexOf(":");
+  const tag = separator > image.lastIndexOf("/") ? image.slice(separator + 1) : "latest";
+  const stableServerTag = tag.match(/^(v?\d+\.\d+\.\d+)-server$/u);
+  const versionTag = stableServerTag?.[1] ?? tag;
+  const version = parseSemver(versionTag);
   if (!version) {
     return null;
   }
   // A prerelease or build suffix orders the tag below the stable version it
   // decorates (0.13.1-rc.1 < 0.13.1), and the range grammar cannot express
   // prerelease bounds, so such a tag cannot be held to the range.
-  if (!/^v?\d+\.\d+\.\d+$/u.test(tag)) {
+  if (!stableServerTag && !/^v?\d+\.\d+\.\d+$/u.test(tag)) {
     return `Tama image tag ${tag} is a prerelease or build tag; the supported Tama range ${supportedRange} admits stable release tags only`;
   }
   const constraints = supportedRange.matchAll(VERSION_CONSTRAINT_PATTERN);

@@ -29,6 +29,7 @@ test("MCP App guidance makes bootstrap validation the first provider-work gate",
   assert.match(appIntegration, /--skills <resolved-skill-mode>/u);
   assert.match(appIntegration, /every\s+non-loopback allowed origin must use HTTPS/u);
   assert.match(appIntegration, /at most 32 unique\s+origins are allowed/u);
+  assert.match(appIntegration, /official\s+server image tag `<version>-server`/u);
   assert.match(appIntegration, /`--activate` requires both/u);
   assert.match(appIntegration, /reported private `\/setup\/root\?token=\.\.\.` URL/u);
   assert.match(appIntegration, /in-app browser/u);
@@ -63,6 +64,7 @@ test("Tama Kit CLI guidance repeats the bootstrap gate", () => {
   assert.doesNotMatch(tamaKitCli, /--skills manual --dry-run --json/u);
   assert.match(tamaKitCli, /every non-loopback allowed\s+origin must use HTTPS/u);
   assert.match(tamaKitCli, /at most 32 unique allowed origins/u);
+  assert.match(tamaKitCli, /official server image\s+tag `<version>-server`/u);
   assert.match(tamaKitCli, /Supported MCP App flags are `--provider-name/u);
   assert.match(tamaKitCli, /`--provider-origin/u);
   assert.match(tamaKitCli, /`--tama-origin/u);

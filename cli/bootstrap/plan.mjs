@@ -13,6 +13,7 @@ import { persistedTamaOrigin, planMcpApp, resolveMcpAppState } from "./mcp-app.m
 import {
   contractTamaPort,
   discoverProviderContract,
+  invalidOfficialTamaImageTag,
   loadTamaContract,
   MCP_APP_COMPATIBILITY_IDENTIFIER,
   unpinnedTamaImageTag,
@@ -130,6 +131,11 @@ function managedTemplate(planManagedFile, filename, templateName, replacements) 
 export function createBootstrapPlan(options) {
   const inspection = inspectProject(options);
   const skillMode = options.skillMode ?? "manual";
+  const tamaImage = options.image ?? DEFAULTS.tamaImage;
+  const invalidOfficialTag = invalidOfficialTamaImageTag(tamaImage);
+  if (invalidOfficialTag) {
+    throw usageError(invalidOfficialTag);
+  }
   const mcpAppPrepared = options.mcpApp?.requested ? (options.mcpAppPrepared ?? null) : null;
   if (options.mcpApp?.requested && mcpAppPrepared === null) {
     throw usageError(
@@ -213,13 +219,13 @@ export function createBootstrapPlan(options) {
       persistedMcpApp.contractSource === "contract" && persistedMcpApp.contractPath !== null
         ? discoverProviderContract(inspection.root, persistedMcpApp.contractPath).document
         : null;
-    const plannedImage = options.image ?? DEFAULTS.tamaImage;
+    const plannedImage = tamaImage;
     const unpinnedTag = unpinnedTamaImageTag(plannedImage);
     if (unpinnedTag !== null) {
       throw usageError(
         `the persisted MCP App integration requires a pinned Tama image, but the planned image ` +
-          `${plannedImage} uses the unresolvable tag ${unpinnedTag}; pass --image with a version ` +
-          `inside the supported Tama range ${persistedTamaContract.supported_tama_versions}`,
+          `${plannedImage} uses the unresolvable tag ${unpinnedTag}; pass --image with an official ` +
+          `<version>-server tag inside the supported Tama range ${persistedTamaContract.supported_tama_versions}`,
       );
     }
     const unsupported = unsupportedTamaImage(
@@ -268,7 +274,7 @@ export function createBootstrapPlan(options) {
       persisted: mcpAppPrepared.persisted,
       contractDocument: mcpAppPrepared.contractDocument,
       port,
-      tamaImage: options.image ?? DEFAULTS.tamaImage,
+      tamaImage,
       manageFile: managedFiles.plan,
       removeManagedFile: managedFiles.remove,
       materializeKeys: options.materializeSecrets ?? true,
@@ -319,7 +325,7 @@ export function createBootstrapPlan(options) {
   const replacements = {
     PORT: environment.port,
     CONTAINER_PORT: DEFAULTS.containerPort,
-    TAMA_IMAGE: options.image ?? DEFAULTS.tamaImage,
+    TAMA_IMAGE: tamaImage,
     POSTGRES_IMAGE: DEFAULTS.postgresImage,
     TAMA_EXTRA_HOSTS: providerUsesHostGateway ? TAMA_EXTRA_HOSTS_BLOCK : "",
   };

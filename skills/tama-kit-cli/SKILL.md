@@ -298,7 +298,7 @@ npx @kritama/tama-kit bootstrap /path/to/provider \
   --tama-origin http://127.0.0.1:4001 \
   --allowed-origin http://127.0.0.1:3000 \
   --port 4001 \
-  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection> \
+  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection>-server \
   --skills <resolved-skill-mode> \
   --dry-run --json
 ```
@@ -312,9 +312,11 @@ origin must use HTTPS. Supply at most 32 unique allowed origins; if the client
 set is larger, stop and narrow it before running bootstrap. When an
 application-owned provider contract declares `supported_tama_versions`, choose
 a concrete pinned version in the intersection of that range and the bundled
-supported range `>= 0.13.1 and < 0.14.0`; if it does not, `0.13.1` is a valid
-default. Never use the example version when it is outside the provider range,
-and stop if no known pinned version lies in both ranges. The provider origin
+supported range `>= 0.13.1 and < 0.14.0`, then use the official server image
+tag `<version>-server`. The floating `latest` tag is unsuffixed but is rejected
+for MCP App preparation. If no provider range exists, `0.13.1-server` is a
+valid default. Never use the example version when it is outside the provider
+range, and stop if no known pinned version lies in both ranges. The provider origin
 must not be `localhost`, `127.0.0.0/8`, `::1`, `0.0.0.0`, or `::`; use
 `http://host.docker.internal:<provider-port>` for a host-native provider.
 
