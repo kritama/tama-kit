@@ -91,14 +91,15 @@ npx @kritama/tama-kit bootstrap --mcp-app \
   --tama-origin http://127.0.0.1:4001 \
   --allowed-origin http://127.0.0.1:3000 \
   --port 4001 \
-  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection>
+  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection>-server
 ```
 
 Choose a concrete pinned image version in the intersection of Tama Kit's
 bundled range `>= 0.13.1 and < 0.14.0` and the application-owned contract's
-`supported_tama_versions` when that contract is present. If no provider range
-is declared, `0.13.1` is a valid default. Do not use `0.13.1` when the provider
-contract excludes it.
+`supported_tama_versions` when that contract is present. Versioned official
+images use the `<version>-server` tag form; `latest` remains unsuffixed. If no
+provider range is declared, `0.13.1-server` is a valid default. Do not use
+`0.13.1-server` when the provider contract excludes version `0.13.1`.
 
 The provider origin must be one origin reachable from both the host-native
 provider and the Tama container. `host.docker.internal` adds the managed
@@ -126,7 +127,7 @@ npx @kritama/tama-kit bootstrap --mcp-app \
   --tama-origin http://127.0.0.1:4001 \
   --allowed-origin http://127.0.0.1:3000 \
   --port 4001 \
-  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection> --start --activate
+  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection>-server --start --activate
 ```
 
 The first run verifies prepared state and enables/restarts Tama, then reports
@@ -150,7 +151,7 @@ npx @kritama/tama-kit bootstrap --mcp-app \
   --tama-origin http://127.0.0.1:4001 \
   --allowed-origin http://127.0.0.1:3000 \
   --port 4001 \
-  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection>
+  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection>-server
 ```
 
 The migration moves preserved provider-owned entries to the new fragment,

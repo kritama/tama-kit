@@ -1,6 +1,6 @@
 {
   "name": "tama-kit",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Bootstrap apps, provision MCP App OAuth, and build, manage, and audit Tama Terraform graphs.",
   "author": {
     "name": "Upmaru",
