@@ -19,7 +19,7 @@ const packagedProject = join(temporaryRoot, "packaged-project");
 const npxProject = join(temporaryRoot, "npx-project");
 const npmCache = join(temporaryRoot, "npm-cache");
 const composeFile = join(project, "compose.yaml");
-const environmentFile = join(project, ".tama.env");
+const environmentFile = join(project, "tama", ".tama.env");
 
 const SENSITIVE_ENVIRONMENT_VARIABLES = [
   "DATABASE_URL",
@@ -167,6 +167,11 @@ try {
   const generatedEnvironment = environmentValues(readFileSync(environmentFile, "utf8"));
   assert.equal(bootstrapOutput.includes(generatedEnvironment.TAMA_SETUP_TOKEN), false);
   assert.equal(existsSync(join(project, "tama", ".tama-kit.json")), true);
+  assert.equal(existsSync(join(project, "tama", ".tama.postgres.env")), true);
+  assert.equal(existsSync(join(project, "tama", ".tama.env.example")), true);
+  assert.equal(existsSync(join(project, ".tama.env")), false);
+  assert.equal(existsSync(join(project, ".tama.postgres.env")), false);
+  assert.equal(existsSync(join(project, ".tama.env.example")), false);
   assert.equal(existsSync(join(project, "tama", "AGENTS.md")), true);
   assert.equal(existsSync(join(project, ".agents", "skills", "graph-builder", "SKILL.md")), true);
   assert.equal(existsSync(join(project, ".agents", "skills", "graph-audit", "SKILL.md")), true);

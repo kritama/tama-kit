@@ -25,10 +25,11 @@ After a global npm installation, the equivalent command is:
 tama-kit bootstrap
 ```
 
-Bootstrap detects the project and its default Docker Compose file, creates a
-private `.tama.env`, adds managed Tama and PostgreSQL services, and generates a
-`tama/` Terraform root with one version-pinned `module "global"` and focused
-`AGENTS.md` guidance. On the first interactive run, it asks whether to install
+Bootstrap detects the project and its default Docker Compose file, creates
+private runtime files under `tama/`, adds managed Tama and PostgreSQL services,
+and generates a `tama/` Terraform root with one version-pinned
+`module "global"` and focused `AGENTS.md` guidance. On the first interactive
+run, it asks whether to install
 the bundled `tama-kit-cli`, `app-integration`, `graph-builder`, and
 `graph-audit` skills into the repository's `.agents/skills/` directory or leave
 skill installation to the user. It preserves an existing global-foundation

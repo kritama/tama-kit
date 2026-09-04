@@ -27,13 +27,13 @@ first-run setup, load the private environment and open the setup URL:
 
 ```bash
 set -a
-. ./.tama.env
+. ./tama/.tama.env
 set +a
 echo "http://localhost:${TAMA_PORT}/setup/root?token=${TAMA_SETUP_TOKEN}"
 ```
 
 Create the root user, sign in, then create provisioner credentials from the
-setup flow. Store those values in the project-root `.tama.env`:
+setup flow. Store those values in `tama/.tama.env`:
 
 If you explicitly ask your coding agent to guide you through setup, it may open
 this private URL in the in-app browser. Do not paste the URL or its token into
@@ -49,7 +49,7 @@ Load the environment before using Terraform:
 ```bash
 cd tama
 set -a
-. ../.tama.env
+. ./.tama.env
 set +a
 terraform init
 terraform plan
