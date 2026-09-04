@@ -266,6 +266,10 @@ test("agent setup prompt covers runtime, private setup, Terraform validation, an
   );
   assert.equal(prompt.split(setupUrl).length - 1, 1);
   assert.match(prompt, /do not repeat it or its token elsewhere in chat or logs/u);
+  assert.match(
+    prompt,
+    /If browser control is unavailable, direct me to tama\/README\.md without reproducing the token/u,
+  );
   assert.match(prompt, /Do not ask me to paste credentials into chat/u);
   assert.match(prompt, /terraform -chdir=tama init/u);
   assert.match(prompt, /terraform -chdir=tama validate/u);
