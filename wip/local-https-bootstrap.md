@@ -111,6 +111,9 @@ never written into metadata, token claims, or public contracts.
 11. Do not weaken Tama's production URL policy as part of this feature.
 12. Add an MCP App runtime gate. The existing generic runtime gate does not
     exercise `prepared` configuration and therefore did not catch this issue.
+13. Update the bundled agent skills, generated repository instructions, and
+    post-bootstrap handoff together with the CLI. No supported guidance may
+    continue recommending the incompatible local HTTP topology.
 
 ## Domain and DNS model
 
@@ -330,6 +333,41 @@ prompting or invoking `sudo`.
 after host resolution and trust checks pass. `--activate` retains its existing
 authority boundary and cannot bypass HTTPS or readiness failures.
 
+## Skills and post-bootstrap handoff
+
+Update the bundled `tama-kit-cli` and `app-integration` skills, their CLI and
+OAuth references, and the generated `tama/AGENTS.md` and `tama/README.md` so
+agents and operators use the same HTTPS topology as the command. Review
+`graph-builder` and `graph-audit`; change them only where their instructions or
+examples refer to runtime origins. With `--skills local`, an ordinary managed
+rerun must refresh installed copies under `.agents/skills/` without requiring
+manual deletion and while retaining the existing drift and symlink checks.
+
+The human success output and copy/paste agent prompt must be generated from the
+resolved plan rather than containing fixed localhost ports. They must state:
+
+- the public provider, Tama, and MCP App URLs;
+- that Caddy is the public entry point and direct container ports are upstream
+  details, not OAuth identities;
+- whether mkcert is installed, the local CA is trusted, both hostnames resolve,
+  Caddy is healthy, and Tama passed its lifecycle-specific readiness gate;
+- the exact Compose start, status, and safe HTTPS verification commands;
+- any remaining provider-owned external-URL, trusted-proxy, loader, restart,
+  preparation, or activation step; and
+- where to read `tama/README.md`, `tama/AGENTS.md`, and the installed skills.
+
+Do not tell the user to open the old `http://localhost:<port>` Tama URL after
+an MCP App bootstrap. Do not report configuration generation as a successful
+runtime start. Human output may retain the existing private guided-setup
+handoff only when requested; JSON, non-interactive output, logs, and the agent
+prompt must not disclose setup tokens, credentials, certificate private keys,
+or private JWK material.
+
+Test human output, JSON output, and the agent prompt separately for dry-run,
+write-only, started/prepared, activation-required, enabled, and prerequisite-
+failure states. Tests must reject stale HTTP URLs and ensure every printed
+command uses the selected Compose path and resolved HTTPS names.
+
 ## Verification
 
 Static verification must cover:
@@ -414,8 +452,10 @@ workflow. A generic standard-bootstrap runtime test is not sufficient.
 1. Render all Tama and provider variables from HTTPS public origins.
 2. Add an explicit 0.4.3 HTTP-to-HTTPS topology migration that preserves
    secrets.
-3. Update local contract, manifest, generated instructions, skills, README,
-   CLI reference, help, and JSON output.
+3. Update the local contract, manifest, bundled `tama-kit-cli` and
+   `app-integration` skills, any affected graph skills, generated README and
+   AGENTS guidance, post-bootstrap agent prompt, CLI reference, help, and human
+   and JSON output.
 4. Keep provider preparation and activation as separate checkpoints.
 
 ### Phase 5: Verification and delivery
@@ -441,6 +481,11 @@ workflow. A generic standard-bootstrap runtime test is not sufficient.
 - An existing 0.4.3 generated project can explicitly migrate without rotating
   valid provider or Tama signing material.
 - Dry-run, JSON, logs, and diagnostics disclose no secrets.
+- Human output and the copy/paste agent prompt use the resolved HTTPS topology,
+  accurately distinguish written, started, prepared, and enabled states, and
+  provide actionable next commands without stale direct-port guidance.
+- A `--skills local` rerun refreshes affected managed skills and generated
+  repository instructions for the new topology.
 - Standard non-MCP bootstrap behavior remains unchanged.
 - Full tests, package validation, the generic runtime gate, and the new MCP App
   production-runtime gate pass on the exact review head.
