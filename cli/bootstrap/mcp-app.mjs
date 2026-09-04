@@ -10,6 +10,11 @@ import {
   readEnvironmentValues,
   readRawEnvironmentLine,
 } from "./environment.mjs";
+import {
+  normalizeLocalDomain,
+  resolveLocalHttpsTopology,
+  usesLocalHttpsTopology,
+} from "./local-https.mjs";
 import { readMcpAppProvider } from "./manifest.mjs";
 import {
   contractLocalOrigin,
@@ -303,6 +308,15 @@ export async function prepareMcpApp({
   io,
 }) {
   const persisted = readMcpAppProvider(tamaDirectory);
+  if (
+    options.localDomain !== undefined &&
+    !normalizeLocalDomain(options.localDomain).endsWith(".localhost") &&
+    !options.acknowledgeLocalDomainRisk
+  ) {
+    throw usageError(
+      "a non-.localhost --local-domain can collide with public DNS; pass --acknowledge-local-domain-risk after verifying local-only resolution",
+    );
+  }
   const contract = discoverProviderContract(
     root,
     options.contractPath ?? persisted?.contractPath ?? undefined,
@@ -317,6 +331,13 @@ export async function prepareMcpApp({
     environmentFile: options.providerEnvironmentFile,
     identitySource: options.identitySource,
   });
+  const localHttps = usesLocalHttpsTopology(options, persisted, contract.document);
+  const defaultTopology = localHttps
+    ? resolveLocalHttpsTopology({
+        localDomain: options.localDomain,
+        providerPort: options.providerPort,
+      })
+    : null;
 
   if (options.migrateProviderIdentity) {
     if (!persisted) {
@@ -387,6 +408,11 @@ export async function prepareMcpApp({
     throw usageError("--allowed-origin may be supplied at most 32 unique times");
   }
   if (allowedOrigins.length === 0) {
+    if (defaultTopology) {
+      allowedOrigins.push(defaultTopology.providerOrigin);
+    }
+  }
+  if (allowedOrigins.length === 0) {
     if (nonInteractive || typeof io.prompt !== "function") {
       throw usageError(
         "at least one explicit --allowed-origin is required for MCP App preparation",
@@ -415,6 +441,7 @@ export async function prepareMcpApp({
  * @property {string | null} contractPath
  * @property {Record<string, unknown> | null} contractDocument
  * @property {string} [selectedCompose]
+ * @property {import("../types.mjs").LocalHttpsTopology | null} [topology]
  */
 
 /**
@@ -430,6 +457,7 @@ export function resolveMcpAppState({
   contractPath,
   contractDocument,
   selectedCompose,
+  topology = null,
 }) {
   const bindings = resolveBindings(contractDocument, identity.environmentPrefix);
   const environmentLoading = verifyEnvironmentLoadingEvidence(
@@ -454,7 +482,9 @@ export function resolveMcpAppState({
       providerContractPath: contractPath,
       providerContractDocument: contractDocument,
       environmentLoading,
+      topology,
     }),
+    localHttps: topology,
   };
 }
 
@@ -506,6 +536,7 @@ export function planMcpApp(input) {
   const materializeKeys = input.materializeKeys ?? true;
   const roles = localContract.bindings;
   const providerEndpoints = localContract.public_endpoints;
+  let localHttps = input.options.localHttps ?? null;
 
   if (migratingIdentity && !persisted) {
     throw usageError("provider identity migration requires persisted MCP App state");
@@ -571,13 +602,29 @@ export function planMcpApp(input) {
     }
   }
 
-  const providerOrigin = normalizeMcpAppOrigin(
-    options.providerOrigin ??
-      contractLocalOrigin(input.contractDocument, identity.name) ??
-      contractLocalOrigin(tamaContract, identity.name) ??
-      null,
-    "--provider-origin",
-  );
+  const contractProviderOrigin = contractLocalOrigin(input.contractDocument, identity.name);
+  const requestedProviderOrigin = options.providerOrigin ?? contractProviderOrigin ?? null;
+  const providerOrigin = localHttps
+    ? localHttps.providerOrigin
+    : normalizeMcpAppOrigin(
+        requestedProviderOrigin ??
+          contractProviderOrigin ??
+          contractLocalOrigin(tamaContract, identity.name) ??
+          null,
+        "--provider-origin",
+      );
+  if (localHttps && requestedProviderOrigin !== null) {
+    const asserted = normalizeMcpAppOrigin(requestedProviderOrigin, "--provider-origin");
+    const expectedAssertion =
+      options.migrateLocalHttps && persisted?.providerOrigin
+        ? persisted.providerOrigin
+        : providerOrigin;
+    if (asserted !== expectedAssertion) {
+      throw usageError(
+        `--provider-origin is a migration assertion and must equal ${expectedAssertion}`,
+      );
+    }
+  }
   // Every verification probe is issued from the host, so a loopback or
   // unspecified provider origin would pass them while the Tama container can
   // never reach the host-native provider: from the inside, both address
@@ -622,13 +669,13 @@ export function planMcpApp(input) {
         `Pass --port to select a different Tama port`,
     );
   }
-  const existingTamaOrigin = persistedTamaOrigin(root);
+  const existingTamaOrigin = persisted?.tamaOrigin ?? persistedTamaOrigin(root);
   const defaultTamaOrigin =
     namedLocalOrigin(input.contractDocument, "tama_origin") ??
     namedLocalOrigin(tamaContract, "tama_origin") ??
     `http://127.0.0.1:${port}`;
   let persistedOriginForPort = existingTamaOrigin;
-  if (persistedOriginForPort) {
+  if (!localHttps && persistedOriginForPort) {
     const persistedUrl = new URL(persistedOriginForPort);
     const persistedPort =
       persistedUrl.port === ""
@@ -641,9 +688,26 @@ export function planMcpApp(input) {
       persistedOriginForPort = `${persistedUrl.protocol}//${persistedUrl.host}`;
     }
   }
-  const requestedTamaOrigin = options.tamaOrigin ?? persistedOriginForPort;
+  const contractTamaOrigin = namedLocalOrigin(input.contractDocument, "tama_origin");
+  const requestedTamaOrigin = localHttps
+    ? (options.tamaOrigin ??
+      (persisted?.localHttps ? persistedOriginForPort : null) ??
+      contractTamaOrigin)
+    : (options.tamaOrigin ?? persistedOriginForPort);
   let tamaOrigin;
-  if (requestedTamaOrigin) {
+  if (localHttps) {
+    tamaOrigin = localHttps.tamaOrigin;
+    const expectedAssertion =
+      options.migrateLocalHttps && existingTamaOrigin ? existingTamaOrigin : tamaOrigin;
+    if (
+      requestedTamaOrigin &&
+      normalizeMcpAppOrigin(requestedTamaOrigin, "--tama-origin") !== expectedAssertion
+    ) {
+      throw usageError(
+        `--tama-origin is a migration assertion and must equal ${expectedAssertion}`,
+      );
+    }
+  } else if (requestedTamaOrigin) {
     tamaOrigin = originForPort(requestedTamaOrigin, port, "--tama-origin");
   } else {
     const defaultUrl = new URL(normalizeMcpAppOrigin(defaultTamaOrigin, "Tama contract origin"));
@@ -659,7 +723,7 @@ export function planMcpApp(input) {
 
   /** @type {string[]} */
   const allowedOrigins = [];
-  for (const value of options.allowedOrigins ?? []) {
+  for (const value of options.allowedOrigins ?? (localHttps ? [localHttps.providerOrigin] : [])) {
     const origin = allowedOrigin(value);
     if (!allowedOrigins.includes(origin)) {
       allowedOrigins.push(origin);
@@ -671,14 +735,21 @@ export function planMcpApp(input) {
   if (allowedOrigins.length > 32) {
     throw usageError("--allowed-origin may be supplied at most 32 unique times");
   }
+  if (localHttps) {
+    localHttps = Object.freeze({ ...localHttps, allowedOrigins: [...allowedOrigins] });
+  }
 
-  if (persisted?.providerOrigin && persisted.providerOrigin !== providerOrigin) {
+  if (
+    persisted?.providerOrigin &&
+    persisted.providerOrigin !== providerOrigin &&
+    !options.migrateLocalHttps
+  ) {
     throw ownershipError(
       `the persisted MCP App provider origin ${persisted.providerOrigin} does not match ${providerOrigin}; explicit topology migration is required`,
       { providerOrigin: persisted.providerOrigin, requestedProviderOrigin: providerOrigin },
     );
   }
-  if (persisted?.tamaOrigin && persisted.tamaOrigin !== tamaOrigin) {
+  if (persisted?.tamaOrigin && persisted.tamaOrigin !== tamaOrigin && !options.migrateLocalHttps) {
     const previous = new URL(persisted.tamaOrigin);
     const next = new URL(tamaOrigin);
     if (previous.protocol !== next.protocol || previous.hostname !== next.hostname) {
@@ -691,6 +762,22 @@ export function planMcpApp(input) {
   state.providerOrigin = providerOrigin;
   state.tamaOrigin = tamaOrigin;
   state.allowedOrigins = [...allowedOrigins];
+  if (localHttps) {
+    state.localHttps = localHttps;
+    state.localContract = renderMcpAppLocalContract({
+      root,
+      identity,
+      bindings: roles,
+      providerContractPath: state.contractPath,
+      providerContractDocument: input.contractDocument,
+      environmentLoading: {
+        status: state.environmentLoading,
+        mechanism: state.environmentLoadingMechanism,
+        evidencePath: state.environmentLoadingEvidencePath,
+      },
+      topology: localHttps,
+    });
+  }
 
   const sourceIdentity = migratingIdentity
     ? /** @type {PersistedMcpAppProvider} */ (persisted).identity
@@ -843,8 +930,23 @@ export function planMcpApp(input) {
     migratingIdentity && sourceContent !== null
       ? withoutEnvironmentVariables(sourceContent, Object.values(sourceRoles))
       : sourceContent;
+  const proxyPrefix = identity.environmentPrefix;
+  const sourceProxyPrefix = sourceIdentity.environmentPrefix;
+  const fragmentWithoutLegacyLocalHttpsVariables =
+    fragmentBase === null
+      ? null
+      : withoutEnvironmentVariables(fragmentBase, [
+          `${sourceProxyPrefix}_TAMA_LOCAL_HTTPS_PROXY`,
+          `${proxyPrefix}_TAMA_LOCAL_HTTPS_PROXY`,
+          `${sourceProxyPrefix}_TAMA_LOCAL_HTTPS_EXTERNAL_ORIGIN`,
+          `${proxyPrefix}_TAMA_LOCAL_HTTPS_EXTERNAL_ORIGIN`,
+          `${sourceProxyPrefix}_TAMA_LOCAL_HTTPS_BIND_IP`,
+          `${proxyPrefix}_TAMA_LOCAL_HTTPS_BIND_IP`,
+          `${sourceProxyPrefix}_TAMA_LOCAL_HTTPS_UPSTREAM_PORT`,
+          `${proxyPrefix}_TAMA_LOCAL_HTTPS_UPSTREAM_PORT`,
+        ]);
   const fragmentContent = providerFragmentContent(
-    fragmentBase,
+    fragmentWithoutLegacyLocalHttpsVariables,
     new Map([
       [roles.mode, `${roles.mode}=${providerMode}`],
       [roles.issuer, `${roles.issuer}=${providerOrigin}`],
@@ -893,18 +995,32 @@ export function planMcpApp(input) {
   /** @type {Record<string, string>} */
   const variables = {
     TAMA_MCP_APP_MODE: mode,
-    TAMA_MCP_APP_RESOURCE: resource,
     TAMA_MCP_APP_ALLOWED_ORIGINS: allowedOrigins.join(","),
     TAMA_MCP_APP_AUTHORIZATION_SERVER: providerOrigin,
     TAMA_MCP_APP_JWKS_URI: `${providerOrigin}${providerEndpoints.jwks}`,
     TAMA_MCP_APP_INTROSPECTION_ENDPOINT: `${providerOrigin}${providerEndpoints.introspection}`,
     TAMA_MCP_APP_SIGNING_ALGORITHMS: "RS256",
-    TAMA_MCP_APP_INTROSPECTION_CLIENT_ID: introspectionClientId,
     TAMA_MCP_APP_INTROSPECTION_SIGNING_ALGORITHM: "RS256",
     TAMA_MCP_APP_INTROSPECTION_SIGNING_KEY_ID: introspectionSigningKeyId,
     TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY: `'${introspectionPrivateJwk}'`,
+    ...(localHttps
+      ? {}
+      : {
+          TAMA_MCP_APP_RESOURCE: resource,
+          TAMA_MCP_APP_INTROSPECTION_CLIENT_ID: introspectionClientId,
+        }),
     ...(existingTamaPublicKeys === undefined
       ? { [TAMA_INTROSPECTION_PUBLIC_KEYS_VARIABLE]: "[]" }
+      : {}),
+    ...(localHttps
+      ? {
+          PHX_HOST: localHttps.tamaHost,
+          TAMA_PORT: String(localHttps.tamaPort),
+          TAMA_OAUTH_ISSUER: localHttps.tamaOrigin,
+          TAMA_MCP_RESOURCE: `${localHttps.tamaOrigin}/mcp`,
+          TAMA_MCP_ALLOWED_ORIGINS: localHttps.allowedOrigins.join(","),
+          TAMA_BASE_URL: localHttps.tamaOrigin,
+        }
       : {}),
   };
 
@@ -928,6 +1044,7 @@ export function planMcpApp(input) {
     introspectionClientId,
     providerSigningKeyId,
     introspectionSigningKeyId,
+    localHttps,
     operations: [
       input.localContractOperation,
       fragmentOperation,
@@ -939,6 +1056,11 @@ export function planMcpApp(input) {
     plan,
     environmentInput: {
       variables,
+      ...(localHttps && options.migrateLocalHttps
+        ? {
+            removeVariables: ["TAMA_MCP_APP_RESOURCE", "TAMA_MCP_APP_INTROSPECTION_CLIENT_ID"],
+          }
+        : {}),
       validation: {
         mode,
         resource,
@@ -946,6 +1068,7 @@ export function planMcpApp(input) {
         serviceOrigin: providerOrigin,
         allowedOrigins,
         introspectionClientId,
+        localHttps,
       },
     },
   };

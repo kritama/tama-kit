@@ -2,6 +2,7 @@
 
 import { readFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { BOOTSTRAP_PATHS } from "./constants.mjs";
 import { readEnvironmentValues } from "./environment.mjs";
 
@@ -119,6 +120,83 @@ export function createHttpHostMappedFetch(connectHost) {
       request.once("error", reject);
       request.end(init.body ?? undefined);
     });
+}
+
+/**
+ * Creates an HTTPS fetch implementation scoped to the generated public CA.
+ * Hostname verification remains enabled because the original URL hostname is
+ * passed as TLS servername; no global process trust or verification bypass is
+ * used.
+ * @param {string | Buffer} ca
+ * @param {{connectHost?: string}} [options]
+ * @returns {VerifyFetch}
+ */
+export function createLocalHttpsFetch(ca, options = {}) {
+  /** @param {URL} input @param {RequestInit} init @param {number} redirects */
+  const requestUrl = (input, init, redirects) =>
+    new Promise((resolve, reject) => {
+      if (input.protocol !== "https:") {
+        reject(new TypeError("local HTTPS requests require an https URL"));
+        return;
+      }
+      if (init.body !== undefined && init.body !== null && typeof init.body !== "string") {
+        reject(new TypeError("local HTTPS request bodies must be strings"));
+        return;
+      }
+      const headers = new Headers(init.headers);
+      headers.set("accept-encoding", "identity");
+      headers.set("host", input.host);
+      const request = httpsRequest(
+        {
+          hostname: options.connectHost ?? input.hostname,
+          port: input.port === "" ? "443" : input.port,
+          path: `${input.pathname}${input.search}`,
+          method: init.method ?? "GET",
+          headers: Object.fromEntries(headers.entries()),
+          signal: init.signal ?? undefined,
+          ca,
+          servername: input.hostname,
+          rejectUnauthorized: true,
+        },
+        (incoming) => {
+          /** @type {Buffer[]} */
+          const chunks = [];
+          incoming.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+          incoming.once("error", reject);
+          incoming.once("end", () => {
+            const responseHeaders = new Headers();
+            for (const [name, value] of Object.entries(incoming.headers)) {
+              if (Array.isArray(value)) {
+                for (const entry of value) responseHeaders.append(name, entry);
+              } else if (value !== undefined) {
+                responseHeaders.set(name, value);
+              }
+            }
+            const status = incoming.statusCode ?? 500;
+            const body = [101, 204, 205, 304].includes(status) ? null : Buffer.concat(chunks);
+            const location = responseHeaders.get("location");
+            if (init.redirect === "follow" && status >= 300 && status < 400 && location !== null) {
+              if (redirects >= 5) {
+                reject(new TypeError("local HTTPS request exceeded the redirect limit"));
+                return;
+              }
+              resolve(requestUrl(new URL(location, input), init, redirects + 1));
+              return;
+            }
+            resolve(
+              new Response(body, {
+                status,
+                statusText: incoming.statusMessage,
+                headers: responseHeaders,
+              }),
+            );
+          });
+        },
+      );
+      request.once("error", reject);
+      request.end(init.body ?? undefined);
+    });
+  return (input, init = {}) => requestUrl(input, init, 0);
 }
 
 /** @param {string} origin @returns {boolean} */
@@ -490,6 +568,7 @@ async function introspectInactiveToken({ root, plan, fetch, providerTransport })
       headers,
       body: new URLSearchParams({
         token: INACTIVE_PROBE_TOKEN,
+        client_id: plan.introspectionClientId,
         client_assertion: controlAssertion,
         client_assertion_type: CLIENT_ASSERTION_TYPE,
       }).toString(),
@@ -516,6 +595,7 @@ async function introspectInactiveToken({ root, plan, fetch, providerTransport })
       headers,
       body: new URLSearchParams({
         token: INACTIVE_PROBE_TOKEN,
+        client_id: plan.introspectionClientId,
         client_assertion: assertion,
         client_assertion_type: CLIENT_ASSERTION_TYPE,
       }).toString(),

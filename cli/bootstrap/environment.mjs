@@ -184,7 +184,8 @@ export function readSetupUrl(root) {
       path: filename,
     });
   }
-  return `http://localhost:${port}/setup/root?token=${encodeURIComponent(setupToken)}`;
+  const baseUrl = values.get("TAMA_BASE_URL") ?? `http://localhost:${port}`;
+  return `${baseUrl}/setup/root?token=${encodeURIComponent(setupToken)}`;
 }
 
 /** @param {string} content @param {Record<string, string | number>} updates */
@@ -206,6 +207,26 @@ function updateEnvironment(content, updates) {
     lines.push("", ...[...remaining].map(([name, value]) => `${name}=${value}`));
   }
   return `${lines.join("\n")}\n`;
+}
+
+/** @param {string} content @param {string[]} names */
+function withoutEnvironmentVariables(content, names) {
+  const removed = new Set(names);
+  return content
+    .split(/\r?\n/u)
+    .filter((line) => {
+      const match = line.match(/^([A-Z][A-Z0-9_]*)=/u);
+      return !match || !removed.has(match[1]);
+    })
+    .join("\n");
+}
+
+/** @param {string} content @param {McpAppEnvironmentInput} mcpApp */
+function updateMcpAppEnvironment(content, mcpApp) {
+  return updateEnvironment(
+    withoutEnvironmentVariables(content, mcpApp.removeVariables ?? []),
+    mcpApp.variables,
+  );
 }
 
 /** @param {string | undefined} value @param {number} existingPort @param {number} port */
@@ -311,7 +332,8 @@ function validateRuntimeSecrets(values, filename) {
 }
 
 /** @param {Map<string, string>} values @param {string} filename @param {number} port */
-function validateEnvironment(values, filename, port) {
+/** @param {Map<string, string>} values @param {string} filename @param {number} port @param {import("../types.mjs").McpAppEnvironmentValidation | null | undefined} [validation] */
+function validateEnvironment(values, filename, port, validation = null) {
   if (
     Boolean(values.get("TAMA_OAUTH_PRIVATE_JWK")) !==
     Boolean(values.get("TAMA_OAUTH_PRIVATE_JWK_ID"))
@@ -350,11 +372,15 @@ function validateEnvironment(values, filename, port) {
     );
   }
 
-  const baseUrl = `http://localhost:${port}`;
+  const localHttps = validation?.localHttps ?? null;
+  const baseUrl = localHttps?.tamaOrigin ?? `http://localhost:${port}`;
   const expectedUrls = {
     TAMA_OAUTH_ISSUER: baseUrl,
     TAMA_MCP_RESOURCE: `${baseUrl}/mcp`,
     TAMA_BASE_URL: baseUrl,
+    ...(localHttps
+      ? { PHX_HOST: localHttps.tamaHost, TAMA_PORT: String(localHttps.tamaPort) }
+      : {}),
   };
   const mismatches = Object.entries(expectedUrls)
     .filter(([name, expected]) => values.get(name) !== expected)
@@ -363,7 +389,8 @@ function validateEnvironment(values, filename, port) {
     .get("TAMA_MCP_ALLOWED_ORIGINS")
     ?.split(",")
     .map((origin) => origin.trim());
-  if (!allowedOrigins?.includes(baseUrl)) {
+  const requiredAllowedOrigin = localHttps?.allowedOrigins?.[0] ?? baseUrl;
+  if (!allowedOrigins?.includes(requiredAllowedOrigin)) {
     mismatches.push("TAMA_MCP_ALLOWED_ORIGINS");
   }
   if (mismatches.length > 0) {
@@ -414,11 +441,6 @@ function mcpAppHeader(mode) {
   return `# MCP App integration (${mode}). Managed by Tama Kit for local development.`;
 }
 
-/** @param {Record<string, string>} variables @returns {string[]} */
-function mcpAppLines(variables) {
-  return Object.entries(variables).map(([name, value]) => `${name}=${value}`);
-}
-
 /**
  * @param {Map<string, string>} values
  * @param {string} filename
@@ -433,7 +455,11 @@ function validateMcpAppVariables(values, filename, validation) {
     });
   }
 
-  if (values.get("TAMA_MCP_APP_RESOURCE") !== validation.resource) {
+  const configuredResource = values.get("TAMA_MCP_APP_RESOURCE");
+  if (
+    (!validation.localHttps && configuredResource !== validation.resource) ||
+    (configuredResource !== undefined && configuredResource !== validation.resource)
+  ) {
     throw ownershipError(
       `${filename} TAMA_MCP_APP_RESOURCE must be exactly ${validation.resource}`,
       { path: filename, variable: "TAMA_MCP_APP_RESOURCE" },
@@ -488,7 +514,11 @@ function validateMcpAppVariables(values, filename, validation) {
     );
   }
 
-  if (values.get("TAMA_MCP_APP_INTROSPECTION_CLIENT_ID") !== validation.introspectionClientId) {
+  const configuredClientId = values.get("TAMA_MCP_APP_INTROSPECTION_CLIENT_ID");
+  if (
+    (!validation.localHttps && configuredClientId !== validation.introspectionClientId) ||
+    (configuredClientId !== undefined && configuredClientId !== validation.introspectionClientId)
+  ) {
     throw ownershipError(
       `${filename} TAMA_MCP_APP_INTROSPECTION_CLIENT_ID must be ${validation.introspectionClientId}`,
       { path: filename, variable: "TAMA_MCP_APP_INTROSPECTION_CLIENT_ID" },
@@ -613,12 +643,11 @@ export function planEnvironment(
     const port = requestedPort ?? freshDefaultPort ?? DEFAULTS.port;
     let content = newEnvironment(port, materializeSecrets);
     if (mcpApp) {
-      content =
-        content +
-        `\n${mcpAppHeader(mcpApp.validation.mode)}\n${mcpAppLines(mcpApp.variables).join("\n")}\n`;
+      content = updateMcpAppEnvironment(content, mcpApp);
+      content = `${content.trimEnd()}\n\n${mcpAppHeader(mcpApp.validation.mode)}\n`;
     }
     const values = parseEnvironment(content, filename);
-    validateEnvironment(values, filename, port);
+    validateEnvironment(values, filename, port, mcpApp?.validation);
     if (mcpApp) {
       validateMcpAppVariables(values, filename, mcpApp.validation);
     }
@@ -681,10 +710,10 @@ export function planEnvironment(
     });
   }
   if (mcpApp) {
-    content = updateEnvironment(content, mcpApp.variables);
+    content = updateMcpAppEnvironment(content, mcpApp);
   }
   const updatedValues = parseEnvironment(content, filename);
-  validateEnvironment(updatedValues, filename, port);
+  validateEnvironment(updatedValues, filename, port, mcpApp?.validation);
   if (mcpApp) {
     validateMcpAppVariables(updatedValues, filename, mcpApp.validation);
   }

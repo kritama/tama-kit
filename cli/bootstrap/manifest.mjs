@@ -5,6 +5,7 @@ import { isAbsolute, join, relative, sep } from "node:path";
 
 import { ownershipError } from "../errors.mjs";
 import { contentDigest, operationForContent } from "./files.mjs";
+import { resolveLocalHttpsTopology } from "./local-https.mjs";
 
 /** @typedef {import("../types.mjs").FileOperation} FileOperation */
 /** @typedef {import("../types.mjs").FileOperationOptions} FileOperationOptions */
@@ -119,6 +120,19 @@ function parsePersistedProvider(value, manifestPath) {
   const topologyValues = [provider.providerOrigin, provider.tamaOrigin, provider.allowedOrigins];
   const hasTopology = topologyValues.some((value) => value !== undefined);
   if (
+    provider.tamaImage !== undefined &&
+    (typeof provider.tamaImage !== "string" ||
+      provider.tamaImage.length === 0 ||
+      /\s/u.test(provider.tamaImage))
+  ) {
+    throw ownershipError(
+      `Tama Kit manifest contains an invalid MCP App Tama image: ${manifestPath}`,
+      {
+        path: manifestPath,
+      },
+    );
+  }
+  if (
     hasTopology &&
     (typeof provider.providerOrigin !== "string" ||
       typeof provider.tamaOrigin !== "string" ||
@@ -132,6 +146,104 @@ function parsePersistedProvider(value, manifestPath) {
       `Tama Kit manifest contains an invalid mcpAppProvider topology: ${manifestPath}`,
       { path: manifestPath },
     );
+  }
+  const localHttps = provider.localHttps;
+  if (localHttps !== undefined) {
+    if (!localHttps || typeof localHttps !== "object" || Array.isArray(localHttps)) {
+      throw ownershipError(
+        `Tama Kit manifest contains an invalid local HTTPS topology: ${manifestPath}`,
+        {
+          path: manifestPath,
+        },
+      );
+    }
+    const topology = /** @type {Record<string, unknown>} */ (localHttps);
+    const required = [
+      "profile",
+      "localDomain",
+      "providerHost",
+      "tamaHost",
+      "providerOrigin",
+      "tamaOrigin",
+      "resource",
+      "introspectionClientId",
+      "providerJwksUri",
+      "providerIntrospectionEndpoint",
+      "tamaJwksUri",
+      "healthUrl",
+      "providerUpstream",
+      "tamaUpstream",
+      "providerPort",
+      "tamaPort",
+      "httpsPort",
+      "certificateNames",
+      "caddyImage",
+      "trustMechanism",
+      "allowedOrigins",
+    ];
+    if (
+      required.some((key) => !(key in topology)) ||
+      topology.profile !== "mcp-app-local-https" ||
+      typeof topology.localDomain !== "string" ||
+      typeof topology.providerHost !== "string" ||
+      typeof topology.tamaHost !== "string" ||
+      typeof topology.providerOrigin !== "string" ||
+      typeof topology.tamaOrigin !== "string" ||
+      typeof topology.resource !== "string" ||
+      typeof topology.introspectionClientId !== "string" ||
+      typeof topology.providerJwksUri !== "string" ||
+      typeof topology.providerIntrospectionEndpoint !== "string" ||
+      typeof topology.tamaJwksUri !== "string" ||
+      typeof topology.healthUrl !== "string" ||
+      typeof topology.providerUpstream !== "string" ||
+      typeof topology.tamaUpstream !== "string" ||
+      !Number.isInteger(topology.providerPort) ||
+      !Number.isInteger(topology.tamaPort) ||
+      topology.httpsPort !== 443 ||
+      !Array.isArray(topology.certificateNames) ||
+      topology.certificateNames.some((name) => typeof name !== "string") ||
+      typeof topology.caddyImage !== "string" ||
+      typeof topology.trustMechanism !== "string" ||
+      !Array.isArray(topology.allowedOrigins) ||
+      topology.allowedOrigins.length === 0 ||
+      topology.allowedOrigins.length > 32 ||
+      topology.allowedOrigins.some((origin) => typeof origin !== "string" || origin.length === 0) ||
+      new Set(topology.allowedOrigins).size !== topology.allowedOrigins.length
+    ) {
+      throw ownershipError(
+        `Tama Kit manifest contains an invalid local HTTPS topology: ${manifestPath}`,
+        {
+          path: manifestPath,
+        },
+      );
+    }
+    let expectedTopology;
+    try {
+      expectedTopology = resolveLocalHttpsTopology({
+        localDomain: /** @type {string} */ (topology.localDomain),
+        providerPort: /** @type {number} */ (topology.providerPort),
+        httpsPort: /** @type {number} */ (topology.httpsPort),
+        allowedOrigins: /** @type {string[]} */ (topology.allowedOrigins),
+      });
+    } catch {
+      throw ownershipError(
+        `Tama Kit manifest contains an invalid local HTTPS topology: ${manifestPath}`,
+        { path: manifestPath },
+      );
+    }
+    const topologyKeys = Object.keys(expectedTopology);
+    if (
+      topologyKeys.some(
+        (key) =>
+          JSON.stringify(topology[key]) !==
+          JSON.stringify(expectedTopology[/** @type {keyof typeof expectedTopology} */ (key)]),
+      )
+    ) {
+      throw ownershipError(
+        `Tama Kit manifest local HTTPS topology does not match its canonical derivation: ${manifestPath}`,
+        { path: manifestPath },
+      );
+    }
   }
   return {
     identity: {
@@ -157,6 +269,10 @@ function parsePersistedProvider(value, manifestPath) {
           allowedOrigins: /** @type {string[]} */ (provider.allowedOrigins),
         }
       : {}),
+    ...(localHttps !== undefined
+      ? { localHttps: /** @type {import("../types.mjs").LocalHttpsTopology} */ (localHttps) }
+      : {}),
+    ...(typeof provider.tamaImage === "string" ? { tamaImage: provider.tamaImage } : {}),
   };
 }
 
@@ -492,6 +608,8 @@ export function createManagedFilePlanner(root, tamaDirectory, skillMode, mcpAppP
                     allowedOrigins: provider.allowedOrigins,
                   }
                 : {}),
+              ...(provider.localHttps ? { localHttps: provider.localHttps } : {}),
+              ...(provider.tamaImage ? { tamaImage: provider.tamaImage } : {}),
             },
           }
         : {}),

@@ -248,7 +248,7 @@ function preparedFor(root, extra = {}) {
 
 // The MCP App integration requires a pinned Tama image, so every planned
 // integration in the suite uses one inside the bundled supported range.
-const PINNED_TAMA_IMAGE = "ghcr.io/upmaru/tama:0.13.1-server";
+const PINNED_TAMA_IMAGE = "ghcr.io/upmaru/tama:0.13.2-server";
 
 /**
  * @param {string} root
@@ -813,9 +813,9 @@ test("contractLocalOrigin reads the provider-keyed local development origin", ()
 test("unsupportedTamaImage checks semver tags against the contract range", () => {
   const range = loadTamaContract().supported_tama_versions;
   assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:latest", range), null);
-  assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1-server", range), null);
+  assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.2-server", range), null);
   assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.5-server", range), null);
-  assert.equal(unsupportedTamaImage("example.com/tama:0.13.1", range), null);
+  assert.equal(unsupportedTamaImage("example.com/tama:0.13.2", range), null);
   assert.match(
     unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1", range) ?? "",
     /missing the required -server suffix/u,
@@ -840,11 +840,82 @@ test("unsupportedTamaImage checks semver tags against the contract range", () =>
     unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1+build.5-server", range) ?? "",
     /prerelease or build tag/u,
   );
-  assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1-server", null), null);
+  assert.equal(unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.2-server", null), null);
   assert.throws(
-    () => unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.1-server", "^0.14.0"),
+    () => unsupportedTamaImage("ghcr.io/upmaru/tama:0.13.2-server", "^0.14.0"),
     /comparison range/u,
   );
+});
+
+test("bundled Tama contract derives local HTTPS identities from PHX_HOST", () => {
+  const contract = loadTamaContract();
+
+  assert.equal(contract.supported_tama_versions, ">= 0.13.2 and < 0.14.0");
+  assert.equal(Object.hasOwn(contract, "local_development"), false);
+  assert.deepEqual(contract.variables.PHX_HOST, {
+    required_in: ["prepared", "enabled"],
+    format: "hostname",
+    max_bytes: 253,
+    "x-sensitive": false,
+  });
+  assert.deepEqual(contract.variables.TAMA_MCP_APP_RESOURCE, {
+    required: false,
+    format: "absolute-uri",
+    exact_path: "/mcp/app",
+    derived_from: "PHX_HOST",
+    derived_template: "https://{PHX_HOST}/mcp/app",
+    migration_assertion: true,
+    max_bytes: 2048,
+    "x-sensitive": false,
+  });
+  assert.deepEqual(contract.variables.TAMA_MCP_APP_INTROSPECTION_CLIENT_ID, {
+    required: false,
+    format: "bounded-identifier",
+    derived_from: "PHX_HOST",
+    derived_template: "https://{PHX_HOST}/mcp/app/introspection",
+    migration_assertion: true,
+    max_bytes: 2048,
+    "x-sensitive": false,
+  });
+});
+
+test("derived Tama variables require a safe declared source and migration assertion", () => {
+  const mutations = [
+    [
+      "missing template",
+      (contract) => delete contract.variables.TAMA_MCP_APP_RESOURCE.derived_template,
+    ],
+    [
+      "unknown source",
+      (contract) => {
+        contract.variables.TAMA_MCP_APP_RESOURCE.derived_from = "UNKNOWN_HOST";
+      },
+    ],
+    [
+      "missing placeholder",
+      (contract) => {
+        contract.variables.TAMA_MCP_APP_RESOURCE.derived_template = "https://example/mcp/app";
+      },
+    ],
+    [
+      "required derived value",
+      (contract) => {
+        contract.variables.TAMA_MCP_APP_RESOURCE.required = true;
+      },
+    ],
+    [
+      "non-asserting legacy value",
+      (contract) => {
+        contract.variables.TAMA_MCP_APP_RESOURCE.migration_assertion = false;
+      },
+    ],
+  ];
+
+  for (const [label, mutate] of mutations) {
+    const contract = structuredClone(loadTamaContract());
+    mutate(contract);
+    assert.throws(() => validateMcpAppContract(contract), /derived|declared/u, label);
+  }
 });
 
 test("provider identity normalization derives the prefix and fragment file", () => {
@@ -1333,6 +1404,170 @@ test("bootstrap derives conventional bindings for providers without a contract",
   assert.equal(localContract.bindings.issuer, "ACME_OAUTH_ISSUER");
 });
 
+test("fresh local HTTPS plans leave provider runtime behavior application-owned", () => {
+  const root = project();
+  const identity = {
+    name: "memovee",
+    environmentPrefix: "MEMOVEE",
+    environmentFile: "tama/.memovee.integration.env",
+    source: "flags",
+  };
+  const prepared = preparedFor(root, { identity });
+  prepared.allowedOrigins = ["https://app.localhost"];
+
+  const first = planWithMcp(root, prepared);
+  assert.equal(first.mcpApp?.providerOrigin, "https://app.localhost");
+  assert.equal(first.mcpApp?.tamaOrigin, "https://tama.app.localhost");
+  applyOperations(first.operations);
+
+  const fragmentPath = join(root, "tama", ".memovee.integration.env");
+  const fragment = parseEnv(readFileSync(fragmentPath, "utf8"));
+  for (const variable of [
+    "MEMOVEE_TAMA_LOCAL_HTTPS_PROXY",
+    "MEMOVEE_TAMA_LOCAL_HTTPS_EXTERNAL_ORIGIN",
+    "MEMOVEE_TAMA_LOCAL_HTTPS_BIND_IP",
+    "MEMOVEE_TAMA_LOCAL_HTTPS_UPSTREAM_PORT",
+  ]) {
+    assert.equal(Object.hasOwn(fragment, variable), false);
+  }
+
+  const tama = parseEnv(readFileSync(join(root, "tama", ".tama.env"), "utf8"));
+  assert.equal(tama.PHX_HOST, "tama.app.localhost");
+  assert.equal(Object.hasOwn(tama, "TAMA_MCP_APP_RESOURCE"), false);
+  assert.equal(Object.hasOwn(tama, "TAMA_MCP_APP_INTROSPECTION_CLIENT_ID"), false);
+
+  const rerunPrepared = preparedFor(root, { identity });
+  rerunPrepared.allowedOrigins = ["https://app.localhost"];
+  const rerun = planWithMcp(root, rerunPrepared);
+  assert.equal(rerun.mcpApp?.tamaOrigin, "https://tama.app.localhost");
+  assert.ok(
+    rerun.operations.every((operation) => operation.action === "unchanged"),
+    JSON.stringify(rerun.operations.map(({ action, path, reason }) => ({ action, path, reason }))),
+  );
+});
+
+test("local HTTPS migration removes legacy Tama-derived MCP App identities", () => {
+  const root = project();
+  const legacy = planWithMcp(root, preparedFor(root), {
+    providerOrigin: "http://host.docker.internal:4000",
+    tamaOrigin: "http://127.0.0.1:4001",
+    allowedOrigins: ["http://127.0.0.1:3000"],
+  });
+  applyOperations(legacy.operations);
+
+  const environmentPath = join(root, "tama", ".tama.env");
+  const legacyEnvironment = parseEnv(readFileSync(environmentPath, "utf8"));
+  assert.equal(legacyEnvironment.TAMA_MCP_APP_RESOURCE, "http://127.0.0.1:4001/mcp/app");
+  assert.equal(
+    legacyEnvironment.TAMA_MCP_APP_INTROSPECTION_CLIENT_ID,
+    "http://127.0.0.1:4001/mcp/app/introspection",
+  );
+
+  const migrated = createBootstrapPlan({
+    cwd: root,
+    targetPath: root,
+    image: PINNED_TAMA_IMAGE,
+    mcpApp: {
+      requested: true,
+      activate: false,
+      migrateLocalHttps: true,
+      providerOrigin: "http://host.docker.internal:4000",
+      tamaOrigin: "http://127.0.0.1:4001",
+      allowedOrigins: ["https://app.localhost"],
+    },
+    mcpAppPrepared: preparedFor(root),
+  });
+
+  for (const assertion of [
+    { providerOrigin: "http://host.docker.internal:5000" },
+    { tamaOrigin: "http://127.0.0.1:5001" },
+  ]) {
+    assert.throws(
+      () =>
+        createBootstrapPlan({
+          cwd: root,
+          targetPath: root,
+          image: PINNED_TAMA_IMAGE,
+          mcpApp: {
+            requested: true,
+            activate: false,
+            migrateLocalHttps: true,
+            providerOrigin: "http://host.docker.internal:4000",
+            tamaOrigin: "http://127.0.0.1:4001",
+            allowedOrigins: ["https://app.localhost"],
+            ...assertion,
+          },
+          mcpAppPrepared: preparedFor(root),
+        }),
+      /migration assertion/u,
+    );
+  }
+
+  const contract = validContract();
+  const contractPath = writeContract(root, contract);
+  assert.doesNotThrow(() =>
+    createBootstrapPlan({
+      cwd: root,
+      targetPath: root,
+      image: PINNED_TAMA_IMAGE,
+      mcpApp: {
+        requested: true,
+        activate: false,
+        migrateLocalHttps: true,
+        allowedOrigins: ["https://app.localhost"],
+      },
+      mcpAppPrepared: preparedFor(root, { contractPath, contractDocument: contract }),
+    }),
+  );
+  applyOperations(migrated.operations);
+
+  const environment = parseEnv(readFileSync(environmentPath, "utf8"));
+  assert.equal(Object.hasOwn(environment, "TAMA_MCP_APP_RESOURCE"), false);
+  assert.equal(Object.hasOwn(environment, "TAMA_MCP_APP_INTROSPECTION_CLIENT_ID"), false);
+  assert.equal(environment.PHX_HOST, "tama.app.localhost");
+  assert.equal(environment.TAMA_OAUTH_ISSUER, "https://tama.app.localhost");
+});
+
+test("ordinary local HTTPS reruns preserve public URLs and the selected Tama image", () => {
+  const root = project();
+  const selectedImage = "ghcr.io/upmaru/tama:0.13.5-server";
+  const prepared = preparedFor(root);
+  prepared.allowedOrigins = ["https://app.localhost"];
+  const first = createBootstrapPlan({
+    cwd: root,
+    targetPath: root,
+    image: selectedImage,
+    mcpApp: { requested: true, activate: false },
+    mcpAppPrepared: prepared,
+  });
+  applyOperations(first.operations);
+
+  const rerun = createBootstrapPlan({ cwd: root, targetPath: root });
+  assert.equal(rerun.tamaImage, selectedImage);
+  assert.ok(
+    rerun.operations.every((operation) => operation.action === "unchanged"),
+    JSON.stringify(rerun.operations.map(({ action, path, reason }) => ({ action, path, reason }))),
+  );
+  const environment = parseEnv(readFileSync(join(root, "tama", ".tama.env"), "utf8"));
+  assert.equal(environment.TAMA_OAUTH_ISSUER, "https://tama.app.localhost");
+  assert.equal(environment.TAMA_MCP_RESOURCE, "https://tama.app.localhost/mcp");
+  assert.equal(environment.TAMA_BASE_URL, "https://tama.app.localhost");
+  assert.match(
+    readFileSync(join(root, "tama", "tama-local-ca.Dockerfile"), "utf8"),
+    new RegExp(`^FROM ${selectedImage.replaceAll(".", "\\.")}$`, "mu"),
+  );
+
+  const manifestPath = join(root, "tama", ".tama-kit.json");
+  const legacyManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  delete legacyManifest.mcpAppProvider.tamaImage;
+  writeFileSync(manifestPath, `${JSON.stringify(legacyManifest, null, 2)}\n`);
+  const upgraded = createBootstrapPlan({ cwd: root, targetPath: root });
+  assert.equal(upgraded.tamaImage, selectedImage);
+  applyOperations(upgraded.operations);
+  const upgradedManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  assert.equal(upgradedManifest.mcpAppProvider.tamaImage, selectedImage);
+});
+
 test("a matching provider contract updates provenance without rotating provider keys", async () => {
   const root = project();
   const firstPrepared = await prepareFor(root, {
@@ -1430,14 +1665,14 @@ test("bootstrap rejects Tama image tags outside the supported contract range", (
 test("bootstrap enforces a narrower provider Tama version range", () => {
   const root = project();
   const contract = validContract();
-  contract.supported_tama_versions = ">= 0.13.2 and < 0.14.0";
+  contract.supported_tama_versions = ">= 0.13.3 and < 0.14.0";
   const contractPath = writeContract(root, contract);
   assert.throws(
     () => planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })),
     (error) =>
       error instanceof CLIError &&
       error.exitCode === EXIT_CODES.USAGE &&
-      /outside the supported Tama range >= 0\.13\.2 and < 0\.14\.0/u.test(error.message) &&
+      /outside the supported Tama range >= 0\.13\.3 and < 0\.14\.0/u.test(error.message) &&
       /accepted provider contract/u.test(error.message),
   );
 });
@@ -1883,7 +2118,10 @@ test("bootstrap preserves exact public origins and never infers allowed origins"
     "http://[::1]:4001",
   ]) {
     const root = project();
-    const plan = planWithMcp(root, preparedFor(root), { tamaOrigin });
+    const contract = validContract();
+    const plan = planWithMcp(root, preparedFor(root, { contractDocument: contract }), {
+      tamaOrigin,
+    });
     assert.equal(plan.mcpApp?.tamaOrigin, tamaOrigin);
     assert.equal(plan.mcpApp?.resource, `${tamaOrigin}/mcp/app`);
     assert.deepEqual(plan.mcpApp?.allowedOrigins, ["http://127.0.0.1:3000"]);
@@ -1891,7 +2129,8 @@ test("bootstrap preserves exact public origins and never infers allowed origins"
   }
 
   const root = project();
-  const first = planWithMcp(root, preparedFor(root), {
+  const contract = validContract();
+  const first = planWithMcp(root, preparedFor(root, { contractDocument: contract }), {
     tamaOrigin: "http://127.0.0.1:4001",
   });
   applyOperations(first.operations);
@@ -1901,7 +2140,7 @@ test("bootstrap preserves exact public origins and never infers allowed origins"
   assert.deepEqual(persisted?.allowedOrigins, ["http://127.0.0.1:3000"]);
   assert.throws(
     () =>
-      planWithMcp(root, preparedFor(root), {
+      planWithMcp(root, preparedFor(root, { contractDocument: contract }), {
         tamaOrigin: "http://localhost:4001",
       }),
     /origin migration|topology migration/u,
@@ -2149,6 +2388,7 @@ test("verifyMcpApp verifies both JWKS and the inactive introspection probe", asy
   const introspectionCalls = calls.filter((call) => call.url.endsWith("/auth/introspections"));
   assert.equal(introspectionCalls.length, 2);
   const controlBody = new URLSearchParams(String(introspectionCalls[0]?.body));
+  assert.equal(controlBody.get("client_id"), plan.introspectionClientId);
   // The negative control is structurally valid — a real JWT shape — but
   // signed by an unrelated key, so only signature verification rejects it.
   assert.match(String(controlBody.get("client_assertion")), JWT_PATTERN);
@@ -2158,6 +2398,7 @@ test("verifyMcpApp verifies both JWKS and the inactive introspection probe", asy
   );
   const body = new URLSearchParams(String(introspectionCalls[1]?.body));
   assert.equal(body.get("token"), "tama-kit-bootstrap-inactive-probe");
+  assert.equal(body.get("client_id"), plan.introspectionClientId);
   assert.equal(
     body.get("client_assertion_type"),
     "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
@@ -3085,7 +3326,7 @@ test("bootstrap rejects nested Git ignore overrides and rolls generated secrets 
           "tama/config/provider.env",
         ]);
       }),
-    /not effectively ignored by Git.*nested \.gitignore/u,
+    /(?:not effectively ignored by Git.*nested \.gitignore|destination is not ignored by Git)/u,
   );
   assert.equal(existsSync(join(root, "tama", ".tama.env")), false);
   assert.equal(existsSync(join(root, "tama", ".tama.postgres.env")), false);
@@ -3160,7 +3401,7 @@ test("bootstrap rejects a Tama port change while an MCP App integration is persi
 test("contractTamaPort derives the fresh Tama port from the accepted contract", () => {
   const contract = validContract();
   assert.equal(contractTamaPort(contract, null), 4001);
-  assert.equal(contractTamaPort(null, loadTamaContract()), 4001);
+  assert.equal(contractTamaPort(null, loadTamaContract()), null);
   const override = structuredClone(memoveeContract());
   override.local_development.tama_origin = "http://127.0.0.1:4567";
   assert.equal(contractTamaPort(validateMcpAppContract(override), loadTamaContract()), 4567);
@@ -3236,6 +3477,7 @@ test("bootstrap rejects an HTTPS Tama origin without TLS termination", () => {
   assert.throws(
     () =>
       planWithMcp(root, preparedFor(root), {
+        providerOrigin: "http://host.docker.internal:4000",
         tamaOrigin: "https://127.0.0.1:4001",
       }),
     (error) =>
@@ -3331,7 +3573,7 @@ test("ordinary reruns reject drift in persisted MCP App environment variables", 
   );
 });
 
-test("an ordinary rerun keeps the pinned image for a persisted MCP App integration", () => {
+test("an ordinary rerun selects the pinned MCP App image", () => {
   const root = project();
   const contractPath = writeContract(root);
   const contract = validContract();
@@ -3340,14 +3582,11 @@ test("an ordinary rerun keeps the pinned image for a persisted MCP App integrati
   });
   applyOperations(first.operations);
 
-  // The default floating tag must not silently replace the pinned runtime.
-  assert.throws(
-    () => createBootstrapPlan({ cwd: root, targetPath: root }),
-    (error) =>
-      error instanceof CLIError &&
-      error.exitCode === EXIT_CODES.USAGE &&
-      /requires a pinned Tama image/u.test(error.message) &&
-      /unresolvable tag latest/u.test(error.message),
+  const rerun = createBootstrapPlan({ cwd: root, targetPath: root });
+  assert.equal(rerun.tamaImage, PINNED_TAMA_IMAGE);
+  assert.match(
+    readFileSync(join(root, "tama", "compose.yaml"), "utf8"),
+    new RegExp(PINNED_TAMA_IMAGE.replaceAll(".", "\\."), "u"),
   );
   assert.doesNotThrow(() =>
     createBootstrapPlan({ cwd: root, targetPath: root, image: PINNED_TAMA_IMAGE }),
@@ -3357,12 +3596,12 @@ test("an ordinary rerun keeps the pinned image for a persisted MCP App integrati
 test("ordinary reruns enforce the persisted provider Tama version range", () => {
   const root = project();
   const contract = validContract();
-  contract.supported_tama_versions = ">= 0.13.2 and < 0.14.0";
+  contract.supported_tama_versions = ">= 0.13.3 and < 0.14.0";
   const contractPath = writeContract(root, contract);
   const first = createBootstrapPlan({
     cwd: root,
     targetPath: root,
-    image: "ghcr.io/upmaru/tama:0.13.2-server",
+    image: "ghcr.io/upmaru/tama:0.13.3-server",
     port: 4001,
     mcpApp: {
       requested: true,
@@ -3378,7 +3617,7 @@ test("ordinary reruns enforce the persisted provider Tama version range", () => 
     (error) =>
       error instanceof CLIError &&
       error.exitCode === EXIT_CODES.USAGE &&
-      /outside the supported Tama range >= 0\.13\.2 and < 0\.14\.0/u.test(error.message) &&
+      /outside the supported Tama range >= 0\.13\.3 and < 0\.14\.0/u.test(error.message) &&
       /persisted provider contract/u.test(error.message),
   );
 });
@@ -3592,7 +3831,7 @@ test("the bootstrap command plans the provider integration from explicit flags",
     "--port",
     "4001",
     "--image",
-    "ghcr.io/upmaru/tama:0.13.1-server",
+    "ghcr.io/upmaru/tama:0.13.2-server",
     "--provider-name",
     "acme",
     "--provider-origin",
@@ -3649,7 +3888,7 @@ test("the human bootstrap result warns when provider environment loading is unve
     "--port",
     "4001",
     "--image",
-    "ghcr.io/upmaru/tama:0.13.1-server",
+    "ghcr.io/upmaru/tama:0.13.2-server",
     "--provider-name",
     "acme",
     "--provider-origin",
@@ -3680,7 +3919,7 @@ test("the bootstrap command accepts --provider-env-file for the provider fragmen
     "--port",
     "4001",
     "--image",
-    "ghcr.io/upmaru/tama:0.13.1-server",
+    "ghcr.io/upmaru/tama:0.13.2-server",
     "--provider-name",
     "acme",
     "--provider-env-file",
@@ -3725,7 +3964,7 @@ test("the bootstrap command accepts --provider-env-file for the provider fragmen
     "--port",
     "4001",
     "--image",
-    "ghcr.io/upmaru/tama:0.13.1-server",
+    "ghcr.io/upmaru/tama:0.13.2-server",
     "--provider-name",
     "acme",
     "--provider-env-file",
@@ -3753,7 +3992,7 @@ test("MCP App JSON dry-runs are byte-for-byte deterministic and write no secrets
     "--port",
     "4001",
     "--image",
-    "ghcr.io/upmaru/tama:0.13.1-server",
+    "ghcr.io/upmaru/tama:0.13.2-server",
     "--provider-name",
     "acme",
     "--provider-origin",
@@ -3788,7 +4027,7 @@ test("the bootstrap command discovers the contract identity for --mcp-app", asyn
     "--port",
     "4001",
     "--image",
-    "ghcr.io/upmaru/tama:0.13.1-server",
+    "ghcr.io/upmaru/tama:0.13.2-server",
     "--allowed-origin",
     "http://127.0.0.1:3000",
   ]);

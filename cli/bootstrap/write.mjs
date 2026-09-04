@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, sep } from "node:path";
 
+import { writeExclusiveSecretFile } from "../commands/oauth.mjs";
 import { contentDigest } from "./files.mjs";
 
 /** @typedef {import("../types.mjs").FileOperation} FileOperation */
@@ -32,6 +33,10 @@ import { contentDigest } from "./files.mjs";
 function atomicWrite(operation) {
   const directory = dirname(operation.path);
   mkdirSync(directory, { recursive: true });
+  if (operation.action === "create" && operation.sensitive) {
+    writeExclusiveSecretFile(directory, basename(operation.path), operation.content);
+    return;
+  }
   const existing = operation.action === "update" ? statSync(operation.path) : null;
   const mode = operation.mode ?? (existing ? existing.mode & 0o777 : 0o644);
   const temporary = join(
