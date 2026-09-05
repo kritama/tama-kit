@@ -6,7 +6,7 @@ import { basename, join, resolve } from "node:path";
 import { buildInventory } from "../../skills/graph-builder/scripts/inspect-tama-repository.mjs";
 
 import { ownershipError } from "../errors.mjs";
-import { operationForContent } from "./files.mjs";
+import { operationForContent } from "../shared/files.mjs";
 import { renderTemplate } from "./templates.mjs";
 
 /** @typedef {import("../types.mjs").TerraformPlan} TerraformPlan */

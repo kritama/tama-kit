@@ -1,16 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import {
-  chmodSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  unlinkSync,
-} from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { createServer } from "node:https";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
@@ -26,9 +17,10 @@ import {
   usesLocalHttpsTopology,
 } from "../../cli/bootstrap/local-https.mjs";
 import { createLocalHttpsFetch } from "../../cli/bootstrap/mcp-app-verify.mjs";
+import { temporaryDirectory } from "../helpers/temporary.mjs";
 
 function certificateFixture() {
-  const root = mkdtempSync(join(tmpdir(), "tama-kit-local-https-test-"));
+  const root = temporaryDirectory("tama-kit-local-https-test-");
   const paths = localHttpsPaths(root);
   mkdirSync(paths.directory, { recursive: true });
   const rootKey = join(root, "root-key.pem");

@@ -20,6 +20,28 @@ const OAUTH_JWK_KID_PATTERN = /^[A-Za-z0-9._~-]+$/u;
 const OAUTH_JWK_SMALL_FACTOR_LIMIT = 997n;
 
 /**
+ * Node 20.12 can abort if GC destroys a key-generation job while JWK export
+ * holds that job's key mutex. DER encoding and reimport detach the exported
+ * key from the generation job. Keep this path on every supported runtime.
+ */
+function generateRsaJwks() {
+  const { privateKey } = generateKeyPairSync("rsa", {
+    modulusLength: OAUTH_JWK_MODULUS_BITS,
+    publicExponent: 0x10001,
+    privateKeyEncoding: { format: "der", type: "pkcs8" },
+    publicKeyEncoding: { format: "der", type: "spki" },
+  });
+  try {
+    const key = createPrivateKey({ key: privateKey, format: "der", type: "pkcs8" });
+    const privateJwk = /** @type {Record<string, string>} */ (key.export({ format: "jwk" }));
+    const publicJwk = { kty: "RSA", n: privateJwk.n, e: privateJwk.e };
+    return { privateJwk, publicJwk };
+  } finally {
+    privateKey.fill(0);
+  }
+}
+
+/**
  * Reports whether a value is an identifier Tama Kit can round-trip through
  * both an unquoted dotenv assignment and a single-quoted JSON JWK without
  * interpolation or comment/quote ambiguity.
@@ -62,12 +84,7 @@ export function generateOAuthPrivateJwk(kid = undefined) {
   if (kid !== undefined && !isBoundedKid(kid)) {
     throw invalidKidError();
   }
-  const { privateKey, publicKey } = generateKeyPairSync("rsa", {
-    modulusLength: OAUTH_JWK_MODULUS_BITS,
-    publicExponent: 0x10001,
-  });
-  const privateJwk = /** @type {Record<string, string>} */ (privateKey.export({ format: "jwk" }));
-  const publicJwk = /** @type {Record<string, string>} */ (publicKey.export({ format: "jwk" }));
+  const { privateJwk, publicJwk } = generateRsaJwks();
   const canonical = JSON.stringify({ e: publicJwk.e, kty: "RSA", n: publicJwk.n });
   const thumbprint = createHash("sha256").update(canonical, "utf8").digest("base64url");
   const keyIdentifier = kid ?? `oauth-${thumbprint}`;
@@ -98,12 +115,7 @@ export function generateOAuthPrivateJwk(kid = undefined) {
  * @returns {OAuthKeyPair}
  */
 export function generateOAuthKeyPair(kidPrefix) {
-  const { privateKey, publicKey } = generateKeyPairSync("rsa", {
-    modulusLength: OAUTH_JWK_MODULUS_BITS,
-    publicExponent: 0x10001,
-  });
-  const privateJwk = /** @type {Record<string, string>} */ (privateKey.export({ format: "jwk" }));
-  const publicJwk = /** @type {Record<string, string>} */ (publicKey.export({ format: "jwk" }));
+  const { privateJwk, publicJwk } = generateRsaJwks();
   const canonical = JSON.stringify({ e: publicJwk.e, kty: "RSA", n: publicJwk.n });
   const thumbprint = createHash("sha256").update(canonical, "utf8").digest("base64url");
   const kid = `${kidPrefix}-${thumbprint}`;

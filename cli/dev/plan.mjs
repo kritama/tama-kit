@@ -1,7 +1,8 @@
 // @ts-check
 
-import { planDevGitignore, validateSecretFilesUntracked } from "../bootstrap/gitignore.mjs";
+import { validateSecretFilesUntracked } from "../shared/git.mjs";
 import { planDevEnvironment } from "./environment.mjs";
+import { planDevGitignore } from "./gitignore.mjs";
 import { inspectDevProject } from "./project.mjs";
 
 /** @param {{cwd: string, targetPath?: string, tamaPort?: number, postgresPort?: number}} options @returns {import("../types.mjs").DevSetupPlan} */

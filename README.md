@@ -354,9 +354,22 @@ runtime unknowns with exact evidence.
 ## Development
 
 The bundled maintenance utilities and Terraform inspector are dependency-free
-Node.js ES modules; no Python runtime is required. The CLI remains native ESM
-and uses JSDoc contracts with a no-emit TypeScript check, so development does
-not require a compiled `dist/` tree.
+Node.js ES modules; no Python runtime is required. The CLI combines checked
+JavaScript with TypeScript contracts and workflows. Run `npm ci` and
+`npm run build` before invoking `node bin/tama-kit.mjs` directly. The build
+checks the mixed source tree, then emits `.mjs` files beside `.mts` sources.
+Generated counterparts are ignored by Git; edit the `.mts` source files.
+
+`npm test`, `npm pack`, and the runtime validation commands build automatically.
+Run `npm run validate:package` to verify the tarball in an isolated consumer.
+The published package contains ready-to-run ESM and its templates, contracts,
+and skills; installed users need neither TypeScript nor a build step.
+
+Command input/output lives in `cli/commands` and `cli/output`, execution in
+`cli/workflows`, typed domain contracts in `cli/domain`, and reusable system
+operations in `cli/shared`. Bootstrap and source-development policy remain in
+`cli/bootstrap` and `cli/dev`. See [the cleanup design](wip/cli-cleanup.md) for
+compatibility and recovery boundaries.
 
 Memovee-derived forward-test cases live in `evals/cases.json`; public skill
 references remain domain-neutral. Validate the public-directory metadata,
