@@ -1,34 +1,14 @@
 // @ts-check
 
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createConnection, isIP } from "node:net";
-
 import { prerequisiteError, startupError } from "../errors.mjs";
+import { runProcess } from "../shared/process.mjs";
 import { localHttpsPaths } from "./local-https.mjs";
 import { createLocalHttpsFetch } from "./mcp-app-verify.mjs";
 
 /** @typedef {import("../types.mjs").BootstrapPlan} BootstrapPlan */
-
-/**
- * @param {string} command
- * @param {string[]} args
- * @param {import("node:child_process").SpawnOptions} [options]
- * @returns {Promise<void>}
- */
-function runProcess(command, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, options);
-    child.once("error", reject);
-    child.once("exit", (code, signal) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`${command} exited with ${code ?? signal}`));
-      }
-    });
-  });
-}
 
 /** @param {unknown} error @param {string} code */
 function hasErrorCode(error, code) {

@@ -9,8 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ownershipError, prerequisiteError, usageError } from "../errors.mjs";
+import { operationForContent } from "../shared/files.mjs";
 import { BOOTSTRAP_PATHS, DEFAULTS, MANAGED_MARKER } from "./constants.mjs";
-import { operationForContent } from "./files.mjs";
 
 export const LOCAL_HTTPS_DEFAULT_DOMAIN = "app.localhost";
 export const LOCAL_HTTPS_DEFAULT_PORT = 443;

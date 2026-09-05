@@ -6,8 +6,8 @@ import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { parseDocument } from "yaml";
 
 import { ambiguityError, ownershipError } from "../errors.mjs";
+import { operationForContent } from "../shared/files.mjs";
 import { MANAGED_MARKER } from "./constants.mjs";
-import { operationForContent } from "./files.mjs";
 
 /** @typedef {import("../types.mjs").FileOperation} FileOperation */
 /** @typedef {Record<string, unknown>} ComposeMapping */

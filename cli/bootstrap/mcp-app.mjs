@@ -4,6 +4,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { ownershipError, usageError } from "../errors.mjs";
+import {
+  generateOAuthKeyPair,
+  validateOAuthPrivateJwk,
+  validatePublicJwkSet,
+} from "../shared/oauth-key.mjs";
 import { BOOTSTRAP_PATHS, MANAGED_MARKER } from "./constants.mjs";
 import {
   PENDING_SECRET_VALUE,
@@ -28,11 +33,6 @@ import {
 } from "./mcp-app-contract.mjs";
 import { renderMcpAppLocalContract } from "./mcp-app-local-contract.mjs";
 import {
-  generateOAuthKeyPair,
-  validateOAuthPrivateJwk,
-  validatePublicJwkSet,
-} from "./oauth-key.mjs";
-import {
   environmentFileForName,
   normalizeProviderName,
   prefixFromName,
@@ -50,7 +50,7 @@ import {
 /** @typedef {import("../types.mjs").McpAppPrepared} McpAppPrepared */
 /** @typedef {import("../types.mjs").PersistedMcpAppProvider} PersistedMcpAppProvider */
 /** @typedef {import("../types.mjs").ProviderIdentity} ProviderIdentity */
-/** @typedef {import("./oauth-key.mjs").OAuthKeyPair} OAuthKeyPair */
+/** @typedef {import("../shared/oauth-key.mjs").OAuthKeyPair} OAuthKeyPair */
 
 const TAMA_MCP_APP_RESOURCE_PATH = "/mcp/app";
 const TAMA_INTROSPECTION_KEY_VARIABLE = "TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY";

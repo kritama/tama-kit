@@ -4,11 +4,12 @@ import { relative } from "node:path";
 import { parseArgs } from "node:util";
 
 import { validateCompose, validateComposePrerequisite } from "../bootstrap/start.mjs";
-import { applyOperationsTransactionally } from "../bootstrap/write.mjs";
-import { processEnvironment, readDevSetupUrl } from "../dev/environment.mjs";
+import { readDevSetupUrl } from "../dev/environment.mjs";
 import { createDevSetupPlan, publicDevSetupPlan } from "../dev/plan.mjs";
 import { runMixSetup, runTestFoundationSetup, startDevDatabase } from "../dev/start.mjs";
 import { CLIError, EXIT_CODES, usageError } from "../errors.mjs";
+import { processEnvironment } from "../shared/environment.mjs";
+import { applyOperationsTransactionally } from "../shared/write.mjs";
 import { createProgressBar, paint } from "../terminal.mjs";
 
 /** @typedef {import("../types.mjs").CommandIO} CommandIO */

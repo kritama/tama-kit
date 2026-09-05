@@ -30,8 +30,8 @@ import {
   validateCompose,
   validateComposePrerequisite,
 } from "../bootstrap/start.mjs";
-import { applyOperationsTransactionally } from "../bootstrap/write.mjs";
 import { CLIError, EXIT_CODES, startupError, usageError } from "../errors.mjs";
+import { applyOperationsTransactionally } from "../shared/write.mjs";
 import { createProgressBar, paint, renderBox } from "../terminal.mjs";
 
 /** @typedef {import("../types.mjs").BootstrapPlan} BootstrapPlan */

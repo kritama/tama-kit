@@ -41,7 +41,6 @@ import {
   defaultProviderListenerInspector,
   verifyMcpApp as verifyMcpAppImplementation,
 } from "../../cli/bootstrap/mcp-app-verify.mjs";
-import { generateOAuthKeyPair } from "../../cli/bootstrap/oauth-key.mjs";
 import { createBootstrapPlan } from "../../cli/bootstrap/plan.mjs";
 import {
   environmentFileForName,
@@ -51,10 +50,11 @@ import {
   resolveProviderIdentity,
 } from "../../cli/bootstrap/provider-identity.mjs";
 import { parseComposeHostGatewayAddress } from "../../cli/bootstrap/start.mjs";
-import { applyOperations, applyOperationsTransactionally } from "../../cli/bootstrap/write.mjs";
 import { validateWrittenSecretsIgnored } from "../../cli/commands/bootstrap.mjs";
 import { CLIError, EXIT_CODES } from "../../cli/errors.mjs";
 import { run } from "../../cli/index.mjs";
+import { generateOAuthKeyPair } from "../../cli/shared/oauth-key.mjs";
+import { applyOperations, applyOperationsTransactionally } from "../../cli/shared/write.mjs";
 
 /** @param {Parameters<typeof verifyMcpAppImplementation>[0]} input */
 function verifyMcpApp(input) {

@@ -12,12 +12,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-
-import { applyOperations } from "../../cli/bootstrap/write.mjs";
 import { createDevSetupPlan } from "../../cli/dev/plan.mjs";
 import { runTestFoundationSetup } from "../../cli/dev/start.mjs";
 import { CLIError, EXIT_CODES } from "../../cli/errors.mjs";
 import { run } from "../../cli/index.mjs";
+import { applyOperations } from "../../cli/shared/write.mjs";
 
 function tamaProject() {
   const root = mkdtempSync(join(tmpdir(), "tama-kit-dev-"));

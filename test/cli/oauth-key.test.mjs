@@ -8,6 +8,7 @@ import {
   generateKeyPairSync,
 } from "node:crypto";
 import test from "node:test";
+import { CLIError, EXIT_CODES } from "../../cli/errors.mjs";
 import {
   generateOAuthPrivateJwk,
   OAUTH_JWK_MAX_ENCODED_BYTES,
@@ -15,8 +16,7 @@ import {
   OAUTH_JWK_PUBLIC_SET_MAX_ITEMS,
   validateOAuthPrivateJwk,
   validatePublicJwkSet,
-} from "../../cli/bootstrap/oauth-key.mjs";
-import { CLIError, EXIT_CODES } from "../../cli/errors.mjs";
+} from "../../cli/shared/oauth-key.mjs";
 
 /** @param {number} [bits] */
 function rsaPrivateKeyObject(bits = 2048) {

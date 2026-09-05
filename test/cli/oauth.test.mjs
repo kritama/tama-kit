@@ -24,11 +24,10 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
-
-import { validateOAuthPrivateJwk } from "../../cli/bootstrap/oauth-key.mjs";
-import { writeExclusiveSecretFile } from "../../cli/commands/oauth.mjs";
 import { EXIT_CODES } from "../../cli/errors.mjs";
 import { run } from "../../cli/index.mjs";
+import { validateOAuthPrivateJwk } from "../../cli/shared/oauth-key.mjs";
+import { writeExclusiveSecretFile } from "../../cli/shared/secret-file.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const JWK_PREFIX = "TAMA_OAUTH_PRIVATE_JWK=";

@@ -3,10 +3,9 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-
-import { isValidVaultKey } from "../bootstrap/environment.mjs";
-import { operationForContent } from "../bootstrap/files.mjs";
 import { ownershipError } from "../errors.mjs";
+import { isValidVaultKey, token } from "../shared/environment.mjs";
+import { operationForContent } from "../shared/files.mjs";
 
 const DEFAULT_POSTGRES_PORT = 55_432;
 const DEFAULT_TAMA_PORT = 4_001;
@@ -27,11 +26,6 @@ const REQUIRED_VARIABLES = [
   "TAMA_JWT_SECRET",
   "TAMA_SETUP_TOKEN",
 ];
-
-/** @param {number} [bytes] */
-function token(bytes = 32) {
-  return randomBytes(bytes).toString("base64url");
-}
 
 /** @param {string} content @param {string} filename */
 export function parseDevEnvironment(content, filename) {
@@ -242,9 +236,4 @@ export function readDevSetupUrl(root) {
     throw ownershipError(`${filename} must export PORT and TAMA_SETUP_TOKEN`);
   }
   return `http://localhost:${port}/setup/root?token=${encodeURIComponent(setupToken)}`;
-}
-
-/** @param {Map<string, string>} values */
-export function processEnvironment(values) {
-  return { ...process.env, ...Object.fromEntries(values) };
 }
