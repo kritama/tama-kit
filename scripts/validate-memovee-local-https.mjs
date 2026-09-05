@@ -65,13 +65,18 @@ function bootstrap(...args) {
 
 async function startProvider() {
   const values = parseEnv(readFileSync(fragment, "utf8"));
-  const child = spawn("mix", ["phx.server"], {
+  // Trust the fixture CA inside this provider VM before its HTTP clients start.
+  // Host certificate stores and the pinned provider source stay unchanged.
+  const start =
+    ':ok = :public_key.cacerts_load(String.to_charlist(System.fetch_env!("TAMA_TEST_CA_CERT"))); Mix.Task.run("app.start")';
+  const child = spawn("mix", ["phx.server", "--no-start", "--eval", start], {
     cwd: project,
     env: {
       ...process.env,
       ...values,
       MIX_ENV: "dev",
       PHX_SERVER: "true",
+      TAMA_TEST_CA_CERT: join(caRoot, "rootCA.pem"),
       DATABASE_HOST: "127.0.0.1",
       DATABASE_PORT: "5432",
     },

@@ -52,10 +52,8 @@ jobs:
       - name: Type-check CLI
         run: npm run typecheck
 
-      # Run files serially on the minimum macOS runtime: concurrent Node 20.12
-      # workers aborted natively on hosted runners before reporting assertions.
       - name: Run Node test suite
-        run: npm test -- --test-concurrency=${{ runner.os == 'macOS' && matrix.node == '20.12.0' && '1' || '2' }}
+        run: npm test
 
       - name: Report macOS native crashes
         if: failure() && runner.os == 'macOS'

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
   createHash,
   createPrivateKey,
@@ -430,4 +431,32 @@ test("validatePublicJwkSet rejects private, non-RSA, duplicate, and oversized me
   expectInvalidSet(
     JSON.stringify(Array.from({ length: OAUTH_JWK_PUBLIC_SET_MAX_ITEMS + 1 }, () => key)),
   );
+});
+
+test("OAuth key generation survives garbage collection during repeated JWK export", () => {
+  const moduleUrl = new URL("../../cli/shared/oauth-key.mjs", import.meta.url).href;
+  const script = `
+    import { generateKeyPairSync } from 'node:crypto';
+    import { generateOAuthPrivateJwk, generateOAuthKeyPair } from ${JSON.stringify(moduleUrl)};
+    const prototype = Object.getPrototypeOf(generateKeyPairSync('rsa', {
+      modulusLength: 512,
+    }).privateKey);
+    const originalExport = prototype.export;
+    prototype.export = function (options) {
+      let result;
+      for (let i = 0; i < 200; i++) result = originalExport.call(this, options);
+      return result;
+    };
+    for (let i = 0; i < 8; i++) {
+      generateOAuthPrivateJwk();
+      generateOAuthKeyPair('test');
+    }
+    console.log('ok');
+  `;
+  const output = execFileSync(
+    process.execPath,
+    ["--max-semi-space-size=1", "--input-type=module", "--eval", script],
+    { encoding: "utf8", timeout: 60_000, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  assert.equal(output.trim(), "ok");
 });

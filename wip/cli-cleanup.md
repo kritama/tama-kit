@@ -113,7 +113,7 @@ Local validation on macOS arm64, against the completed five-stage change:
 
 - `npm run check`, `npm run typecheck`, and `git diff --check` pass.
 - `npm test` passes on Node 20.12.0/npm 10.5.0 and Node 24.13.0:
-  273 pass, one existing root-only ownership test skipped. The normal macOS
+  274 pass, one existing root-only ownership test skipped. The normal macOS
   temporary directory now works; explicit symlink refusal tests remain intact.
 - `npm run validate:package` passes on both runtime versions. It builds, packs,
   installs without development dependencies, and checks ESM/assets, help,
@@ -135,14 +135,20 @@ Local validation on macOS arm64, against the completed five-stage change:
   The source also builds and runs from a fresh archive without generated files.
 - CI now covers Linux/macOS with Node 20.12.0 and 24, installed-package checks,
   and the existing Linux bootstrap and pinned Memovee runtime gates. Their
-  results must be checked on the pushed revision. Initial runs passed three
-  matrix jobs; concurrent macOS Node 20.12 workers aborted with SIGABRT in
-  different files on two attempts. That job now executes files serially;
-  native crash diagnostics report exception/stack fields without environment
-  variables. No assertions or test cases are suppressed. The pinned Memovee gate is
+  results must be checked on the pushed revision. macOS Node 20.12 exposed a
+  native crypto mutex abort during JWK export/GC, reproduced in a small local
+  script and in serial execution. The shared generator now requests DER output
+  and reimports it before JWK export, separating the key from the native keygen
+  job. Temporary private DER buffers are cleared. RSA strength, JWK fields,
+  thumbprints, and output contracts are unchanged. A subprocess regression
+  stresses GC during export; normal test concurrency is restored. Native crash
+  diagnostics report exception/stack fields without environment variables. The pinned Memovee gate is
   not run against the user's active local checkout or occupied provider port.
 
 Runtime harnesses use unique Compose project names and canonical fixture paths.
 The ordinary runtime test selects a free host port; HTTPS probes explicitly trust
-an isolated CA. Production timeout, certificate policy, generated templates,
+an isolated CA. The pinned Memovee fixture loads that CA into its own Erlang VM
+before application startup; this fixes the initial CI provider's unknown-CA
+failure without editing provider source or host trust. Production timeout,
+certificate policy, generated templates,
 contract schemas, and runtime validation remain unchanged.
