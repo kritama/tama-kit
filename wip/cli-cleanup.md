@@ -129,11 +129,17 @@ Local validation on macOS arm64, against the completed five-stage change:
   Compose 5.1.2, and a private fixture CA. No host trust-store changes.
 - `mise exec terraform@1.12.2 -- npm run validate:bootstrap:runtime` reaches
   Compose startup but the cached arm64 `ghcr.io/upmaru/tama:latest` image does
-  not become reachable within the existing 60-second limit. The test cleans
-  up its services; this does not establish ordinary-runtime acceptance.
+  not become reachable within the existing 60-second limit on the first run.
+  Both v0.4.4 and the cleaned CLI passed subsequent isolated runtime runs,
+  including health/setup/JWKS, Compose, Terraform, and package checks.
+  The source also builds and runs from a fresh archive without generated files.
 - CI now covers Linux/macOS with Node 20.12.0 and 24, installed-package checks,
   and the existing Linux bootstrap and pinned Memovee runtime gates. Their
-  results must be checked on the pushed revision. The pinned Memovee gate is
+  results must be checked on the pushed revision. Initial runs passed three
+  matrix jobs; concurrent macOS Node 20.12 workers aborted with SIGABRT in
+  different files on two attempts. That job now executes files serially;
+  native crash diagnostics report exception/stack fields without environment
+  variables. No assertions or test cases are suppressed. The pinned Memovee gate is
   not run against the user's active local checkout or occupied provider port.
 
 Runtime harnesses use unique Compose project names and canonical fixture paths.

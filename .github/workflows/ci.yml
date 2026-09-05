@@ -52,8 +52,31 @@ jobs:
       - name: Type-check CLI
         run: npm run typecheck
 
+      # Run files serially on the minimum macOS runtime: concurrent Node 20.12
+      # workers aborted natively on hosted runners before reporting assertions.
       - name: Run Node test suite
-        run: npm test
+        run: npm test -- --test-concurrency=${{ runner.os == 'macOS' && matrix.node == '20.12.0' && '1' || '2' }}
+
+      - name: Report macOS native crashes
+        if: failure() && runner.os == 'macOS'
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          from pathlib import Path
+          for path in (Path.home() / "Library/Logs/DiagnosticReports").glob("node*.ips"):
+              try:
+                  text = path.read_text()
+                  report = json.loads(text.split("\n", 1)[1])
+                  print(json.dumps({
+                      "report": path.name,
+                      "exception": report.get("exception"),
+                      "termination": report.get("termination"),
+                      "frames": [frame.get("symbol") for thread in report.get("threads", [])
+                                 if thread.get("triggered") for frame in thread.get("frames", [])]
+                  }))
+              except (ValueError, OSError):
+                  pass
+          PYTHON
 
       - name: Validate public submission metadata
         run: npm run validate:submission
