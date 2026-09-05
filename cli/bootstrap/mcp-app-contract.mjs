@@ -1,13 +1,15 @@
 // @ts-check
 
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseDocument } from "yaml";
 import { usageError } from "../errors.mjs";
+import { isPlainObject, MAX_CONTRACT_BYTES, safeRead } from "./contracts/files.mjs";
+import { validateSupportedVersionRange } from "./contracts/images.mjs";
 import { PENDING_SECRET_VALUE } from "./environment.mjs";
 
 /** @typedef {import("../types.mjs").ProviderBindings} ProviderBindings */
+/** @typedef {import("../domain/contracts.mjs").McpAppContract} McpAppContract */
 
 export const MCP_APP_COMPATIBILITY_IDENTIFIER = "tama-mcp-app-bootstrap-v1";
 export const MCP_APP_PROVIDER_CONTRACT_FILENAME = "tama-mcp-app-bootstrap-v1.json";
@@ -45,7 +47,6 @@ const CONVENTIONAL_ROLE_SUFFIX = Object.freeze({
   introspection_jwks_uri: "TAMA_INTROSPECTION_JWKS_URI",
 });
 
-const MAX_CONTRACT_BYTES = 256 * 1024;
 const ENVIRONMENT_NAME_PATTERN = /^[A-Z][A-Z0-9_]*$/u;
 const PROVIDER_NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const SAFE_PATH_SEGMENT_PATTERN = /^[A-Za-z0-9._-]+$/u;
@@ -56,12 +57,6 @@ export const MCP_APP_PROVIDER_PUBLIC_ENDPOINTS = Object.freeze({
   jwks: "/.well-known/jwks.json",
   introspection: "/auth/introspections",
 });
-const VERSION_CONSTRAINT_SOURCE = "(?:>=|<=|>|<|=)\\s*v?\\d+\\.\\d+\\.\\d+";
-const VERSION_RANGE_PATTERN = new RegExp(
-  `^${VERSION_CONSTRAINT_SOURCE}(?:\\s+and\\s+${VERSION_CONSTRAINT_SOURCE})*$`,
-  "u",
-);
-const VERSION_CONSTRAINT_PATTERN = /(>=|<=|>|<|=)\s*v?(\d+\.\d+\.\d+)/gu;
 const VARIABLE_FORMATS = Object.freeze([
   "absolute-uri",
   "absolute-origin",
@@ -104,27 +99,6 @@ const VARIABLE_KEYS = Object.freeze([
   "default",
   "x-sensitive",
 ]);
-
-/** @param {unknown} value @returns {value is Record<string, unknown>} */
-function isPlainObject(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** @param {string} path @param {number} [maxBytes] @returns {string | null} */
-function safeRead(path, maxBytes = MAX_CONTRACT_BYTES) {
-  try {
-    if (!existsSync(path)) {
-      return null;
-    }
-    const metadata = lstatSync(path);
-    if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.size > maxBytes) {
-      return null;
-    }
-    return readFileSync(path, "utf8");
-  } catch {
-    return null;
-  }
-}
 
 /** @param {string} value @returns {boolean} */
 function safeString(value) {
@@ -230,15 +204,6 @@ export function assertUnreservedFragmentPath(path, label) {
     throw usageError(
       `${label} collides with a bootstrap-managed or application-owned path: ` +
         `${path}; choose a dedicated provider fragment filename such as tama/.<provider>.integration.env`,
-    );
-  }
-}
-
-/** @param {string} value @param {string} label */
-function validateSupportedVersionRange(value, label) {
-  if (!VERSION_RANGE_PATTERN.test(value)) {
-    throw usageError(
-      `MCP App contract ${label} must be a comparison range such as >= 0.13.1 and < 0.14.0`,
     );
   }
 }
@@ -615,7 +580,7 @@ export function bundledTamaContractPath() {
  * describes the Tama environment variables, lifecycle modes, public
  * endpoints, and local development topology that Tama Kit provisions.
  *
- * @returns {Record<string, unknown>}
+ * @returns {McpAppContract}
  */
 export function loadTamaContract() {
   const path = bundledTamaContractPath();
@@ -630,124 +595,12 @@ export function loadTamaContract() {
 }
 
 /**
- * Rejects the official version form that GHCR does not publish. Floating
- * `latest` remains unsuffixed, while concrete server releases use
- * `<version>-server`.
- *
- * @param {string} image
- * @returns {string | null}
- */
-export function invalidOfficialTamaImageTag(image) {
-  const separator = image.lastIndexOf(":");
-  const repository = separator > image.lastIndexOf("/") ? image.slice(0, separator) : image;
-  const tag = separator > image.lastIndexOf("/") ? image.slice(separator + 1) : "latest";
-  return repository === "ghcr.io/upmaru/tama" && /^v?\d+\.\d+\.\d+$/u.test(tag)
-    ? `versioned ghcr.io/upmaru/tama image tag ${tag} is missing the required -server suffix`
-    : null;
-}
-
-/**
- * Checks a Tama image tag against the contract's `supported_tama_versions`
- * range. Official versioned server images use `<version>-server`; the deployment
- * suffix is removed before comparison. The check is best-effort by design:
- * non-semver tags such as `latest` cannot be resolved offline, so they pass
- * with no warning. Other prerelease and build tags do resolve, but SemVer
- * orders them below the stable version they decorate and the range grammar
- * cannot express prerelease bounds, so they are reported as outside the range.
- *
- * @param {string} image
- * @param {unknown} supportedRange
- * @returns {string | null} a reason when the tag is provably outside the
- *   range, otherwise null
- */
-export function unsupportedTamaImage(image, supportedRange) {
-  const invalidOfficialTag = invalidOfficialTamaImageTag(image);
-  if (invalidOfficialTag) {
-    return invalidOfficialTag;
-  }
-  if (typeof supportedRange !== "string" || supportedRange.length === 0) {
-    return null;
-  }
-  validateSupportedVersionRange(supportedRange, "supported_tama_versions");
-  const separator = image.lastIndexOf(":");
-  const tag = separator > image.lastIndexOf("/") ? image.slice(separator + 1) : "latest";
-  const stableServerTag = tag.match(/^(v?\d+\.\d+\.\d+)-server$/u);
-  const versionTag = stableServerTag?.[1] ?? tag;
-  const version = parseSemver(versionTag);
-  if (!version) {
-    return null;
-  }
-  // A prerelease or build suffix orders the tag below the stable version it
-  // decorates (0.13.1-rc.1 < 0.13.1), and the range grammar cannot express
-  // prerelease bounds, so such a tag cannot be held to the range.
-  if (!stableServerTag && !/^v?\d+\.\d+\.\d+$/u.test(tag)) {
-    return `Tama image tag ${tag} is a prerelease or build tag; the supported Tama range ${supportedRange} admits stable release tags only`;
-  }
-  const constraints = supportedRange.matchAll(VERSION_CONSTRAINT_PATTERN);
-  for (const match of constraints) {
-    const bound = parseSemver(match[2]);
-    if (!bound) {
-      continue;
-    }
-    const comparison = compareSemver(version, bound);
-    const ok =
-      match[1] === ">="
-        ? comparison >= 0
-        : match[1] === "<="
-          ? comparison <= 0
-          : match[1] === ">"
-            ? comparison > 0
-            : match[1] === "<"
-              ? comparison < 0
-              : comparison === 0;
-    if (!ok) {
-      return `Tama image tag ${tag} is outside the supported Tama range ${supportedRange}`;
-    }
-  }
-  return null;
-}
-
-/**
- * Reports the Tama image tag when it is not a pinned version. Floating tags
- * such as `latest` cannot be checked against the supported range offline, so
- * planning the MCP App integration against them would start a runtime Tama
- * Kit cannot hold to the contract once the tag moves.
- *
- * @param {string} image
- * @returns {string | null} the unresolvable tag, or null for a pinned one
- */
-export function unpinnedTamaImageTag(image) {
-  const separator = image.lastIndexOf(":");
-  const tag = separator > image.lastIndexOf("/") ? image.slice(separator + 1) : "latest";
-  return parseSemver(tag) === null ? tag : null;
-}
-
-/** @param {string} value @returns {[number, number, number] | null} */
-function parseSemver(value) {
-  const match = value.match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?$/u);
-  if (!match) {
-    return null;
-  }
-  return [Number(match[1]), Number(match[2]), Number(match[3])];
-}
-
-/** @param {[number, number, number]} left @param {[number, number, number]} right */
-function compareSemver(left, right) {
-  for (let index = 0; index < 3; index += 1) {
-    if (left[index] !== right[index]) {
-      return left[index] < right[index] ? -1 : 1;
-    }
-  }
-  return 0;
-}
-
-/**
  * Structurally validates a contract document against the versioned MCP App
  * bootstrap schema: the schema version, compatibility identifier, and
  * lifecycle modes must be present and supported.
  *
  * @param {unknown} document
- * @returns {Record<string, unknown>}
+ * @returns {McpAppContract}
  */
 export function validateMcpAppContract(document) {
   if (!isPlainObject(document)) {
@@ -811,7 +664,7 @@ export function validateMcpAppContract(document) {
   if (provider !== null) {
     validateBindingsAgainstVariables(document, provider);
   }
-  return document;
+  return /** @type {McpAppContract} */ (document);
 }
 
 /**
@@ -895,7 +748,7 @@ function declaredEnumerations(variable) {
  * Dry-run placeholder values are exempt: the real material is validated when
  * it is generated or preserved.
  *
- * @param {Record<string, unknown> | null} contractDocument Provider contract, or null for conventional bindings.
+ * @param {McpAppContract | null} contractDocument Provider contract, or null for conventional bindings.
  * @param {Record<string, string>} roles Role to bound variable name.
  * @param {Record<string, string>} emitted Variable name to planned value.
  */
@@ -1026,7 +879,7 @@ function parseJson(value, reject) {
   }
 }
 
-/** @param {string} path @returns {Record<string, unknown>} */
+/** @param {string} path @returns {McpAppContract} */
 function parseContract(path) {
   let metadata;
   try {
@@ -1063,7 +916,7 @@ function parseContract(path) {
  *
  * @param {string} root
  * @param {string | undefined} explicitPath
- * @returns {{path: string | null, document: Record<string, unknown> | null}}
+ * @returns {{path: string | null, document: McpAppContract | null}}
  */
 export function discoverProviderContract(root, explicitPath) {
   if (explicitPath) {
@@ -1131,14 +984,12 @@ export function discoverProviderContract(root, explicitPath) {
  * `bindings` map supplies the variable names; otherwise the conventional
  * `<PREFIX>_<SUFFIX>` table derives them from the environment prefix.
  *
- * @param {Record<string, unknown> | null} contractDocument
+ * @param {{bindings?: unknown} | null} contractDocument
  * @param {string} environmentPrefix
  * @returns {ProviderBindings}
  */
 export function resolveBindings(contractDocument, environmentPrefix) {
-  const bindings = isPlainObject(contractDocument?.bindings)
-    ? /** @type {Record<string, unknown>} */ (contractDocument.bindings)
-    : null;
+  const bindings = isPlainObject(contractDocument?.bindings) ? contractDocument.bindings : null;
   if (bindings) {
     const unexpected = Object.keys(bindings).filter((role) => !MCP_APP_ROLES.includes(role));
     if (unexpected.length > 0) {
@@ -1172,181 +1023,17 @@ export function resolveBindings(contractDocument, environmentPrefix) {
 }
 
 /**
- * Determines whether the provider fragment is loaded by an application-owned
- * mechanism that Tama Kit can safely confirm. A provider contract declaration
- * records intent but is not evidence by itself. An active direnv
- * `dotenv`/`dotenv_load` directive or a Compose `env_file` entry that references
- * the fragment verifies it. A bare textual occurrence — a comment or an
- * unrelated command naming the file — does not count: migration deletes the
- * fragment this check exists to protect. When no loader can be confirmed the
- * integration is reported unverified rather than failing, because the
- * application owns its loader.
- *
- * @param {string} root
- * @param {string} environmentFile
- * @param {Record<string, unknown> | null} contractDocument
- * @param {string} [selectedCompose]
- * @returns {"verified" | "unverified"}
- */
-export function verifyEnvironmentLoading(root, environmentFile, contractDocument, selectedCompose) {
-  return verifyEnvironmentLoadingEvidence(root, environmentFile, contractDocument, selectedCompose)
-    .status;
-}
-
-/**
- * Returns the exact static evidence behind the loader status. Provider
- * contract declarations describe intent but are not evidence by themselves:
- * the referenced application-owned loader must exist and actively consume the
- * generated fragment.
- *
- * @param {string} root
- * @param {string} environmentFile
- * @param {Record<string, unknown> | null} contractDocument
- * @param {string} [selectedCompose]
- * @returns {import("../types.mjs").EnvironmentLoadingEvidence}
- */
-export function verifyEnvironmentLoadingEvidence(
-  root,
-  environmentFile,
-  contractDocument,
-  selectedCompose,
-) {
-  // Reading the declaration keeps this verifier deliberately aware of the
-  // accepted provider contract without treating the object as certification.
-  // The validator already requires `loads` to match the provider fragment.
-  void contractDocument;
-  const envrc = safeRead(join(root, ".envrc"));
-  if (envrc !== null && envrcLoadsFragment(envrc, environmentFile)) {
-    return { status: "verified", mechanism: "direnv", evidencePath: ".envrc" };
-  }
-  const composePaths = [
-    ...(selectedCompose ? [resolve(root, selectedCompose)] : []),
-    ...["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"].map((name) =>
-      join(root, name),
-    ),
-  ];
-  for (const composePath of new Set(composePaths)) {
-    const compose = safeRead(composePath);
-    if (
-      compose !== null &&
-      composeReferencesFragment(compose, resolve(root, environmentFile), composePath)
-    ) {
-      const local = relative(root, composePath);
-      return {
-        status: "verified",
-        mechanism: "compose-env-file",
-        evidencePath:
-          local !== "" && !isAbsolute(local) && local !== ".." && !local.startsWith(`..${sep}`)
-            ? local.split(sep).join("/")
-            : composePath,
-      };
-    }
-  }
-  return { status: "unverified", mechanism: null, evidencePath: null };
-}
-
-/** @param {string} value */
-function unquote(value) {
-  return value.length >= 2 &&
-    ((value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'")))
-    ? value.slice(1, -1)
-    : value;
-}
-
-/**
- * Reports whether a direnv `.envrc` actively loads the fragment: a top-level
- * `dotenv` or `dotenv_load` directive whose path argument is the fragment.
- *
- * @param {string} envrc
- * @param {string} environmentFile
- * @returns {boolean}
- */
-function envrcLoadsFragment(envrc, environmentFile) {
-  for (const rawLine of envrc.split(/\r?\n/u)) {
-    const tokens = rawLine
-      .trim()
-      .split(/\s+/u)
-      .filter((token) => token !== "");
-    if (tokens.length === 0) {
-      continue;
-    }
-    const command = unquote(tokens[0]);
-    if (command !== "dotenv" && command !== "dotenv_load") {
-      continue;
-    }
-    let path = null;
-    for (let index = 1; index < tokens.length; index += 1) {
-      const token = tokens[index];
-      if (token.startsWith("-")) {
-        continue;
-      }
-      if (path === null && token === "load") {
-        continue;
-      }
-      path = unquote(token);
-      break;
-    }
-    if (path === environmentFile || path === `./${environmentFile}`) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
- * Reports whether a Compose file loads the fragment: the name must appear as
- * a service `env_file` entry (string, flow list, or block list form). A
- * textual mention in a command, label, or volume does not load the file, so
- * it does not count.
- *
- * @param {string} compose
- * @param {string} environmentFilePath
- * @param {string} composePath
- * @returns {boolean}
- */
-function composeReferencesFragment(compose, environmentFilePath, composePath) {
-  const document = parseDocument(compose);
-  if (document.errors.length > 0) {
-    return false;
-  }
-  const root = document.toJS();
-  const services = isPlainObject(root) && isPlainObject(root.services) ? root.services : null;
-  if (services === null) {
-    return false;
-  }
-  for (const service of Object.values(services)) {
-    if (!isPlainObject(service)) {
-      continue;
-    }
-    const envFile = service.env_file;
-    const entries = Array.isArray(envFile) ? envFile : envFile === undefined ? [] : [envFile];
-    if (
-      entries.some((entry) => {
-        const path = typeof entry === "string" ? entry : isPlainObject(entry) ? entry.path : null;
-        return (
-          typeof path === "string" && resolve(dirname(composePath), path) === environmentFilePath
-        );
-      })
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
  * Reads an optional local development origin declared by the provider
  * contract, keyed by `<provider>_origin`. This keeps provider-specific
  * defaults inside the provider contract instead of Tama Kit.
  *
- * @param {Record<string, unknown> | null} contractDocument
+ * @param {McpAppContract | null} contractDocument
  * @param {string} providerName
  * @returns {string | null}
  */
 export function contractLocalOrigin(contractDocument, providerName) {
   const local = isPlainObject(contractDocument?.local_development)
-    ? /** @type {Record<string, unknown>} */ (contractDocument.local_development)
+    ? contractDocument.local_development
     : null;
   const value = local?.[`${providerName}_origin`];
   return typeof value === "string" && value.length > 0 ? value : null;
@@ -1360,15 +1047,13 @@ export function contractLocalOrigin(contractDocument, providerName) {
  * contract wins over the bundled Tama contract; an absent or unparsable
  * origin yields null.
  *
- * @param {Record<string, unknown> | null} providerContract
- * @param {Record<string, unknown> | null} tamaContract
+ * @param {McpAppContract | null} providerContract
+ * @param {McpAppContract | null} tamaContract
  * @returns {number | null}
  */
 export function contractTamaPort(providerContract, tamaContract) {
   for (const document of [providerContract, tamaContract]) {
-    const local = isPlainObject(document?.local_development)
-      ? /** @type {Record<string, unknown>} */ (document.local_development)
-      : null;
+    const local = isPlainObject(document?.local_development) ? document.local_development : null;
     const value = local?.tama_origin;
     if (typeof value !== "string" || value.length === 0) {
       continue;
@@ -1387,3 +1072,13 @@ export function contractTamaPort(providerContract, tamaContract) {
   }
   return null;
 }
+
+export {
+  verifyEnvironmentLoading,
+  verifyEnvironmentLoadingEvidence,
+} from "./contracts/environment-loading.mjs";
+export {
+  invalidOfficialTamaImageTag,
+  unpinnedTamaImageTag,
+  unsupportedTamaImage,
+} from "./contracts/images.mjs";

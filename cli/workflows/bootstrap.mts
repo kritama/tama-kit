@@ -1,4 +1,3 @@
-// @ts-check
 import { existsSync } from "node:fs";
 import {
   discoverMkcert,
@@ -14,11 +13,11 @@ import { applyOperationsTransactionally } from "../shared/write.mjs";
 import { startBootstrapRuntime } from "./mcp-app-runtime.mjs";
 import { mcpAppOptions } from "./options.mjs";
 
-/** @typedef {import("../types.mjs").BootstrapPlan} BootstrapPlan */
-/** @typedef {import("../types.mjs").BootstrapCommandOptions} BootstrapCommandOptions */
-/** @typedef {import("../types.mjs").McpAppPrepared} McpAppPrepared */
-/** @typedef {import("../types.mjs").McpAppBootstrapOptions} McpAppBootstrapOptions */
-/** @typedef {ReturnType<typeof import("../terminal.mjs").createProgressBar>} Progress */
+type BootstrapPlan = import("../types.mjs").BootstrapPlan;
+type BootstrapCommandOptions = import("../types.mjs").BootstrapCommandOptions;
+type McpAppPrepared = import("../types.mjs").McpAppPrepared;
+type McpAppBootstrapOptions = import("../types.mjs").McpAppBootstrapOptions;
+type Progress = ReturnType<typeof import("../terminal.mjs").createProgressBar>;
 
 const bootstrapEffects = {
   createBootstrapPlan,
@@ -33,8 +32,7 @@ const bootstrapEffects = {
   existsSync,
 };
 
-/** @param {Partial<typeof bootstrapEffects>} [overrides] */
-export function createBootstrapWorkflow(overrides = {}) {
+export function createBootstrapWorkflow(overrides: Partial<typeof bootstrapEffects> = {}) {
   const {
     createBootstrapPlan,
     validateWrittenSecretsIgnored,
@@ -48,7 +46,6 @@ export function createBootstrapWorkflow(overrides = {}) {
     existsSync,
   } = { ...bootstrapEffects, ...overrides };
 
-  /** @param {{options: BootstrapCommandOptions, cwd: string, skillMode: import("../types.mjs").AgentSkillMode, mcpAppPrepared: McpAppPrepared | null, progress: Progress, authorizeLocalCa?: () => Promise<boolean>}} input */
   return async function runBootstrapWorkflow({
     options,
     cwd,
@@ -56,16 +53,22 @@ export function createBootstrapWorkflow(overrides = {}) {
     mcpAppPrepared,
     progress,
     authorizeLocalCa,
+  }: {
+    options: BootstrapCommandOptions;
+    cwd: string;
+    skillMode: import("../types.mjs").AgentSkillMode;
+    mcpAppPrepared: McpAppPrepared | null;
+    progress: Progress;
+    authorizeLocalCa?: () => Promise<boolean>;
   }) {
     progress.update(0, "Planning bootstrap changes");
-    /** @type {BootstrapPlan} */
-    let plan;
-    let healthUrl;
+    let plan: BootstrapPlan;
+    let healthUrl: string | undefined;
     try {
-      /** @type {McpAppBootstrapOptions | undefined} */
-      const requestedMcpApp = mcpAppPrepared ? mcpAppOptions(options) : undefined;
-      /** @type {McpAppBootstrapOptions | undefined} */
-      const initialMcpApp =
+      const requestedMcpApp: McpAppBootstrapOptions | undefined = mcpAppPrepared
+        ? mcpAppOptions(options)
+        : undefined;
+      const initialMcpApp: McpAppBootstrapOptions | undefined =
         requestedMcpApp && options.activate
           ? {
               ...requestedMcpApp,
@@ -75,7 +78,7 @@ export function createBootstrapWorkflow(overrides = {}) {
             }
           : requestedMcpApp;
       plan = createBootstrapPlan({
-        cwd: cwd,
+        cwd,
         targetPath: options.targetPath,
         composePath: options.composePath,
         port: options.port,
@@ -87,14 +90,14 @@ export function createBootstrapWorkflow(overrides = {}) {
       });
       if (options.activate && plan.mcpApp?.providerLifecycle === "enabled") {
         plan = createBootstrapPlan({
-          cwd: cwd,
+          cwd,
           targetPath: options.targetPath,
           composePath: options.composePath,
           port: options.port,
           image: options.image,
           skillMode,
           mcpApp: {
-            .../** @type {McpAppBootstrapOptions} */ (requestedMcpApp),
+            ...(requestedMcpApp as McpAppBootstrapOptions),
             activate: true,
             targetMode: "enabled",
             providerMode: "enabled",

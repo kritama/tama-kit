@@ -1,4 +1,5 @@
 // @ts-check
+/** @typedef {import("../domain/contracts.mjs").McpAppContract} McpAppContract */
 
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
@@ -313,7 +314,7 @@ export function validateMcpAppLocalContract(document) {
  *   identity: import("../types.mjs").ProviderIdentity,
  *   bindings: Record<string, string>,
  *   providerContractPath: string | null,
- *   providerContractDocument: Record<string, unknown> | null,
+ *   providerContractDocument: McpAppContract | null,
  *   environmentLoading: import("../types.mjs").EnvironmentLoadingEvidence,
  *   topology?: import("../types.mjs").LocalHttpsTopology | null,
  * }} input

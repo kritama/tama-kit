@@ -1,4 +1,5 @@
 // @ts-check
+/** @typedef {import("../domain/contracts.mjs").McpAppContract} McpAppContract */
 
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
@@ -208,7 +209,7 @@ export function detectProviderIdentity(root, framework) {
  * @property {string} root
  * @property {Framework} framework
  * @property {ProviderIdentity | null} manifestProvider
- * @property {Record<string, unknown> | null} contractDocument
+ * @property {McpAppContract | null} contractDocument
  * @property {string | undefined} name
  * @property {string | undefined} prefix
  * @property {string | undefined} environmentFile
@@ -231,14 +232,14 @@ function assertFragmentPath(value, label) {
 }
 
 /**
- * @param {Record<string, unknown> | null} contractDocument
+ * @param {McpAppContract | null} contractDocument
  * @param {ProviderIdentity["source"] | undefined} identitySource
  * @returns {ProviderIdentity | null}
  */
 function contractProviderIdentity(contractDocument, identitySource) {
   const contractIdentity =
     contractDocument !== null && isIdentityDocument(contractDocument.provider)
-      ? /** @type {Record<string, unknown>} */ (contractDocument.provider)
+      ? contractDocument.provider
       : null;
   const contractName =
     typeof contractIdentity?.name === "string" ? contractIdentity.name : undefined;

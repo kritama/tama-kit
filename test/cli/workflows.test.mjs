@@ -33,7 +33,13 @@ function plan(tama = "prepared", provider = "prepared") {
     },
   };
 }
-function fixture({ startFailure, verifyFailure, recoveryFailure, transportFailure } = {}) {
+function fixture({
+  startFailure,
+  verifyFailure,
+  verifyException,
+  recoveryFailure,
+  transportFailure,
+} = {}) {
   const events = [];
   let starts = 0;
   let verifications = 0;
@@ -68,6 +74,7 @@ function fixture({ startFailure, verifyFailure, recoveryFailure, transportFailur
     },
     async verifyMcpApp({ plan: value }) {
       verifications++;
+      if (verifications === verifyException) throw new Error("verification exception");
       events.push(`verify:${value.lifecycle}/${value.providerLifecycle}`);
       return {
         verified: verifications !== verifyFailure,
@@ -221,4 +228,25 @@ test("development prepare-only writes files without Docker, Mix, or foundation s
     progress,
   });
   assert.deepEqual(events, ["write"]);
+});
+
+test("a rejected enabled verification effect compensates before reporting failure", async () => {
+  const f = fixture({ verifyException: 1 });
+  await assert.rejects(
+    f.run(plan("enabled", "enabled")),
+    /Verification failure: verification exception/u,
+  );
+  assert.equal(f.events.at(-1), "start:prepared/prepared");
+});
+
+test("a failed recovery reports both the activation and recovery failures", async () => {
+  const f = fixture({ startFailure: 1, recoveryFailure: true });
+  await assert.rejects(f.run(plan("enabled", "enabled")), (error) => {
+    assert.equal(error.category, "startup");
+    assert.match(
+      error.message,
+      /startup fault.*Restoring prepared mode also failed: recovery fault/u,
+    );
+    return true;
+  });
 });

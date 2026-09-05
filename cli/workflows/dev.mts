@@ -1,11 +1,10 @@
-// @ts-check
 import { validateCompose, validateComposePrerequisite } from "../bootstrap/start.mjs";
 import { createDevSetupPlan } from "../dev/plan.mjs";
 import { runMixSetup, runTestFoundationSetup, startDevDatabase } from "../dev/start.mjs";
 import { processEnvironment } from "../shared/environment.mjs";
 import { applyOperationsTransactionally } from "../shared/write.mjs";
 
-/** @typedef {import("../types.mjs").DevSetupPlan} DevSetupPlan */
+type DevSetupPlan = import("../types.mjs").DevSetupPlan;
 
 const devEffects = {
   createDevSetupPlan,
@@ -16,8 +15,8 @@ const devEffects = {
   startDevDatabase,
   applyOperationsTransactionally,
 };
-/** @param {Partial<typeof devEffects>} [overrides] */
-export function createDevWorkflow(overrides = {}) {
+
+export function createDevWorkflow(overrides: Partial<typeof devEffects> = {}) {
   const {
     createDevSetupPlan,
     validateCompose,
@@ -27,14 +26,21 @@ export function createDevWorkflow(overrides = {}) {
     startDevDatabase,
     applyOperationsTransactionally,
   } = { ...devEffects, ...overrides };
-  /** @param {{options: import("../types.mjs").DevCommandOptions, cwd: string, progress: ReturnType<typeof import("../terminal.mjs").createProgressBar>}} input */
-  return async function runDevWorkflow({ options, cwd, progress }) {
+
+  return async function runDevWorkflow({
+    options,
+    cwd,
+    progress,
+  }: {
+    options: import("../types.mjs").DevCommandOptions;
+    cwd: string;
+    progress: ReturnType<typeof import("../terminal.mjs").createProgressBar>;
+  }) {
     progress.update(0, "Planning development setup");
-    /** @type {DevSetupPlan} */
-    let plan;
+    let plan: DevSetupPlan;
     try {
       plan = createDevSetupPlan({
-        cwd: cwd,
+        cwd,
         targetPath: options.targetPath,
         tamaPort: options.port,
         postgresPort: options.postgresPort,

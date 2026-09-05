@@ -1,9 +1,7 @@
-// @ts-check
-/** @typedef {import("../types.mjs").BootstrapCommandOptions} BootstrapCommandOptions */
-/** @typedef {import("../types.mjs").McpAppBootstrapOptions} McpAppBootstrapOptions */
+type BootstrapCommandOptions = import("../types.mjs").BootstrapCommandOptions;
+type McpAppBootstrapOptions = import("../types.mjs").McpAppBootstrapOptions;
 
-/** @param {BootstrapCommandOptions} options @returns {McpAppBootstrapOptions} */
-export function mcpAppOptions(options) {
+export function mcpAppOptions(options: BootstrapCommandOptions): McpAppBootstrapOptions {
   return {
     requested: options.mcpApp,
     contractPath: options.mcpAppContract,
