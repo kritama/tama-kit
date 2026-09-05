@@ -1,9 +1,15 @@
 // @ts-check
+/** @typedef {import("../domain/contracts.mjs").McpAppContract} McpAppContract */
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { ownershipError, usageError } from "../errors.mjs";
+import {
+  generateOAuthKeyPair,
+  validateOAuthPrivateJwk,
+  validatePublicJwkSet,
+} from "../shared/oauth-key.mjs";
 import { BOOTSTRAP_PATHS, MANAGED_MARKER } from "./constants.mjs";
 import {
   PENDING_SECRET_VALUE,
@@ -28,11 +34,6 @@ import {
 } from "./mcp-app-contract.mjs";
 import { renderMcpAppLocalContract } from "./mcp-app-local-contract.mjs";
 import {
-  generateOAuthKeyPair,
-  validateOAuthPrivateJwk,
-  validatePublicJwkSet,
-} from "./oauth-key.mjs";
-import {
   environmentFileForName,
   normalizeProviderName,
   prefixFromName,
@@ -50,7 +51,7 @@ import {
 /** @typedef {import("../types.mjs").McpAppPrepared} McpAppPrepared */
 /** @typedef {import("../types.mjs").PersistedMcpAppProvider} PersistedMcpAppProvider */
 /** @typedef {import("../types.mjs").ProviderIdentity} ProviderIdentity */
-/** @typedef {import("./oauth-key.mjs").OAuthKeyPair} OAuthKeyPair */
+/** @typedef {import("../shared/oauth-key.mjs").OAuthKeyPair} OAuthKeyPair */
 
 const TAMA_MCP_APP_RESOURCE_PATH = "/mcp/app";
 const TAMA_INTROSPECTION_KEY_VARIABLE = "TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY";
@@ -439,7 +440,7 @@ export async function prepareMcpApp({
  * @property {string} root
  * @property {ProviderIdentity} identity
  * @property {string | null} contractPath
- * @property {Record<string, unknown> | null} contractDocument
+ * @property {McpAppContract | null} contractDocument
  * @property {string} [selectedCompose]
  * @property {import("../types.mjs").LocalHttpsTopology | null} [topology]
  */
@@ -495,7 +496,7 @@ export function resolveMcpAppState({
  * @property {ProviderIdentity} identity
  * @property {import("../types.mjs").ResolvedMcpAppProvider} state Resolved state to persist and plan from.
  * @property {PersistedMcpAppProvider | null} persisted Previously persisted manifest state.
- * @property {Record<string, unknown> | null} contractDocument Provider contract document,
+ * @property {McpAppContract | null} contractDocument Provider contract document,
  *   or null when conventional bindings are used.
  * @property {number} port Public Tama port the environment file will carry.
  * @property {string} tamaImage Tama image reference planned for Compose.

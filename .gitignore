@@ -3,3 +3,8 @@ node_modules/
 __pycache__/
 *.py[cod]
 .DS_Store
+
+# ESM emitted from CLI TypeScript sources
+/cli/types.mjs
+/cli/workflows/*.mjs
+/cli/domain/*.mjs

@@ -2,16 +2,27 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
+import { prepareLocalTestCa } from "./lib/local-test-ca.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const project = resolve(process.env.MEMOVEE_CHECKOUT ?? "");
 if (!process.env.MEMOVEE_CHECKOUT || !existsSync(join(project, "mix.exs"))) {
   throw new Error("MEMOVEE_CHECKOUT must name a Memovee source checkout");
 }
+const temporary = mkdtempSync(join(realpathSync(tmpdir()), "tama-kit-memovee-validation-"));
+let caRoot;
 const composeFile = join(project, "compose.yaml");
 const originalCompose = readFileSync(composeFile, "utf8");
 const fragment = join(project, "tama", ".memovee.integration.env");
@@ -21,6 +32,11 @@ let provider;
 function execute(command, args, options = {}) {
   return execFileSync(command, args, {
     cwd: project,
+    env: {
+      ...process.env,
+      CAROOT: caRoot,
+      COMPOSE_PROJECT_NAME: temporary.split("/").at(-1).toLowerCase(),
+    },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     ...options,
@@ -49,13 +65,18 @@ function bootstrap(...args) {
 
 async function startProvider() {
   const values = parseEnv(readFileSync(fragment, "utf8"));
-  const child = spawn("mix", ["phx.server"], {
+  // Trust the fixture CA inside this provider VM before its HTTP clients start.
+  // Host certificate stores and the pinned provider source stay unchanged.
+  const start =
+    ':ok = :public_key.cacerts_load(String.to_charlist(System.fetch_env!("TAMA_TEST_CA_CERT"))); Mix.Task.run("app.start")';
+  const child = spawn("mix", ["phx.server", "--no-start", "--eval", start], {
     cwd: project,
     env: {
       ...process.env,
       ...values,
       MIX_ENV: "dev",
       PHX_SERVER: "true",
+      TAMA_TEST_CA_CERT: join(caRoot, "rootCA.pem"),
       DATABASE_HOST: "127.0.0.1",
       DATABASE_PORT: "5432",
     },
@@ -96,7 +117,8 @@ try {
   execute("mix", ["deps.get"]);
   execute("mix", ["ecto.setup"]);
 
-  bootstrap("--install-local-ca");
+  caRoot = prepareLocalTestCa(temporary);
+  bootstrap();
   provider = await startProvider();
   const prepared = bootstrap("--start");
   assert.equal(prepared.mcpApp.verified, true);
@@ -121,4 +143,5 @@ try {
     // Preserve the primary validation failure.
   }
   writeFileSync(composeFile, originalCompose);
+  rmSync(temporary, { recursive: true, force: true });
 }

@@ -1,11 +1,12 @@
 // @ts-check
+/** @typedef {import("../domain/contracts.mjs").McpAppContract} McpAppContract */
 
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 
 import { usageError } from "../errors.mjs";
+import { contentDigest } from "../shared/files.mjs";
 import { BOOTSTRAP_PATHS } from "./constants.mjs";
-import { contentDigest } from "./files.mjs";
 import {
   assertUnreservedFragmentPath,
   MCP_APP_COMPATIBILITY_IDENTIFIER,
@@ -313,7 +314,7 @@ export function validateMcpAppLocalContract(document) {
  *   identity: import("../types.mjs").ProviderIdentity,
  *   bindings: Record<string, string>,
  *   providerContractPath: string | null,
- *   providerContractDocument: Record<string, unknown> | null,
+ *   providerContractDocument: McpAppContract | null,
  *   environmentLoading: import("../types.mjs").EnvironmentLoadingEvidence,
  *   topology?: import("../types.mjs").LocalHttpsTopology | null,
  * }} input

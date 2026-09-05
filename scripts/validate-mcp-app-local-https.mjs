@@ -2,15 +2,26 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 
+import { prepareLocalTestCa } from "./lib/local-test-ca.mjs";
+
+let caRoot;
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const project = mkdtempSync(join(tmpdir(), "tama-kit-mcp-app-https-"));
+const project = mkdtempSync(join(realpathSync(tmpdir()), "tama-kit-mcp-app-https-"));
 const composeFile = join(project, "compose.yaml");
 const fragment = join(project, "tama", ".fixture.integration.env");
 let provider;
@@ -30,6 +41,11 @@ const providerPort = await new Promise((resolvePort, reject) => {
 function execute(command, args, options = {}) {
   return execFileSync(command, args, {
     cwd: project,
+    env: {
+      ...process.env,
+      CAROOT: caRoot,
+      COMPOSE_PROJECT_NAME: project.split("/").at(-1).toLowerCase(),
+    },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     ...options,
@@ -64,7 +80,8 @@ try {
   );
   mkdirSync(join(project, "tama"), { recursive: true });
 
-  const prepared = bootstrap("--install-local-ca");
+  caRoot = prepareLocalTestCa(project);
+  const prepared = bootstrap();
   assert.equal(prepared.localHttps.providerOrigin, "https://app.localhost");
   assert.equal(prepared.localHttps.tamaOrigin, "https://tama.app.localhost");
   assert.equal(prepared.localHttps.certificateReady, true);

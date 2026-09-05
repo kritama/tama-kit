@@ -3,16 +3,15 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseEnv } from "node:util";
-
 import { ownershipError } from "../errors.mjs";
-import { BOOTSTRAP_PATHS, DEFAULTS } from "./constants.mjs";
-import { hasManagedMarker, operationForContent } from "./files.mjs";
+import { isValidVaultKey, parseEnvironment, token } from "../shared/environment.mjs";
+import { hasManagedMarker, operationForContent } from "../shared/files.mjs";
 import {
   generateOAuthPrivateJwk,
   validateOAuthPrivateJwk,
   validatePublicJwkSet,
-} from "./oauth-key.mjs";
+} from "../shared/oauth-key.mjs";
+import { BOOTSTRAP_PATHS, DEFAULTS } from "./constants.mjs";
 
 const RETIRED_OAUTH_VARIABLES = ["TAMA_OAUTH_SIGNING_KEY", "TAMA_OAUTH_SIGNING_KEY_ID"];
 export const PENDING_SECRET_VALUE = "__tama-kit-pending-secret-material__";
@@ -41,46 +40,6 @@ const REQUIRED_ENVIRONMENT_VARIABLES = [
   "TAMA_MCP_ALLOWED_ORIGINS",
   "TAMA_BASE_URL",
 ];
-
-/** @param {number} [bytes] */
-function token(bytes = 32) {
-  return randomBytes(bytes).toString("base64url");
-}
-
-/** @param {string} content @param {string} filename @returns {Map<string, string>} */
-function parseEnvironment(content, filename) {
-  const values = new Map();
-  const duplicates = new Set();
-  for (const line of content.split(/\r?\n/u)) {
-    const match = line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/u);
-    if (match) {
-      if (values.has(match[1])) {
-        duplicates.add(match[1]);
-      }
-      let value;
-      try {
-        value = parseEnv(`${line}\n`)[match[1]];
-      } catch {
-        throw ownershipError(`${filename} contains invalid dotenv syntax for ${match[1]}`, {
-          path: filename,
-          variable: match[1],
-        });
-      }
-      values.set(match[1], value ?? "");
-    }
-  }
-  if (duplicates.size > 0) {
-    const names = [...duplicates].sort();
-    throw ownershipError(
-      `${filename} contains duplicate environment variables: ${names.join(", ")}`,
-      {
-        path: filename,
-        variables: names,
-      },
-    );
-  }
-  return values;
-}
 
 /**
  * Reads the variable values from an environment file without planning or
@@ -300,18 +259,6 @@ function migrateOAuthKeyPair(content) {
     throw new Error("internal error: retired OAuth signing key lines are missing");
   }
   return lines.join("\n");
-}
-
-/** @param {string} value */
-export function isValidVaultKey(value) {
-  if (Buffer.byteLength(value, "utf8") === 32) {
-    return true;
-  }
-  if (value.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(value)) {
-    return false;
-  }
-  const decoded = Buffer.from(value, "base64");
-  return decoded.length === 32 && decoded.toString("base64") === value;
 }
 
 /** @param {Map<string, string>} values @param {string} filename */

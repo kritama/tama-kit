@@ -14,9 +14,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, sep } from "node:path";
-
-import { writeExclusiveSecretFile } from "../commands/oauth.mjs";
 import { contentDigest } from "./files.mjs";
+import { writeExclusiveSecretFile } from "./secret-file.mjs";
 
 /** @typedef {import("../types.mjs").FileOperation} FileOperation */
 /** @typedef {import("../types.mjs").WriteOperation} WriteOperation */

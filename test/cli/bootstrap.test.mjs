@@ -6,14 +6,12 @@ import {
   chownSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   statSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { parseEnv } from "node:util";
@@ -21,14 +19,15 @@ import { formatAgentSetupPrompt } from "../../cli/bootstrap/agent-prompt.mjs";
 import { formatComposeUpCommand } from "../../cli/bootstrap/compose-command.mjs";
 import { inspectProject } from "../../cli/bootstrap/detect-project.mjs";
 import { readSetupUrl } from "../../cli/bootstrap/environment.mjs";
-import { contentDigest } from "../../cli/bootstrap/files.mjs";
 import { createBootstrapPlan } from "../../cli/bootstrap/plan.mjs";
-import { applyOperations, applyOperationsTransactionally } from "../../cli/bootstrap/write.mjs";
 import { CLIError, EXIT_CODES } from "../../cli/errors.mjs";
 import { run } from "../../cli/index.mjs";
+import { contentDigest } from "../../cli/shared/files.mjs";
+import { applyOperations, applyOperationsTransactionally } from "../../cli/shared/write.mjs";
+import { temporaryDirectory } from "../helpers/temporary.mjs";
 
 function project(prefix = "tama-kit-bootstrap-") {
-  return mkdtempSync(join(tmpdir(), prefix));
+  return temporaryDirectory(prefix);
 }
 
 function planFor(root, extra = {}) {

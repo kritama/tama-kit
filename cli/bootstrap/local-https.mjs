@@ -1,4 +1,5 @@
 // @ts-check
+/** @typedef {import("../domain/contracts.mjs").McpAppContract} McpAppContract */
 
 import { execFileSync } from "node:child_process";
 import { createPrivateKey, X509Certificate } from "node:crypto";
@@ -9,8 +10,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ownershipError, prerequisiteError, usageError } from "../errors.mjs";
+import { operationForContent } from "../shared/files.mjs";
 import { BOOTSTRAP_PATHS, DEFAULTS, MANAGED_MARKER } from "./constants.mjs";
-import { operationForContent } from "./files.mjs";
 
 export const LOCAL_HTTPS_DEFAULT_DOMAIN = "app.localhost";
 export const LOCAL_HTTPS_DEFAULT_PORT = 443;
@@ -103,7 +104,7 @@ export function resolveLocalHttpsTopology(input = {}) {
  * supplied. This keeps 0.4.3 projects migratable without making the legacy
  * transport the default again.
  */
-/** @param {import("../types.mjs").McpAppBootstrapOptions | null | undefined} options @param {import("../types.mjs").PersistedMcpAppProvider | null} [persisted] @param {Record<string, unknown> | null} [contractDocument] */
+/** @param {import("../types.mjs").McpAppBootstrapOptions | null | undefined} options @param {import("../types.mjs").PersistedMcpAppProvider | null} [persisted] @param {McpAppContract | null} [contractDocument] */
 export function usesLocalHttpsTopology(options, persisted = null, contractDocument = null) {
   const explicitlyLegacyClient = [
     ...(options?.allowedOrigins ?? []),
@@ -113,9 +114,7 @@ export function usesLocalHttpsTopology(options, persisted = null, contractDocume
   const localDevelopment = contractDocument?.local_development;
   const contractOrigins =
     localDevelopment && typeof localDevelopment === "object" && !Array.isArray(localDevelopment)
-      ? Object.values(/** @type {Record<string, unknown>} */ (localDevelopment)).filter(
-          (value) => typeof value === "string",
-        )
+      ? Object.values(localDevelopment).filter((value) => typeof value === "string")
       : [];
   const explicitlyLegacyContract = contractOrigins.some((origin) =>
     /** @type {string} */ (origin).startsWith("http://"),

@@ -9,7 +9,6 @@ import {
   fstatSync,
   lstatSync,
   mkdirSync,
-  mkdtempSync,
   openSync,
   readdirSync,
   readFileSync,
@@ -19,23 +18,22 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
-
-import { validateOAuthPrivateJwk } from "../../cli/bootstrap/oauth-key.mjs";
-import { writeExclusiveSecretFile } from "../../cli/commands/oauth.mjs";
 import { EXIT_CODES } from "../../cli/errors.mjs";
 import { run } from "../../cli/index.mjs";
+import { validateOAuthPrivateJwk } from "../../cli/shared/oauth-key.mjs";
+import { writeExclusiveSecretFile } from "../../cli/shared/secret-file.mjs";
+import { temporaryDirectory } from "../helpers/temporary.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const JWK_PREFIX = "TAMA_OAUTH_PRIVATE_JWK=";
 const ID_PREFIX = "TAMA_OAUTH_PRIVATE_JWK_ID=";
 
 function tempCwd() {
-  return mkdtempSync(join(tmpdir(), "tama-kit-oauth-"));
+  return temporaryDirectory("tama-kit-oauth-");
 }
 
 /** @param {string} cwd */
@@ -210,7 +208,7 @@ test("existing files, final symlinks, and symlinked ancestors fail closed", asyn
   assert.ok(lstatSync(linkPath).isSymbolicLink(), "the symlink must be left in place");
   assert.equal(readFileSync(target, "utf8"), original);
 
-  const outside = mkdtempSync(join(tmpdir(), "tama-kit-oauth-outside-"));
+  const outside = temporaryDirectory("tama-kit-oauth-outside-");
   symlinkSync(outside, join(cwd, "linked"), "dir");
   captured = capture(cwd);
   assert.equal(
@@ -220,8 +218,8 @@ test("existing files, final symlinks, and symlinked ancestors fail closed", asyn
   assert.equal(captured.stdout.length, 0);
   assert.ok(!existsSync(join(outside, "secret.env")), "no file may be created through the link");
 
-  const externalAnchor = mkdtempSync(join(tmpdir(), "tama-kit-oauth-external-anchor-"));
-  const externalTarget = mkdtempSync(join(tmpdir(), "tama-kit-oauth-external-target-"));
+  const externalAnchor = temporaryDirectory("tama-kit-oauth-external-anchor-");
+  const externalTarget = temporaryDirectory("tama-kit-oauth-external-target-");
   mkdirSync(join(externalTarget, "sub"));
   symlinkSync(externalTarget, join(externalAnchor, "linked"), "dir");
   const externalOutput = join(externalAnchor, "linked", "sub", "secret.env");
@@ -320,7 +318,7 @@ test("an ancestor exchange between validation and creation writes no key materia
   const cwd = tempCwd();
   const parent = join(cwd, "keys");
   const originalParent = join(cwd, "keys-original");
-  const redirectedParent = mkdtempSync(join(tmpdir(), "tama-kit-oauth-redirected-"));
+  const redirectedParent = temporaryDirectory("tama-kit-oauth-redirected-");
   mkdirSync(parent);
 
   assert.throws(

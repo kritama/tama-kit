@@ -4,7 +4,7 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 
 import { ownershipError } from "../errors.mjs";
-import { contentDigest, operationForContent } from "./files.mjs";
+import { contentDigest, operationForContent } from "../shared/files.mjs";
 import { resolveLocalHttpsTopology } from "./local-https.mjs";
 
 /** @typedef {import("../types.mjs").FileOperation} FileOperation */
