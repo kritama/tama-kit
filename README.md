@@ -361,6 +361,7 @@ checks the mixed source tree, then emits `.mjs` files beside `.mts` sources.
 Generated counterparts are ignored by Git; edit the `.mts` source files.
 
 `npm test`, `npm pack`, and the runtime validation commands build automatically.
+Run `npm run validate:package` to verify the tarball in an isolated consumer.
 The published package contains ready-to-run ESM and its templates, contracts,
 and skills; installed users need neither TypeScript nor a build step.
 

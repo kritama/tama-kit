@@ -109,5 +109,34 @@ boundary. No release publication or provisioning against user environments.
 
 ## Final validation
 
-Pending implementation. Record commands, runtime/platform, skips, live-runtime
-outcomes, and remaining limitations here before the final PR.
+Local validation on macOS arm64, against the completed five-stage change:
+
+- `npm run check`, `npm run typecheck`, and `git diff --check` pass.
+- `npm test` passes on Node 20.12.0/npm 10.5.0 and Node 24.13.0:
+  273 pass, one existing root-only ownership test skipped. The normal macOS
+  temporary directory now works; explicit symlink refusal tests remain intact.
+- `npm run validate:package` passes on both runtime versions. It builds, packs,
+  installs without development dependencies, and checks ESM/assets, help,
+  aliases, JSON plans, dry-run behavior, and private-key file permissions.
+  Build and pack run separately because older npm prints prepack lifecycle
+  output into the JSON report stream.
+- Thirteen comparisons against v0.4.4 have identical stdout, stderr, and exit
+  codes for help/version, ordinary and MCP App JSON plans, aliases, and errors.
+- `npm run validate:submission` passes: 22 positive cases, 3 negative cases;
+  the existing submission remains `review_ready=false`.
+- `npm run validate:mcp-app:runtime` passes preparation and activation with
+  `ghcr.io/upmaru/tama:0.13.2-server`, a real fixture provider, Docker 29.4.0 /
+  Compose 5.1.2, and a private fixture CA. No host trust-store changes.
+- `mise exec terraform@1.12.2 -- npm run validate:bootstrap:runtime` reaches
+  Compose startup but the cached arm64 `ghcr.io/upmaru/tama:latest` image does
+  not become reachable within the existing 60-second limit. The test cleans
+  up its services; this does not establish ordinary-runtime acceptance.
+- CI now covers Linux/macOS with Node 20.12.0 and 24, installed-package checks,
+  and the existing Linux bootstrap and pinned Memovee runtime gates. Their
+  results must be checked on the pushed revision. The pinned Memovee gate is
+  not run against the user's active local checkout or occupied provider port.
+
+Runtime harnesses use unique Compose project names and canonical fixture paths.
+The ordinary runtime test selects a free host port; HTTPS probes explicitly trust
+an isolated CA. Production timeout, certificate policy, generated templates,
+contract schemas, and runtime validation remain unchanged.
