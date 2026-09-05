@@ -49,8 +49,8 @@ import {
   prefixFromName,
   resolveProviderIdentity,
 } from "../../cli/bootstrap/provider-identity.mjs";
+import { validateWrittenSecretsIgnored } from "../../cli/bootstrap/secrets.mjs";
 import { parseComposeHostGatewayAddress } from "../../cli/bootstrap/start.mjs";
-import { validateWrittenSecretsIgnored } from "../../cli/commands/bootstrap.mjs";
 import { CLIError, EXIT_CODES } from "../../cli/errors.mjs";
 import { run } from "../../cli/index.mjs";
 import { generateOAuthKeyPair } from "../../cli/shared/oauth-key.mjs";

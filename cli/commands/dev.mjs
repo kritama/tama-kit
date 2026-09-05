@@ -3,30 +3,17 @@
 import { relative } from "node:path";
 import { parseArgs } from "node:util";
 
-import { validateCompose, validateComposePrerequisite } from "../bootstrap/start.mjs";
 import { readDevSetupUrl } from "../dev/environment.mjs";
 import { createDevSetupPlan, publicDevSetupPlan } from "../dev/plan.mjs";
-import { runMixSetup, runTestFoundationSetup, startDevDatabase } from "../dev/start.mjs";
 import { CLIError, EXIT_CODES, usageError } from "../errors.mjs";
-import { processEnvironment } from "../shared/environment.mjs";
-import { applyOperationsTransactionally } from "../shared/write.mjs";
 import { createProgressBar, paint } from "../terminal.mjs";
+import { runDevWorkflow } from "../workflows/dev.mjs";
 
 /** @typedef {import("../types.mjs").CommandIO} CommandIO */
 /** @typedef {import("../types.mjs").DevSetupPlan} DevSetupPlan */
 /** @typedef {import("../types.mjs").ExitCode} ExitCode */
 
-/**
- * @typedef {object} DevCommandOptions
- * @property {string} [targetPath]
- * @property {number} [port]
- * @property {number} [postgresPort]
- * @property {boolean} prepareOnly
- * @property {boolean} dryRun
- * @property {boolean} json
- * @property {boolean} noColor
- * @property {boolean} help
- */
+/** @typedef {import("../types.mjs").DevCommandOptions} DevCommandOptions */
 
 function usage() {
   return [
@@ -189,45 +176,7 @@ async function executeDev(argv, io) {
     color,
     total: options.dryRun ? 1 : fullSetup ? 7 : 2,
   });
-  progress.update(0, "Planning development setup");
-  /** @type {DevSetupPlan} */
-  let plan;
-  try {
-    plan = createDevSetupPlan({
-      cwd: io.cwd,
-      targetPath: options.targetPath,
-      tamaPort: options.port,
-      postgresPort: options.postgresPort,
-    });
-    if (options.dryRun) {
-      progress.finish("Plan ready");
-    } else if (options.prepareOnly) {
-      progress.update(1, "Writing development environment files");
-      await applyOperationsTransactionally(plan.operations, () => undefined);
-      progress.finish("Environment prepared");
-    } else {
-      progress.update(1, "Checking Docker Compose");
-      validateComposePrerequisite();
-      progress.update(2, "Writing development environment files");
-      await applyOperationsTransactionally(plan.operations, () => {
-        progress.update(3, "Validating compose.yml");
-        return validateCompose(plan, {
-          checkPrerequisite: false,
-          env: processEnvironment(plan.environment),
-        });
-      });
-      progress.update(4, "Starting isolated PostgreSQL");
-      await startDevDatabase(plan, { quiet: options.json });
-      progress.update(5, "Running mix setup");
-      await runMixSetup(plan, { quiet: options.json });
-      progress.update(6, "Ensuring the test foundation");
-      await runTestFoundationSetup(plan, { quiet: options.json });
-      progress.finish("Development environment ready");
-    }
-  } catch (error) {
-    progress.stop();
-    throw error;
-  }
+  const plan = await runDevWorkflow({ options, cwd: io.cwd, progress });
 
   const result = resultEnvelope(plan, {
     dryRun: options.dryRun,

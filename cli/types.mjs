@@ -397,4 +397,45 @@
 /** @typedef {0 | 1 | 2 | 3 | 4 | 5 | 6} ExitCode */
 /** @typedef {Record<string, unknown>} CLIErrorDetails */
 
+/**
+ * @typedef {object} BootstrapCommandOptions
+ * @property {string} [targetPath]
+ * @property {string} [composePath]
+ * @property {number} [port]
+ * @property {string} [image]
+ * @property {AgentSkillMode} [skillMode]
+ * @property {boolean} dryRun
+ * @property {boolean} start
+ * @property {boolean} json
+ * @property {boolean} noColor
+ * @property {boolean} help
+ * @property {boolean} mcpApp
+ * @property {string} [mcpAppContract]
+ * @property {string} [providerName]
+ * @property {string} [providerPrefix]
+ * @property {string} [providerEnvironmentFile]
+ * @property {string} [providerOrigin]
+ * @property {string} [localDomain]
+ * @property {boolean} acknowledgeLocalDomainRisk
+ * @property {number} [providerPort]
+ * @property {boolean} installLocalCa
+ * @property {boolean} migrateLocalHttps
+ * @property {string} [tamaOrigin]
+ * @property {string[]} [allowedOrigins]
+ * @property {boolean} activate
+ * @property {boolean} migrateProviderIdentity
+ */
+
+/**
+ * @typedef {object} DevCommandOptions
+ * @property {string} [targetPath]
+ * @property {number} [port]
+ * @property {number} [postgresPort]
+ * @property {boolean} prepareOnly
+ * @property {boolean} dryRun
+ * @property {boolean} json
+ * @property {boolean} noColor
+ * @property {boolean} help
+ */
+
 export {};
