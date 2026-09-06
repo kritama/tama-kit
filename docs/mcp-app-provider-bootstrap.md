@@ -218,3 +218,57 @@ If enabled-state verification fails, Tama Kit restores the prepared files and
 restarts Tama in prepared mode while preserving trust material. If the provider
 had already consumed enabled configuration, its owner must restart it after
 the fragment is restored.
+
+## Provider runtime topology
+
+The default provider runs natively on the host. For a provider that already
+runs in the application's root Compose project, pass `--provider-service NAME`
+(or `--provider-runtime compose --provider-service NAME`). `--provider-port`
+is the private container listening port in this mode; it need not be published
+on the host. Tama Kit does not create the provider service or its Dockerfile.
+
+The selected service must be declared directly in the selected root Compose
+file, join the default network shared with Tama's include, and be available
+without a Compose profile. Unresolved `extends`, provider services declared
+only in included files, and `network_mode` are not supported. A dependency
+back to Caddy is rejected. Caddy uses `service_healthy` when the provider has
+an active declared health check, and otherwise `service_started`. Image-only
+health checks are not inferred by the offline planner.
+
+The selected service must load the reported private integration fragment through
+`env_file`. An entry on another service, or a host `.envrc`, does not verify
+loading by this provider. Configure the application's listener and public
+issuer as instructed by its provider contract. The application's runtime may
+remain in development mode while Tama uses its pinned production release.
+
+Tama Kit records `providerService`, `providerDependency`, and the derived
+private upstream in the manifest's local HTTPS topology. It generates Caddy's
+route and dependency and omits the unused host gateway entry. Ordinary reruns
+validate and reuse this selection, including runs without `--mcp-app`.
+Application-owned service changes are read on every plan; missing services or
+invalid network/dependency changes fail before managed writes. Changes to a
+service's declared health check update the managed dependency. Unexpected
+changes to hashed Tama-owned files still fail as drift.
+
+To change service or switch runtime, first return both Tama and the provider
+to `prepared` through the existing lifecycle workflow. Then select the new
+runtime/service with `--migrate-provider-topology`; this explicit migration
+preserves public OAuth identities and signing material. To switch to the
+host, use `--provider-runtime host --migrate-provider-topology` without a
+service selection. Do not combine migration with `--activate`. A legacy HTTP
+integration must first complete its explicit local HTTPS migration.
+
+Start the selected runtime with `--start` after reviewing the plan. Compose
+starts the provider as Caddy's declared dependency. Provider code, environment
+loading, and the enable/restart handoff remain application-owned. Static
+configuration and loader evidence do not establish live OAuth readiness.
+
+## Startup diagnostics
+
+Quiet JSON startup failures preserve the `startup` category and exit code 6.
+They also return a bounded `error.diagnostic` projection with operation
+`compose-up` and reason `port-conflict`, `unhealthy-service`,
+`image-unavailable`, `dependency-failed`, or `compose-failed`. A recognized
+bind failure includes its port. Unknown stderr is not copied into the result:
+Compose output can contain application secrets, URLs, or private keys.
+Human mode continues to display native Compose diagnostics.

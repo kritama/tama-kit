@@ -75,6 +75,8 @@ export type LocalHttpsTopology = {
   providerUpstream: string;
   tamaUpstream: string;
   providerPort: number;
+  providerService?: string;
+  providerDependency?: "service_started" | "service_healthy";
   tamaPort: number;
   httpsPort: number;
   certificateNames: string[];
@@ -171,6 +173,9 @@ export type McpAppBootstrapOptions = {
   localDomain?: string;
   acknowledgeLocalDomainRisk?: boolean;
   providerPort?: number;
+  providerRuntime?: "host" | "compose";
+  providerService?: string;
+  migrateProviderTopology?: boolean;
   httpsPort?: number;
   installLocalCa?: boolean;
   migrateLocalHttps?: boolean;
@@ -386,6 +391,7 @@ export type PublicBootstrapPlan = {
 };
 
 export type BootstrapResult = PublicBootstrapPlan & {
+  setup: ReturnType<typeof import("./bootstrap/setup-progress.mjs").setupProgress>;
   ok: true;
   mode: "dry-run" | "write";
   started: boolean;
@@ -419,6 +425,8 @@ export type ExitCode = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 export type CLIErrorDetails = Record<string, unknown>;
 
 export type BootstrapCommandOptions = {
+  nonInteractive?: boolean;
+  preserveLifecycle?: boolean;
   targetPath?: string;
   composePath?: string;
   port?: number;
@@ -438,6 +446,9 @@ export type BootstrapCommandOptions = {
   localDomain?: string;
   acknowledgeLocalDomainRisk: boolean;
   providerPort?: number;
+  providerRuntime?: "host" | "compose";
+  providerService?: string;
+  migrateProviderTopology?: boolean;
   installLocalCa: boolean;
   migrateLocalHttps: boolean;
   tamaOrigin?: string;

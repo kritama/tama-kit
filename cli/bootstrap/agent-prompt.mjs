@@ -23,10 +23,10 @@ export function formatAgentSetupPrompt(plan, { setupUrl } = {}) {
         `Use the exact provider issuer ${plan.mcpApp.providerOrigin} and Tama resource ${plan.mcpApp.resource}; do not substitute Docker transport names or loopback URLs for these public identities.`,
         ...(plan.localHttps
           ? [
-              `Caddy is the public HTTPS entry point. Verify Tama with \`curl --cacert tama/tls/rootCA.pem ${plan.localHttps.healthUrl}\`; the provider remains host-native in MIX_ENV=dev while the official Tama image runs in MIX_ENV=prod.`,
+              `Caddy is the public HTTPS entry point. Verify Tama with \`curl --cacert tama/tls/rootCA.pem ${plan.localHttps.healthUrl}\`; the application owns its provider runtime and development mode while the official Tama image runs in MIX_ENV=prod.`,
             ]
           : []),
-        "Do not activate or restart the host-native provider on my behalf. If activation is requested, verify the prepared checkpoint first, enable and restart Tama through bootstrap, then give me the provider-owned mode change and restart step.",
+        "Do not activate or restart the provider on my behalf. If activation is requested, verify the prepared checkpoint first, enable and restart Tama through bootstrap, then give me the provider-owned mode change and restart step.",
       ]
     : [];
 

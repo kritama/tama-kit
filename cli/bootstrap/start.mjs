@@ -4,7 +4,9 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createConnection, isIP } from "node:net";
 import { prerequisiteError, startupError } from "../errors.mjs";
+import { CapturedProcessError, runCapturedProcess } from "../shared/captured-process.mjs";
 import { runProcess } from "../shared/process.mjs";
+import { composeStartupDiagnostic } from "./diagnostics.mjs";
 import { localHttpsPaths } from "./local-https.mjs";
 import { createLocalHttpsFetch } from "./mcp-app-verify.mjs";
 
@@ -334,12 +336,20 @@ export async function startCompose(plan, { quiet = false } = {}) {
     await assertLocalHttpsPortAvailable(plan.localHttps.httpsPort);
   }
   try {
-    await runProcess("docker", composeUpArguments(plan), {
+    await (quiet ? runCapturedProcess : runProcess)("docker", composeUpArguments(plan), {
       cwd: plan.root,
       stdio: quiet ? "ignore" : "inherit",
     });
   } catch (error) {
-    throw startupError(`Docker Compose startup failed: ${errorMessage(error)}`);
+    const diagnostic = composeStartupDiagnostic(
+      error instanceof CapturedProcessError ? error.stderr : "",
+    );
+    const detail = diagnostic.port
+      ? ` (port ${diagnostic.port} is already in use)`
+      : ` (${diagnostic.reason})`;
+    throw startupError(`Docker Compose startup failed: ${errorMessage(error)}${detail}`, {
+      diagnostic,
+    });
   }
   return waitForHealth(plan);
 }

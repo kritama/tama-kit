@@ -124,6 +124,9 @@ jobs:
       - name: Validate MCP App local HTTPS runtime
         run: npm run validate:mcp-app:runtime
 
+      - name: Validate Compose-managed MCP App provider runtime
+        run: node scripts/validate-mcp-app-local-https.mjs --compose-provider
+
   memovee-local-https-integration:
     name: Memovee local HTTPS integration
     needs: test

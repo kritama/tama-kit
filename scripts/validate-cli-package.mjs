@@ -70,6 +70,7 @@ try {
   const source = join(root, "bin/tama-kit.mjs");
   assert.equal(existsSync(join(consumer, "node_modules/typescript")), false);
   assert.equal(existsSync(join(installedRoot, "cli/workflows/bootstrap.mts")), false);
+  execute("python3", [join(root, "scripts/validate-cli-terminal.py"), process.execPath, installed]);
   for (const args of [
     ["--version"],
     ["--help"],
@@ -110,7 +111,7 @@ try {
   assert.equal(statSync(key).mode & 0o777, 0o600);
   assert.equal(existsSync(join(project, "tama")), false, "package dry runs must not write");
   console.log(
-    `Installed ${metadata.name}@${metadata.version}: ESM, assets, plans, aliases, help, and private-key output verified without development dependencies.`,
+    `Installed ${metadata.name}@${metadata.version}: ESM, assets, plans, terminal preview/cancellation, aliases, help, and private-key output verified without development dependencies.`,
   );
 } finally {
   rmSync(temporary, { recursive: true, force: true });

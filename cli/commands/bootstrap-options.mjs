@@ -15,7 +15,8 @@ export function bootstrapUsage() {
     "  --skills <mode>        Agent skills: local or manual",
     "  --dry-run              Inspect and report without writing",
     "  --start                Start Compose and wait for Tama health",
-    "  --json                 Emit machine-readable output",
+    "  --json                 Emit machine-readable output (never prompts)",
+    "  --non-interactive      Use flags and saved settings without questions",
     "  --no-color             Disable terminal colors",
     "  -h, --help             Show help",
     "MCP App provider integration:",
@@ -28,7 +29,10 @@ export function bootstrapUsage() {
     "  --tama-origin <origin> Exact public Tama origin",
     "  --local-domain <name>  Local HTTPS base name (default: app.localhost)",
     "  --acknowledge-local-domain-risk Allow an explicitly selected non-.localhost name",
-    "  --provider-port <port> Host-native provider upstream port (default: 4000)",
+    "  --provider-port <port> Provider private upstream port (default: 4000)",
+    "  --provider-runtime <mode> Provider runtime: host or compose",
+    "  --provider-service <name> Application-owned Compose provider service",
+    "  --migrate-provider-topology Explicitly change the recorded provider runtime",
     "  --install-local-ca     Explicitly authorize mkcert -install",
     "  --migrate-local-https  Explicitly migrate an existing HTTP MCP App topology",
     "  --allowed-origin <origin> Allowed client origin; HTTPS off loopback, max 32 unique (repeatable)",
@@ -88,6 +92,7 @@ export function parseBootstrap(argv) {
         "dry-run": { type: "boolean", default: false },
         start: { type: "boolean", default: false },
         json: { type: "boolean", default: false },
+        "non-interactive": { type: "boolean", default: false },
         "no-color": { type: "boolean", default: false },
         help: { type: "boolean", short: "h", default: false },
         "mcp-app": { type: "boolean", default: false },
@@ -100,6 +105,9 @@ export function parseBootstrap(argv) {
         "local-domain": { type: "string" },
         "acknowledge-local-domain-risk": { type: "boolean", default: false },
         "provider-port": { type: "string" },
+        "provider-runtime": { type: "string" },
+        "provider-service": { type: "string" },
+        "migrate-provider-topology": { type: "boolean", default: false },
         "install-local-ca": { type: "boolean", default: false },
         "migrate-local-https": { type: "boolean", default: false },
         "allowed-origin": { type: "string", multiple: true },
@@ -129,6 +137,9 @@ export function parseBootstrap(argv) {
     parsed.values["local-domain"] === undefined ? null : "--local-domain",
     parsed.values["acknowledge-local-domain-risk"] ? "--acknowledge-local-domain-risk" : null,
     parsed.values["provider-port"] === undefined ? null : "--provider-port",
+    parsed.values["provider-runtime"] === undefined ? null : "--provider-runtime",
+    parsed.values["provider-service"] === undefined ? null : "--provider-service",
+    parsed.values["migrate-provider-topology"] ? "--migrate-provider-topology" : null,
     parsed.values["install-local-ca"] ? "--install-local-ca" : null,
     parsed.values["migrate-local-https"] ? "--migrate-local-https" : null,
     Array.isArray(parsed.values["allowed-origin"]) && parsed.values["allowed-origin"].length > 0
@@ -153,6 +164,22 @@ export function parseBootstrap(argv) {
       "provider identity migration must complete in prepared mode before activation",
     );
   }
+  const providerRuntime = parsed.values["provider-runtime"];
+  if (
+    providerRuntime !== undefined &&
+    providerRuntime !== "host" &&
+    providerRuntime !== "compose"
+  ) {
+    throw usageError("--provider-runtime must be host or compose");
+  }
+  if (providerRuntime === "host" && parsed.values["provider-service"] !== undefined) {
+    throw usageError("--provider-service cannot be combined with --provider-runtime host");
+  }
+  if (parsed.values["migrate-provider-topology"] && parsed.values.activate) {
+    throw usageError(
+      "provider topology migration must complete in prepared mode before activation",
+    );
+  }
   return {
     targetPath: parsed.positionals[0],
     composePath: parsed.values.compose,
@@ -162,6 +189,7 @@ export function parseBootstrap(argv) {
     dryRun: parsed.values["dry-run"] ?? false,
     start: parsed.values.start ?? false,
     json: parsed.values.json ?? false,
+    nonInteractive: parsed.values["non-interactive"] ?? false,
     noColor: parsed.values["no-color"] ?? false,
     help: parsed.values.help ?? false,
     mcpApp: parsed.values["mcp-app"] ?? false,
@@ -174,6 +202,9 @@ export function parseBootstrap(argv) {
     localDomain: parsed.values["local-domain"],
     acknowledgeLocalDomainRisk: parsed.values["acknowledge-local-domain-risk"] ?? false,
     providerPort: parsePort(parsed.values["provider-port"]),
+    providerRuntime,
+    providerService: parsed.values["provider-service"],
+    migrateProviderTopology: parsed.values["migrate-provider-topology"] ?? false,
     installLocalCa: parsed.values["install-local-ca"] ?? false,
     migrateLocalHttps: parsed.values["migrate-local-https"] ?? false,
     allowedOrigins: parsed.values["allowed-origin"],

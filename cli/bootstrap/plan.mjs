@@ -6,7 +6,7 @@ import { ownershipError, usageError } from "../errors.mjs";
 import { planRootCompose, validateComposeDocument } from "./compose.mjs";
 import { formatComposePsCommand, formatComposeUpCommand } from "./compose-command.mjs";
 import { BOOTSTRAP_PATHS, BOOTSTRAP_SCHEMA_VERSION, DEFAULTS } from "./constants.mjs";
-import { inspectProject } from "./detect-project.mjs";
+import { discoverProject, inspectProject } from "./detect-project.mjs";
 import { planEnvironment, readEnvironmentValues, resolveEnvironmentPort } from "./environment.mjs";
 import { planGitignore, validateSecretFilesUntracked } from "./gitignore.mjs";
 import {
@@ -15,7 +15,11 @@ import {
   resolveLocalHttpsTopology,
   usesLocalHttpsTopology,
 } from "./local-https.mjs";
-import { createManagedFilePlanner, readMcpAppProvider } from "./manifest.mjs";
+import {
+  createManagedFilePlanner,
+  readBootstrapSettings,
+  readMcpAppProvider,
+} from "./manifest.mjs";
 import { persistedTamaOrigin, planMcpApp, resolveMcpAppState } from "./mcp-app.mjs";
 import {
   contractTamaPort,
@@ -31,6 +35,8 @@ import {
   mcpAppLocalContractFilename,
   serializeMcpAppLocalContract,
 } from "./mcp-app-local-contract.mjs";
+import { resolveProviderTopology } from "./provider-topology.mjs";
+import { SETUP_CHECKLIST } from "./setup-progress.mjs";
 import { planAgentSkills } from "./skills.mjs";
 import { renderTemplate } from "./templates.mjs";
 import { planTerraform } from "./terraform.mjs";
@@ -158,6 +164,10 @@ function mcpAppReadmeGuidance(mcpApp) {
   if (!mcpApp) {
     return "";
   }
+  const providerService = mcpApp.localHttps?.providerService;
+  const providerRuntime = providerService
+    ? `provider Compose service \`${providerService}\``
+    : "host-native provider";
   return [
     "",
     "## MCP App provider integration",
@@ -171,12 +181,15 @@ function mcpAppReadmeGuidance(mcpApp) {
     ...(mcpApp.localHttps
       ? [
           `Caddy is the public HTTPS entry point at \`${mcpApp.localHttps.providerOrigin}\` and \`${mcpApp.localHttps.tamaOrigin}\`. The private upstreams (${mcpApp.localHttps.providerUpstream} and ${mcpApp.localHttps.tamaUpstream}) are Docker routing details and must not be used as OAuth identities.`,
-          `The provider remains host-native in MIX_ENV=dev; Tama runs in the official release image with MIX_ENV=prod and trusts the public mkcert CA through the generated derived image.`,
+          providerService
+            ? `The provider runs in the application-owned Compose service \`${providerService}\`. Its development image, listener, environment loader, and lifecycle restart remain application-owned.`
+            : "The provider remains host-native in MIX_ENV=dev.",
+          "Tama runs in the official release image with MIX_ENV=prod and trusts the public mkcert CA through the generated derived image.",
           `Verify the public runtime with \`curl --cacert tama/tls/rootCA.pem ${mcpApp.localHttps.healthUrl}\` after starting Compose.`,
           "",
         ]
       : []),
-    "Activation is staged. Run bootstrap with `--start --activate` to verify prepared state and enable Tama. Tama Kit does not restart the host-native provider: set the provider mode variable to `enabled`, restart the provider, then rerun the same command. An enabled checkpoint is reported only after both live services pass verification.",
+    `Activation is staged. Run bootstrap with \`--start --activate\` to verify prepared state and enable Tama. Tama Kit does not restart the ${providerRuntime}: set the provider mode variable to \`enabled\`, restart the provider, then rerun the same command. An enabled checkpoint is reported only after both live services pass verification.`,
   ].join("\n");
 }
 
@@ -193,7 +206,14 @@ function managedTemplate(planManagedFile, filename, templateName, replacements) 
 
 /** @param {BootstrapPlanOptions} options @returns {BootstrapPlan} */
 export function createBootstrapPlan(options) {
-  const inspection = inspectProject(options);
+  const discovered = discoverProject(options);
+  const recordedSettings = readBootstrapSettings(
+    join(discovered.root, BOOTSTRAP_PATHS.tamaDirectory),
+  );
+  const inspection = inspectProject({
+    ...options,
+    composePath: options.composePath ?? recordedSettings?.composeFile,
+  });
   const skillMode = options.skillMode ?? "manual";
   const mcpAppPrepared = options.mcpApp?.requested ? (options.mcpAppPrepared ?? null) : null;
   if (options.mcpApp?.requested && mcpAppPrepared === null) {
@@ -213,7 +233,9 @@ export function createBootstrapPlan(options) {
   const tamaImage =
     options.image ??
     persistedMcpApp?.tamaImage ??
-    (mcpAppPrepared !== null ? DEFAULTS.mcpAppTamaImage : DEFAULTS.tamaImage);
+    (mcpAppPrepared !== null
+      ? DEFAULTS.mcpAppTamaImage
+      : (recordedSettings?.image ?? DEFAULTS.tamaImage));
   const invalidOfficialTag = invalidOfficialTamaImageTag(tamaImage);
   if (invalidOfficialTag) {
     throw usageError(invalidOfficialTag);
@@ -235,22 +257,48 @@ export function createBootstrapPlan(options) {
     ...(persistedMcpApp ? [persistedMcpApp.identity.environmentFile] : []),
   ];
   validateSecretFilesUntracked(inspection.root, [...new Set(secretFiles)]);
+  const providerTopology = resolveProviderTopology(
+    options.mcpApp,
+    persistedMcpApp?.localHttps,
+    inspection.selectedCompose,
+  );
   const localHttpsTopology =
     mcpAppPrepared &&
     options.mcpApp &&
     usesLocalHttpsTopology(options.mcpApp, persistedMcpApp, mcpAppPrepared.contractDocument)
       ? resolveLocalHttpsTopology({
+          ...providerTopology,
           localDomain: options.mcpApp.localDomain ?? persistedMcpApp?.localHttps?.localDomain,
           providerPort: options.mcpApp.providerPort ?? persistedMcpApp?.localHttps?.providerPort,
           allowedOrigins: mcpAppPrepared.allowedOrigins ?? persistedMcpApp?.allowedOrigins,
         })
       : persistedMcpApp?.localHttps
         ? resolveLocalHttpsTopology({
+            ...providerTopology,
             localDomain: persistedMcpApp.localHttps.localDomain,
             providerPort: persistedMcpApp.localHttps.providerPort,
             allowedOrigins: persistedMcpApp.allowedOrigins,
           })
         : null;
+  if (
+    !localHttpsTopology &&
+    (options.mcpApp?.providerService ||
+      options.mcpApp?.providerRuntime ||
+      options.mcpApp?.migrateProviderTopology)
+  ) {
+    throw usageError(
+      "provider runtime selection requires local HTTPS; migrate an existing HTTP integration first",
+    );
+  }
+  if (
+    options.mcpApp?.migrateProviderTopology &&
+    readEnvironmentValues(inspection.root, BOOTSTRAP_PATHS.environment).get("TAMA_MCP_APP_MODE") !==
+      "prepared"
+  ) {
+    throw ownershipError(
+      "provider topology migration requires Tama and the provider in prepared mode",
+    );
+  }
   if (localHttpsTopology) {
     const tlsPaths = localHttpsPaths(inspection.root);
     validateSecretFilesUntracked(inspection.root, [
@@ -359,7 +407,18 @@ export function createBootstrapPlan(options) {
     inspection.root,
     inspection.tamaDirectory,
     skillMode,
-    mcpAppState ?? (persistedMcpApp ? { ...persistedMcpApp, tamaImage } : null),
+    mcpAppState ??
+      (persistedMcpApp
+        ? {
+            ...persistedMcpApp,
+            tamaImage,
+            ...(localHttpsTopology ? { localHttps: localHttpsTopology } : {}),
+          }
+        : null),
+    {
+      composeFile: relative(inspection.root, inspection.selectedCompose).split("\\").join("/"),
+      image: tamaImage,
+    },
   );
   const localContractOperation = mcpAppState
     ? managedFiles.plan(
@@ -453,6 +512,10 @@ export function createBootstrapPlan(options) {
     POSTGRES_IMAGE: DEFAULTS.postgresImage,
     TAMA_EXTRA_HOSTS: providerUsesHostGateway ? TAMA_EXTRA_HOSTS_BLOCK : "",
     CADDY_IMAGE: localHttpsTopology?.caddyImage ?? "",
+    CADDY_EXTRA_HOSTS: localHttpsTopology?.providerService ? "" : TAMA_EXTRA_HOSTS_BLOCK,
+    PROVIDER_DEPENDENCY: localHttpsTopology?.providerService
+      ? `      ${localHttpsTopology.providerService}:\n        condition: ${localHttpsTopology.providerDependency}\n`
+      : "",
     HTTPS_PORT: localHttpsTopology?.httpsPort ?? "",
     PROVIDER_HOST: localHttpsTopology?.providerHost ?? "",
     TAMA_HOST: localHttpsTopology?.tamaHost ?? "",
@@ -573,6 +636,7 @@ export function createBootstrapPlan(options) {
       ),
       COMPOSE_PS_COMMAND: formatComposePsCommand(projectComposePath),
       MCP_APP_GUIDANCE: mcpAppReadmeGuidance(mcpAppDoc),
+      SETUP_CHECKLIST,
     }),
   );
   operations.push(

@@ -36,6 +36,7 @@ export function verifyEnvironmentLoading(root, environmentFile, contractDocument
  * @param {string} environmentFile
  * @param {McpAppContract | null} contractDocument
  * @param {string} [selectedCompose]
+ * @param {string} [providerService]
  * @returns {import("../../types.mjs").EnvironmentLoadingEvidence}
  */
 export function verifyEnvironmentLoadingEvidence(
@@ -43,26 +44,34 @@ export function verifyEnvironmentLoadingEvidence(
   environmentFile,
   contractDocument,
   selectedCompose,
+  providerService,
 ) {
   // Reading the declaration keeps this verifier deliberately aware of the
   // accepted provider contract without treating the object as certification.
   // The validator already requires `loads` to match the provider fragment.
   void contractDocument;
   const envrc = safeRead(join(root, ".envrc"));
-  if (envrc !== null && envrcLoadsFragment(envrc, environmentFile)) {
+  if (!providerService && envrc !== null && envrcLoadsFragment(envrc, environmentFile)) {
     return { status: "verified", mechanism: "direnv", evidencePath: ".envrc" };
   }
   const composePaths = [
     ...(selectedCompose ? [resolve(root, selectedCompose)] : []),
-    ...["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"].map((name) =>
-      join(root, name),
-    ),
+    ...(!providerService
+      ? ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"].map((name) =>
+          join(root, name),
+        )
+      : []),
   ];
   for (const composePath of new Set(composePaths)) {
     const compose = safeRead(composePath);
     if (
       compose !== null &&
-      composeReferencesFragment(compose, resolve(root, environmentFile), composePath)
+      composeReferencesFragment(
+        compose,
+        resolve(root, environmentFile),
+        composePath,
+        providerService,
+      )
     ) {
       const local = relative(root, composePath);
       return {
@@ -136,9 +145,10 @@ function envrcLoadsFragment(envrc, environmentFile) {
  * @param {string} compose
  * @param {string} environmentFilePath
  * @param {string} composePath
+ * @param {string} [providerService]
  * @returns {boolean}
  */
-function composeReferencesFragment(compose, environmentFilePath, composePath) {
+function composeReferencesFragment(compose, environmentFilePath, composePath, providerService) {
   const document = parseDocument(compose);
   if (document.errors.length > 0) {
     return false;
@@ -148,7 +158,7 @@ function composeReferencesFragment(compose, environmentFilePath, composePath) {
   if (services === null) {
     return false;
   }
-  for (const service of Object.values(services)) {
+  for (const service of providerService ? [services[providerService]] : Object.values(services)) {
     if (!isPlainObject(service)) {
       continue;
     }

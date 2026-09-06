@@ -1,22 +1,24 @@
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import {
   discoverMkcert,
   localHttpsPaths,
   planLocalHttpsCertificates,
   resolveLocalHttpsNames,
 } from "../bootstrap/local-https.mjs";
+import { prepareMcpApp } from "../bootstrap/mcp-app.mjs";
 import { createBootstrapPlan } from "../bootstrap/plan.mjs";
 import { validateWrittenSecretsIgnored } from "../bootstrap/secrets.mjs";
 import { validateCompose, validateComposePrerequisite } from "../bootstrap/start.mjs";
-import { CLIError } from "../errors.mjs";
+import { CLIError, ownershipError } from "../errors.mjs";
 import { applyOperationsTransactionally } from "../shared/write.mjs";
+import { planBootstrap, reviewedPlanDigest } from "./bootstrap-plan.mjs";
 import { startBootstrapRuntime } from "./mcp-app-runtime.mjs";
 import { mcpAppOptions } from "./options.mjs";
 
 type BootstrapPlan = import("../types.mjs").BootstrapPlan;
 type BootstrapCommandOptions = import("../types.mjs").BootstrapCommandOptions;
 type McpAppPrepared = import("../types.mjs").McpAppPrepared;
-type McpAppBootstrapOptions = import("../types.mjs").McpAppBootstrapOptions;
 type Progress = ReturnType<typeof import("../terminal.mjs").createProgressBar>;
 
 const bootstrapEffects = {
@@ -53,6 +55,7 @@ export function createBootstrapWorkflow(overrides: Partial<typeof bootstrapEffec
     mcpAppPrepared,
     progress,
     authorizeLocalCa,
+    reviewedPlan,
   }: {
     options: BootstrapCommandOptions;
     cwd: string;
@@ -60,52 +63,38 @@ export function createBootstrapWorkflow(overrides: Partial<typeof bootstrapEffec
     mcpAppPrepared: McpAppPrepared | null;
     progress: Progress;
     authorizeLocalCa?: () => Promise<boolean>;
+    reviewedPlan?: BootstrapPlan;
   }) {
     progress.update(0, "Planning bootstrap changes");
     let plan: BootstrapPlan;
     let healthUrl: string | undefined;
     try {
-      const requestedMcpApp: McpAppBootstrapOptions | undefined = mcpAppPrepared
-        ? mcpAppOptions(options)
-        : undefined;
-      const initialMcpApp: McpAppBootstrapOptions | undefined =
-        requestedMcpApp && options.activate
-          ? {
-              ...requestedMcpApp,
-              activate: false,
-              targetMode: "prepared",
-              preserveEnabledProvider: true,
-            }
-          : requestedMcpApp;
-      plan = createBootstrapPlan({
-        cwd,
-        targetPath: options.targetPath,
-        composePath: options.composePath,
-        port: options.port,
-        image: options.image,
-        skillMode,
-        mcpApp: initialMcpApp,
-        mcpAppPrepared,
-        materializeSecrets: !options.dryRun,
-      });
-      if (options.activate && plan.mcpApp?.providerLifecycle === "enabled") {
-        plan = createBootstrapPlan({
-          cwd,
-          targetPath: options.targetPath,
-          composePath: options.composePath,
-          port: options.port,
-          image: options.image,
-          skillMode,
-          mcpApp: {
-            ...(requestedMcpApp as McpAppBootstrapOptions),
-            activate: true,
-            targetMode: "enabled",
-            providerMode: "enabled",
-          },
-          mcpAppPrepared,
-          materializeSecrets: !options.dryRun,
-        });
-      }
+      const input = { options, cwd, skillMode, mcpAppPrepared };
+      const validateReview = async () => {
+        if (reviewedPlan) {
+          const prepared = mcpAppPrepared
+            ? await prepareMcpApp({
+                root: reviewedPlan.root,
+                tamaDirectory: join(reviewedPlan.root, "tama"),
+                framework: reviewedPlan.framework,
+                options: mcpAppOptions(options),
+                nonInteractive: true,
+                io: { cwd: reviewedPlan.root, stdout() {}, stderr() {} },
+              })
+            : null;
+          const fresh = planBootstrap(
+            { ...input, mcpAppPrepared: prepared, materializeSecrets: false },
+            createBootstrapPlan,
+          );
+          if (reviewedPlanDigest(fresh) !== reviewedPlanDigest(reviewedPlan)) {
+            throw ownershipError(
+              "the bootstrap plan changed after review; review it again before writing",
+            );
+          }
+        }
+      };
+      await validateReview();
+      plan = planBootstrap({ ...input, materializeSecrets: !options.dryRun }, createBootstrapPlan);
       if (options.dryRun) {
         if (plan.localHttps) {
           await resolveLocalHttpsNames(plan.localHttps);
@@ -145,11 +134,13 @@ export function createBootstrapWorkflow(overrides: Partial<typeof bootstrapEffec
           ) {
             options.installLocalCa = await authorizeLocalCa();
           }
+          await validateReview();
           const certificatePlan = planLocalHttpsCertificates(plan.root, plan.localHttps, {
             installLocalCa: options.installLocalCa,
           });
           plan.operations.push(...certificatePlan.operations);
         }
+        await validateReview();
         progress.update(2, "Writing managed files");
         await applyOperationsTransactionally(plan.operations, () => {
           validateWrittenSecretsIgnored(plan);

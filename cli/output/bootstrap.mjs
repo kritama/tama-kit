@@ -5,6 +5,7 @@ import { formatAgentSetupPrompt } from "../bootstrap/agent-prompt.mjs";
 import { formatComposeUpCommand } from "../bootstrap/compose-command.mjs";
 import { localHttpsPaths } from "../bootstrap/local-https.mjs";
 import { publicPlan } from "../bootstrap/plan.mjs";
+import { setupProgress } from "../bootstrap/setup-progress.mjs";
 import { paint, renderBox } from "../terminal.mjs";
 /** @typedef {import("../types.mjs").BootstrapPlan} BootstrapPlan */
 /** @typedef {import("../types.mjs").BootstrapResult} BootstrapResult */
@@ -24,6 +25,7 @@ export function resultEnvelope(plan, { dryRun, started, healthUrl }) {
     healthUrl: healthUrl ?? null,
     agentPrompt: dryRun ? null : formatAgentSetupPrompt(plan),
     ...result,
+    setup: setupProgress(plan, { dryRun, started }),
     localHttps: plan.localHttps
       ? {
           profile: plan.localHttps.profile,
@@ -37,6 +39,12 @@ export function resultEnvelope(plan, { dryRun, started, healthUrl }) {
           providerUpstream: plan.localHttps.providerUpstream,
           tamaUpstream: plan.localHttps.tamaUpstream,
           providerPort: plan.localHttps.providerPort,
+          ...(plan.localHttps.providerService
+            ? {
+                providerService: plan.localHttps.providerService,
+                providerDependency: plan.localHttps.providerDependency,
+              }
+            : {}),
           tamaPort: plan.localHttps.tamaPort,
           httpsPort: plan.localHttps.httpsPort,
           certificateNames: plan.localHttps.certificateNames,
@@ -190,6 +198,12 @@ export function printHuman(io, result, color, setupUrl) {
     );
   }
 
+  io.stdout("");
+  io.stdout(
+    `Setup phase: ${result.setup.phase}. Runtime health: ${result.setup.runtimeHealth}; foundation: ${result.setup.foundation}.`,
+  );
+  for (const action of result.setup.nextActions)
+    io.stdout(`  ${action.description} (directory: ${action.workingDirectory})`);
   if (result.agentPrompt) {
     io.stdout("");
     printBox({

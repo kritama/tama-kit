@@ -1,15 +1,21 @@
 // @ts-check
+
+import { join } from "node:path";
 import { formatAgentSetupPrompt } from "../bootstrap/agent-prompt.mjs";
-import { inspectProject } from "../bootstrap/detect-project.mjs";
+import { discoverProject, inspectProject } from "../bootstrap/detect-project.mjs";
 import { readSetupUrl } from "../bootstrap/environment.mjs";
-import { readAgentSkillMode } from "../bootstrap/manifest.mjs";
+import { readAgentSkillMode, readBootstrapSettings } from "../bootstrap/manifest.mjs";
 import { prepareMcpApp } from "../bootstrap/mcp-app.mjs";
+import { setupProgress } from "../bootstrap/setup-progress.mjs";
 import { CLIError, EXIT_CODES, usageError } from "../errors.mjs";
 import { printHuman, resultEnvelope } from "../output/bootstrap.mjs";
 import { createProgressBar } from "../terminal.mjs";
 import { runBootstrapWorkflow } from "../workflows/bootstrap.mjs";
+import { planBootstrap } from "../workflows/bootstrap-plan.mjs";
 import { mcpAppOptions } from "../workflows/options.mjs";
+import { prepareBootstrapInput, printReview, resolveBootstrapInput } from "./bootstrap-input.mjs";
 import { bootstrapUsage, parseBootstrap } from "./bootstrap-options.mjs";
+import { CancelledInput, PreviousQuestion, questions } from "./questions.mjs";
 
 /** @typedef {import("../types.mjs").BootstrapCommandOptions} BootstrapCommandOptions */
 /** @typedef {import("../types.mjs").CommandIO} CommandIO */
@@ -63,18 +69,29 @@ async function selectSkillMode(options, io, tamaDirectory) {
 
 /** @param {string[]} argv @param {CommandIO} io @returns {Promise<ExitCode>} */
 async function executeBootstrap(argv, io) {
-  const options = parseBootstrap(argv);
+  let options = parseBootstrap(argv);
   if (options.help) {
     io.stdout(bootstrapUsage());
     return EXIT_CODES.SUCCESS;
   }
 
+  const interactive = Boolean(
+    io.interactive && io.prompt && !options.json && !options.nonInteractive,
+  );
+  const guided = interactive ? await resolveBootstrapInput(options, io) : null;
+  if (guided) options = guided.options;
+  const root = discoverProject({ cwd: io.cwd, targetPath: options.targetPath }).root;
+  options.composePath ??= readBootstrapSettings(join(root, "tama"))?.composeFile;
   const inspection = inspectProject({
     cwd: io.cwd,
     targetPath: options.targetPath,
     composePath: options.composePath,
   });
-  const skillMode = await selectSkillMode(options, io, inspection.tamaDirectory);
+  const skillMode = await selectSkillMode(
+    options,
+    { ...io, interactive: false },
+    inspection.tamaDirectory,
+  );
   /** @type {McpAppPrepared | null} */
   let mcpAppPrepared = null;
   if (options.mcpApp) {
@@ -83,43 +100,82 @@ async function executeBootstrap(argv, io) {
       tamaDirectory: inspection.tamaDirectory,
       framework: inspection.framework,
       options: mcpAppOptions(options),
-      nonInteractive: options.json || !io.interactive,
+      nonInteractive: !interactive,
       io,
     });
     options.allowedOrigins = mcpAppPrepared.allowedOrigins;
   }
   const color = Boolean(io.color && !options.noColor && !options.json);
-  const progress = createProgressBar(io, {
-    enabled: !options.json,
-    color,
-    total: options.dryRun
-      ? 1
-      : options.activate
-        ? 10
-        : options.start
-          ? mcpAppPrepared
-            ? 6
-            : 5
-          : 4,
-  });
 
-  const prompt = io.prompt;
-  const { plan, healthUrl } = await runBootstrapWorkflow({
-    options,
-    cwd: io.cwd,
-    skillMode,
-    mcpAppPrepared,
-    progress,
-    authorizeLocalCa:
-      io.interactive && prompt
-        ? async () => {
-            const answer = (await prompt("Authorize mkcert -install to trust the local CA? [y/N] "))
-              .trim()
-              .toLowerCase();
-            return answer === "y" || answer === "yes";
-          }
-        : undefined,
-  });
+  const q = questions(io);
+  if (guided?.statusOnly) {
+    io.stdout(
+      "Configured status only. Runtime health and Terraform provisioning were not checked.",
+    );
+    for (const action of setupProgress(guided.reviewedPlan, { dryRun: true, started: false })
+      .nextActions)
+      io.stdout(action.description);
+    return EXIT_CODES.SUCCESS;
+  }
+  let reviewedPlan = guided?.reviewedPlan;
+  /** @type {Awaited<ReturnType<typeof runBootstrapWorkflow>>} */
+  let completed;
+  while (true) {
+    if (guided) mcpAppPrepared = await prepareBootstrapInput(options, io);
+    const progress = createProgressBar(io, {
+      enabled: !options.json,
+      color,
+      total: options.dryRun
+        ? 1
+        : options.activate
+          ? 10
+          : options.start
+            ? mcpAppPrepared
+              ? 6
+              : 5
+            : 4,
+    });
+    try {
+      completed = await runBootstrapWorkflow({
+        options,
+        cwd: io.cwd,
+        skillMode,
+        mcpAppPrepared,
+        progress,
+        reviewedPlan,
+        authorizeLocalCa: interactive
+          ? () =>
+              q.confirm(
+                "Authorize mkcert -install to trust this local CA in your host trust store?",
+              )
+          : undefined,
+      });
+      break;
+    } catch (error) {
+      if (
+        !interactive ||
+        !(error instanceof CLIError) ||
+        !["prerequisite", "startup"].includes(error.category)
+      )
+        throw error;
+      io.stderr(error.message);
+      io.stdout(
+        "Completed file changes are retained. Fix the reported prerequisite or provider state before retrying.",
+      );
+      if (!(await q.confirm("Retry with these settings?"))) throw new CancelledInput();
+      mcpAppPrepared = await prepareBootstrapInput(options, io);
+      reviewedPlan = planBootstrap({
+        options,
+        cwd: io.cwd,
+        skillMode,
+        mcpAppPrepared,
+        materializeSecrets: false,
+      });
+      printReview(reviewedPlan, io);
+      if (!(await q.confirm("Execute the reviewed retry?"))) throw new CancelledInput();
+    }
+  }
+  const { plan, healthUrl } = completed;
 
   const result = resultEnvelope(plan, {
     dryRun: options.dryRun,
@@ -144,6 +200,10 @@ export async function runBootstrap(argv, io) {
   try {
     return await executeBootstrap(argv, io);
   } catch (error) {
+    if (!jsonRequested && (error instanceof CancelledInput || error instanceof PreviousQuestion)) {
+      io.stdout("Setup paused. Rerun tama-kit bootstrap to continue.");
+      return EXIT_CODES.SUCCESS;
+    }
     if (!jsonRequested) {
       throw error;
     }
@@ -158,6 +218,9 @@ export async function runBootstrap(argv, io) {
           category: cliError.category,
           exitCode: cliError.exitCode,
           message: cliError.message,
+          ...(cliError.category === "startup" && cliError.details?.diagnostic
+            ? { diagnostic: cliError.details.diagnostic }
+            : {}),
         },
       }),
     );

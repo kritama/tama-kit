@@ -25,29 +25,41 @@ After a global npm installation, the equivalent command is:
 tama-kit bootstrap
 ```
 
-Bootstrap detects the project and its default Docker Compose file, creates
-private runtime files under `tama/`, adds managed Tama and PostgreSQL services,
-and generates a `tama/` Terraform root with one version-pinned
-`module "global"` and focused `AGENTS.md` guidance. On the first interactive
-run, it asks whether to install
-the bundled `tama-kit-cli`, `app-integration`, `graph-builder`, and
-`graph-audit` skills into the repository's `.agents/skills/` directory or leave
-skill installation to the user. It preserves an existing global-foundation
-address and refuses ambiguous ownership rather than creating duplicate
-data-bearing resources. It does not require a separate Tama source checkout.
+In an interactive terminal, bootstrap asks which project and setup mode to use,
+resolves Compose ambiguity, and collects only the relevant settings. Choose a
+standard local runtime or an MCP App OAuth provider integration. Suggested
+values come from the project, provider contract, and saved configuration.
+Advanced settings include images, contracts, provider identity, and migrations.
 
-Skip the prompt in scripts by selecting the skill mode explicitly:
+Before any write, review the image, ports, public identities, skills, and file
+changes. Choose to prepare files, start services, or explicitly activate a ready
+MCP App integration. Type `:back` to revisit a configuration step or `:cancel`
+to exit. EOF and Ctrl-C also pause setup. Dry runs remain read-only.
+
+Rerun the same bare command to continue, inspect configured status, or edit
+settings. Saved Compose/image selections and provider topology are reused;
+configured lifecycle modes are preserved. The ordered checklist in
+`tama/README.md` covers browser setup, Terraform review, provider restart, and
+client connection. Existing files or checkpoints do not prove current runtime
+health or Terraform provisioning.
+
+Flags remain available for automation and advanced callers:
 
 ```bash
-npx @kritama/tama-kit bootstrap --skills local
-npx @kritama/tama-kit bootstrap --skills manual
+npx @kritama/tama-kit bootstrap --non-interactive --skills manual --dry-run
+npx @kritama/tama-kit bootstrap --skills local --dry-run --json
 ```
 
-JSON and other non-interactive runs default to `manual`. When manual mode is
-selected, the human-readable final output prints both the project-scoped Skills
-CLI command and the Codex plugin installation commands. Human-readable
-bootstrap output also uses terminal colors and a progress bar when supported;
-use `--no-color` to disable color styling.
+JSON and non-TTY invocations never prompt; `--non-interactive` disables all
+questions even in a terminal. These modes default to manual skill installation
+unless a valid recorded choice or explicit flag selects local skills. JSON
+output includes non-secret setup phases and next-action identifiers.
+
+Bootstrap creates private runtime files under `tama/`, adds managed Tama and
+PostgreSQL services, and generates a Terraform root with focused agent guidance.
+It preserves the owned global foundation and refuses ambiguous ownership.
+It does not require a separate Tama source checkout. Terminal colors and
+progress remain available; use `--no-color` to disable styling.
 
 After a successful write, bootstrap ends with a copy-ready coding-agent prompt.
 The prompt starts and checks the local Compose runtime, guides the user through
@@ -117,6 +129,30 @@ owner's environment file is planned. Providers without a committed contract
 use conventional bindings immediately; this local artifact does not claim the
 provider runtime implements the OAuth protocol. Application-owned contracts
 under `priv/contracts/` are only read, never generated or modified.
+
+For an application-owned provider service in the root Compose file, select its
+service name and private container port:
+
+```bash
+npx @kritama/tama-kit bootstrap --mcp-app \
+  --provider-name acme --provider-service acme --provider-port 4000
+```
+
+This selects the Compose provider runtime. Caddy reaches `http://acme:4000`
+and depends on the service's health check when one is declared. Public OAuth
+origins remain the HTTPS names above. The application owns its service,
+Dockerfile, development mode, and provider environment loading; the selected
+service must load the reported `tama/` integration fragment and share the
+default Compose network. Services declared only through `extends`, includes,
+or optional profiles are not currently supported as provider selections.
+
+Bootstrap records the effective service and dependency, so reruns reuse them
+without editing generated Caddy or Compose files. To change a recorded runtime
+or service, put both runtimes in `prepared` and explicitly select
+`--migrate-provider-topology`. Use `--provider-runtime host` when moving back
+to a host-native provider. Migration preserves keys and cannot be combined
+with activation. See [provider topology](docs/mcp-app-provider-bootstrap.md#provider-runtime-topology)
+for the ownership and migration contract.
 
 Activation is deliberately two-step:
 

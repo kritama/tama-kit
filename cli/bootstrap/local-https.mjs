@@ -54,7 +54,7 @@ function isLoopbackAddress(value) {
  * separate from the private upstreams so Docker transport names cannot leak
  * into OAuth identities.
  *
- * @param {{localDomain?: string, providerPort?: number, httpsPort?: number, allowedOrigins?: string[]}} [input]
+ * @param {{localDomain?: string, providerPort?: number, providerService?: string, providerDependency?: "service_started" | "service_healthy", httpsPort?: number, allowedOrigins?: string[]}} [input]
  */
 export function resolveLocalHttpsTopology(input = {}) {
   const domain = normalizeLocalDomain(input.localDomain);
@@ -66,8 +66,23 @@ export function resolveLocalHttpsTopology(input = {}) {
   if (httpsPort !== LOCAL_HTTPS_DEFAULT_PORT) {
     throw usageError("local HTTPS currently supports only port 443");
   }
-  if (providerPort === httpsPort) {
+  if (!input.providerService && providerPort === httpsPort) {
     throw usageError("--provider-port must not use port 443; Caddy reserves it for local HTTPS");
+  }
+  if (
+    input.providerService !== undefined &&
+    (typeof input.providerService !== "string" ||
+      !/^[a-z0-9][a-z0-9_.-]*$/u.test(input.providerService) ||
+      ["tama", "tama-postgres", "caddy"].includes(input.providerService))
+  ) {
+    throw usageError("--provider-service must name an application-owned Compose service");
+  }
+  if (
+    input.providerDependency !== undefined &&
+    (!input.providerService ||
+      !["service_started", "service_healthy"].includes(input.providerDependency))
+  ) {
+    throw usageError("invalid Compose provider dependency");
   }
   const providerHost = domain;
   const tamaHost = `${LOCAL_HTTPS_TAMA_HOST_PREFIX}${domain}`;
@@ -87,7 +102,13 @@ export function resolveLocalHttpsTopology(input = {}) {
     providerIntrospectionEndpoint: `${providerOrigin}/auth/introspections`,
     tamaJwksUri: `${tamaOrigin}/.well-known/jwks.json`,
     healthUrl: `${tamaOrigin}/`,
-    providerUpstream: `http://host.docker.internal:${providerPort}`,
+    providerUpstream: `http://${input.providerService ?? "host.docker.internal"}:${providerPort}`,
+    ...(input.providerService
+      ? {
+          providerService: input.providerService,
+          providerDependency: input.providerDependency ?? "service_started",
+        }
+      : {}),
     tamaUpstream: `http://tama:${DEFAULTS.containerPort}`,
     providerPort,
     tamaPort: DEFAULTS.containerPort,
@@ -121,6 +142,7 @@ export function usesLocalHttpsTopology(options, persisted = null, contractDocume
   );
   if (persisted?.localHttps) return true;
   if (options?.migrateLocalHttps) return true;
+  if (options?.localDomain && !persisted?.providerOrigin) return true;
   if (persisted?.providerOrigin) return false;
   return !explicitlyLegacyClient && !explicitlyLegacyContract;
 }
