@@ -17,6 +17,20 @@ switch to a separate Tama repository during application setup.
 Read [the OAuth contract](references/mcp-app-oauth.md) before changing provider
 authorization, tokens, introspection, lifecycle, or persistence.
 
+## Choose terminal guidance or agent execution
+
+For a person setting up the application in their terminal, recommend bare
+`tama-kit bootstrap` and select MCP App setup in the questionnaire. The wizard
+discovers configuration, presents a preview, and offers preparation, startup,
+or staged activation. A later bare invocation can resume or inspect configured
+status; `:back` and `:cancel` allow revision or exit before effects.
+
+For agent execution, use the explicit `--dry-run --json` sequence below and
+reuse valid recorded choices. JSON and non-TTY calls never ask questions;
+`--non-interactive` disables questions for `bootstrap` in a terminal. Ask only
+for missing intent or values. The terminal wizard does not implement provider
+OAuth or authorize browser root-user/provisioner creation.
+
 ## Check Docker before writes or runtime use
 
 The JSON dry run is a pure planning step and may run before Docker is installed
@@ -29,7 +43,7 @@ docker compose version
 ```
 
 Parse the Compose version and require 2.20.0 or newer. Before starting or
-inspecting Compose services, opening guided setup, or activating the
+inspecting Compose services, opening browser root setup, or activating the
 integration, also verify that the daemon is initialized and reachable:
 
 ```bash
@@ -118,8 +132,9 @@ configuration-only and unverified.
    paths and never let Tama Kit rewrite it.
 4. If the local contract is absent, run the Tama Kit MCP App bootstrap command
    as a JSON dry run and then an approved write to generate it. Establish the
-   provider name, container-reachable provider origin, exact Tama origin,
-   allowed client origins, and pinned compatible Tama image first. Use the
+   provider name, public HTTPS identities, host or Compose provider runtime,
+   private listening port, allowed client origins, and pinned compatible Tama
+   image first. Use the
    exact command contract below; do not inspect Tama Kit source code.
 
 Do not invent environment names independently of the resolved contract. If the
@@ -146,13 +161,22 @@ npx @kritama/tama-kit bootstrap . \
 ```
 
 Fresh MCP App bootstrap derives the production-compatible local HTTPS topology:
-`https://app.localhost` for the host-native provider and
+`https://app.localhost` for the provider and
 `https://tama.app.localhost/mcp/app` for Tama. Caddy is the public entry point;
-`host.docker.internal:<provider-port>` and `tama:4000` are private upstreams,
-not OAuth identities. Use `--local-domain` and `--provider-port` for deliberate
+the host provider upstream is `host.docker.internal:<provider-port>` and Tama's
+is `tama:4000`. For an application-owned Compose provider, add
+`--provider-service <service>`; its private upstream becomes
+`<service>:<provider-port>`. These routing addresses are never OAuth identities.
+The application owns its development image, listener, loader, and restart;
+Tama uses the production release image. Read the
+[provider runtime requirements](references/mcp-app-oauth.md#local-provider-runtime)
+before selecting a Compose service.
+Use `--local-domain` and `--provider-port` for deliberate
 customization; a non-`.localhost` name also requires
-`--acknowledge-local-domain-risk`. The default allowed client origin is the provider origin; repeat
-`--allowed-origin` only for additional clients. `--provider-origin` and
+`--acknowledge-local-domain-risk`. With no explicit origins, a fresh HTTPS
+setup defaults to the provider origin. Repeated `--allowed-origin` flags supply
+the complete list, replacing defaults and recorded values; include the provider
+origin if its browser needs access. `--provider-origin` and
 `--tama-origin` are migration assertions in this topology.
 
 Existing 0.4.3 HTTP projects require an explicit `--migrate-local-https` write.
@@ -161,6 +185,13 @@ rotate keys. A custom non-`.localhost` domain requires operator-managed DNS;
 Tama Kit does not edit `/etc/hosts`. For that migration only, the retained
 transport assertion may look like `--provider-origin http://host.docker.internal:<provider-port>`;
 it is never the advertised issuer.
+
+Changing an existing HTTPS domain also requires `--migrate-local-https` or
+the wizard's explicit migration consent. Review allowed origins and ensure
+certificates cover the new names. Switching the recorded host/Compose runtime
+or service requires `--migrate-provider-topology` with both modes prepared,
+and cannot activate in the same run. Preserve the generated Caddy/Compose
+files and manifest hashes; regenerate them through supported inputs.
 
 Before a write or runtime use, verify Docker Compose. Before `--start`, also
 verify the daemon. Before writing local HTTPS certificates, ensure `mkcert` is
@@ -187,7 +218,8 @@ without `--dry-run` to stage prepared configuration. Add `--start` only when
 the user requests that Tama start. `--activate` requires both `--mcp-app` and
 `--start`; do not add it during preparation. Supported provider-specific
 options are `--provider-name`, `--local-domain`,
-`--acknowledge-local-domain-risk`, `--provider-port`,
+`--acknowledge-local-domain-risk`, `--provider-port`, `--provider-runtime`,
+`--provider-service`, `--migrate-provider-topology`,
 `--install-local-ca`, `--migrate-local-https`, `--provider-origin`,
 `--tama-origin`, repeated `--allowed-origin`, `--provider-prefix`,
 `--provider-env-file`, `--mcp-app-contract`, `--activate`, and
@@ -199,7 +231,7 @@ are ignored and untracked, that the generated local contract exists, and that
 the provider loader consumes the reported fragment. Verify both public names
 with `curl --cacert tama/tls/rootCA.pem` after Caddy starts; do not test or
 advertise the private upstreams as OAuth origins. If the user explicitly
-asks for guided Tama setup, use the HTTPS base URL from the private environment
+asks for browser root setup, use the HTTPS base URL from the private environment
 and the reported private `/setup/root?token=...` URL without echoing its token.
 Never ask the user to paste credentials into chat.
 If browser control is available, use the in-app browser for the private setup
@@ -262,7 +294,9 @@ as closed failures.
 ## Provision the local bridge
 
 Ensure the provider process really loads the private fragment reported by Tama
-Kit, using an application-owned `.envrc` source or Compose `env_file` entry.
+Kit. For host execution, use the application-owned environment loader. For a
+Compose provider, the selected service must reference the fragment in its own
+`env_file`; a host `.envrc` or an unrelated service is not loader evidence.
 Keep the fragment ignored and untracked. Rerun `tama-kit bootstrap --mcp-app`
 after adding loader evidence so the local contract records verified loading.
 
@@ -284,6 +318,23 @@ Provision in stages:
 Do not rotate keys on an ordinary rerun. Do not delete the manifest or private
 fragment to bypass drift. Provider identity changes require an explicit,
 prepared-mode migration.
+
+For continuation, read `setup.nextActions` and each entry's `workingDirectory`.
+The wizard preserves configured modes on ordinary reruns. A flag-driven
+`--mcp-app` preparation instead defaults to prepared mode; inspect existing
+state before choosing a write, especially at an enabled/restart handoff.
+`provider-restart-required` and `verification-required` describe configuration;
+only `setup.phase=enabled` with live verification confirms enabled services.
+Check `setup.runtimeHealth` and `setup.runtimeVerified` separately from files.
+`setup.foundation=not-verified` means Terraform provisioning and the active
+root recipient still need independent evidence. Follow the generated checklist
+for browser/provisioner setup, Terraform plan/apply, and OAuth-client connection.
+
+When startup fails, use the sanitized JSON `error.diagnostic` if present to
+identify a port conflict, image, health, or dependency problem. Activation
+recovery preserves this diagnostic. Follow the reported recovery instructions,
+fix the cause, and review a fresh plan before retrying; do not assume a failed
+activation left the provider's live mode synchronized with its fragment.
 
 ## Verify before handoff
 

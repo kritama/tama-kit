@@ -25,11 +25,15 @@ Read the result's `setup.nextActions`, directories, configured modes, and live
 verification state. File generation and recorded lifecycle state do not prove
 Terraform provisioning or current service health. Keep browser credentials,
 provider lifecycle changes, and Terraform apply as their documented handoffs.
+Use the [CLI reference](references/cli-reference.md) for provider topology,
+migration, continuation phases, and startup diagnostic details. Opening the
+terminal questionnaire is distinct from opening Tama's private browser setup.
 
 ## Route the request first
 
-When the user asks generally to “bootstrap my app to work with Tama” or gives
-equivalent ambiguous instructions, ask this before choosing a command:
+For agent execution, reuse the setup mode recorded in the target repository.
+When neither the user's request nor recorded state identifies the mode, ask
+this before choosing a command:
 
 > Is this application an MCP App provider that needs OAuth-protected access to
 > Tama's `/mcp/app` endpoint, or a standard app that only needs a local Tama
@@ -89,7 +93,7 @@ docker compose version
 ```
 
 Parse the reported Compose version and require 2.20.0 or newer. Before starting
-or inspecting Compose services, opening guided setup, or activating an MCP App
+or inspecting Compose services, opening browser root setup, or activating an MCP App
 integration, also verify that the daemon is initialized and reachable:
 
 ```bash
@@ -199,9 +203,9 @@ the runtime was started, verify the reported health result. Hand off the
 generated `tama/README.md` and `tama/AGENTS.md` instructions for onboarding and
 Terraform planning, while keeping the private setup URL out of the response.
 
-## Complete interactive Tama setup when requested
+## Complete browser root setup when requested
 
-After a successful non-dry-run bootstrap, if guided setup was requested, start
+After a successful non-dry-run bootstrap, if browser root setup was requested, start
 the managed Compose runtime and wait for the reported health endpoint. Then
 load `tama/.tama.env` without echoing it and
 open the private `/setup/root?token=...` URL in the in-app browser. Walk the
@@ -212,7 +216,8 @@ control is unavailable, direct the user to the local instructions in
 `tama/README.md` without reproducing the token.
 
 Do not open the setup URL or create credentials unless the user explicitly asks
-for guided setup. Do not ask the user to paste credentials into chat; have them
+for browser root setup. The terminal wizard alone does not authorize browser
+credential creation. Do not ask the user to paste credentials into chat; have them
 store the resulting `TAMA_CLIENT_ID` and `TAMA_CLIENT_SECRET` in `tama/.tama.env`.
 
 The complete standard setup sequence is:
@@ -221,7 +226,7 @@ The complete standard setup sequence is:
 2. If `--start` was omitted, run the Compose command printed by Tama Kit from
    the project root, then run the printed Compose status command. Wait for
    `http://localhost:<TAMA_PORT>/` to respond successfully.
-3. If the user explicitly requests guided setup, load `tama/.tama.env` without
+3. If the user explicitly requests browser root setup, load `tama/.tama.env` without
    echoing it, derive `http://localhost:<TAMA_PORT>/setup/root?token=<TAMA_SETUP_TOKEN>`
    locally, and open it in the in-app browser. Create the root user, sign in,
    and create provisioner credentials through the browser.
@@ -270,8 +275,10 @@ Before planning the CLI command, also establish:
 
 - the explicit provider identity when a committed provider contract does not
   supply it;
-- one provider origin reachable from both the host and Tama container;
-- the exact loopback Tama origin and matching Tama host port;
+- the public provider/Tama HTTPS identities and the provider's private
+  listening port;
+- whether the provider runs on the host or in an application-owned Compose
+  service, reusing recorded topology when present;
 - every browser or MCP client origin that should be allowed; and
 - a pinned Tama image accepted by the installed bootstrap contract.
 
@@ -315,31 +322,35 @@ npx @kritama/tama-kit bootstrap /path/to/provider \
   --dry-run --json
 ```
 
-The default public identities are `https://app.localhost` for the host-native
-provider and `https://tama.app.localhost` for Tama's protected
-`/mcp/app` resource. Caddy is the only public entry point; its
-`host.docker.internal:<provider-port>` and `tama:4000` upstreams are private
-routing details and never OAuth identities. The provider remains
-`MIX_ENV=dev`, while the official Tama image remains `MIX_ENV=prod`.
+The default public identities are `https://app.localhost` for the provider and
+`https://tama.app.localhost/mcp/app` for Tama's protected resource. Caddy is the
+public entry point. The provider upstream is `host.docker.internal:<provider-port>`
+for host execution or `<provider-service>:<provider-port>` for Compose; Tama's
+upstream is `tama:4000`. These are private routing details, never OAuth identities.
+The application owns the provider's development environment and restart;
+the official Tama image remains `MIX_ENV=prod`.
+
+For a Compose provider, add `--provider-service <service>` to the reviewed
+command. It must name an existing application-owned service in the selected
+root Compose file, join the shared default network, and load the provider
+fragment through its own `env_file`. A host `.envrc` or an unrelated service's
+loader is not evidence for that container. Tama Kit manages Caddy routing and
+dependencies; the application owns its service, image, listener, and CA trust.
 Use `--local-domain` and `--provider-port` for deliberate customization. A
 non-`.localhost` name also requires `--acknowledge-local-domain-risk` after
 local-only DNS resolution is verified.
 `--provider-origin` and `--tama-origin` are advanced migration assertions.
-The default allowed client origin is the provider origin; repeat
-`--allowed-origin` only for additional clients.
+Without explicit origins, a fresh HTTPS setup defaults to the provider origin.
+Supplying `--allowed-origin` replaces the list: include every desired origin,
+including the provider origin when its browser must have access.
 Loopback client origins may use HTTP, but every non-loopback allowed origin must use HTTPS;
 at most 32 unique allowed origins are supported.
 
-Supported MCP App flags are `--provider-name`, `--local-domain`,
-`--acknowledge-local-domain-risk`, `--provider-port`,
-`--install-local-ca`, `--migrate-local-https`, `--provider-origin`,
-`--tama-origin`, repeated `--allowed-origin <origin>`,
-`--mcp-app-contract <path>`, `--provider-prefix <prefix>`,
-`--provider-env-file <path>`, `--activate`, and
-`--migrate-provider-identity`. Provider-specific flags require `--mcp-app`;
-`--activate` also requires `--start`. Existing HTTP projects require an
-explicit `--migrate-local-https`; migration preserves OAuth and application
-secrets.
+Provider-specific flags require `--mcp-app`; `--activate` also requires
+`--start`. Use the [CLI reference](references/cli-reference.md) for deliberate
+runtime/service, public-domain, and identity migrations. Keep generated files
+reproducible through those inputs rather than editing managed Caddy/Compose
+files or manifest hashes.
 Use the official server image tag `<version>-server` with a pinned version in
 the supported Tama range; the floating `latest` tag is not valid for MCP App
 preparation.

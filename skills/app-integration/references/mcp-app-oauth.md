@@ -36,7 +36,8 @@ of the following:
 - one provider origin that preserves the advertised issuer while remaining
   reachable by host probes and the Tama container; and
 - a host-native provider listener bound to a bridge-reachable interface rather
-  than loopback only when using the managed host-gateway topology.
+  than loopback only when using the managed host-gateway topology, or a
+  Compose provider listener reachable from Caddy on the shared default network.
 
 Existing OAuth is **partial or incompatible** until every missing item is
 identified. OAuth used only to protect the application's own API does not prove
@@ -55,6 +56,31 @@ plainly before proposing activation. Use language equivalent to:
 Ask whether to implement that prerequisite unless the user already authorized
 it. Configuration may be staged in `prepared` only when explicitly requested;
 it is not provider readiness and must not be activated.
+
+## Local provider runtime
+
+The same public HTTPS provider issuer and Tama resource apply to host and
+Compose providers. Caddy selects the private route; the provider must publish
+the public issuer, resource, and JWKS endpoints from the resolved contract.
+
+- **Host:** Caddy reaches `host.docker.internal:<provider-port>`. Verify the
+  listener is reachable over that bridge and the application loads its fragment.
+- **Compose:** `--provider-service <service>` selects a service in the chosen
+  root Compose file and routes to `<service>:<provider-port>`. The service must
+  join the shared default network, have no profile, `extends`, or `network_mode`,
+  and have no transitive dependency back to Caddy. Unresolved YAML merge keys
+  in the service or dependency configuration must be expanded before planning.
+  Its own `env_file` must load the provider fragment; another service or the
+  host's `.envrc` does not establish container loading.
+- **Application ownership:** keep the development image, listener configuration,
+  environment loader, provider lifecycle restart, and trust in the public local
+  CA in the application's workflow. Tama Kit manages Caddy/Tama routing and
+  Tama's derived image trust; do not copy a CA private key into either image.
+
+Caddy's declared healthcheck dependency is startup ordering, not OAuth readiness.
+Verify provider metadata, public-only JWKS, and authenticated introspection at
+the exact public endpoints, including reachability from Tama. Provider service
+names and host-gateway addresses must not become OAuth metadata.
 
 ## Required provider bindings
 

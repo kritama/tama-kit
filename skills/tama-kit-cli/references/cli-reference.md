@@ -59,14 +59,14 @@ All provider-specific flags require `--mcp-app`.
 | `--provider-env-file <path>` | Override the derived private provider fragment path inside `tama/`. The provider must actually load this file. |
 | `--provider-origin <origin>` | Set or assert the provider issuer/service origin. Fresh local HTTPS derives `https://app.localhost`; the private `host.docker.internal:<provider-port>` upstream must never be used as the issuer. |
 | `--tama-origin <origin>` | Set or assert Tama's exact public origin. Fresh local HTTPS derives `https://tama.app.localhost`; retained legacy HTTP plans may use the selected loopback `--port`. |
-| `--allowed-origin <origin>` | Allow an exact browser/MCP client origin. Repeat for multiple origins. At least one is required; non-loopback origins must use HTTPS. Maximum 32 unique origins. |
+| `--allowed-origin <origin>` | Supply the complete desired browser/MCP client allowlist by repeating this flag. Explicit values replace defaults and recorded origins. Non-loopback origins must use HTTPS; choose 1–32 unique origins. |
 | `--local-domain <domain>` | Derive the local HTTPS provider and Tama hostnames. Defaults to `app.localhost`; `.local`, IP literals, and invalid DNS names are rejected. |
 | `--provider-port <port>` | Set the provider's private host or container Caddy upstream port. Defaults to `4000`; it is not part of the public OAuth issuer. |
 | `--provider-runtime host\|compose` | Select the host-native or Compose provider runtime. |
 | `--provider-service <name>` | Select an application-owned service declared directly in the root Compose file, on the shared default network. The selected service must load the provider fragment. |
 | `--migrate-provider-topology` | Explicitly change a recorded runtime/service with both runtimes prepared. Preserves public identities and keys; cannot activate in the same command. |
 | `--install-local-ca` | Explicitly authorize `mkcert -install` when writing local HTTPS certificates. It never runs during dry-run. |
-| `--migrate-local-https` | Explicitly migrate a persisted 0.4.3 HTTP MCP App topology to the derived HTTPS topology while preserving keys and application secrets. |
+| `--migrate-local-https` | Explicitly migrate a persisted HTTP topology or change recorded public HTTPS names while preserving signing keys and application secrets. Certificates must cover the new names. |
 | `--activate` | Request live activation and verification. Requires both `--mcp-app` and `--start`. |
 | `--migrate-provider-identity` | Deliberately migrate persisted provider identity. Requires an explicit `--provider-name`, a verified loader for the new fragment, and prepared provider mode. It cannot be combined with `--activate`. |
 
@@ -99,9 +99,35 @@ legacy HTTP topology. Verify the HTTPS names with
 Repeat the accepted command without `--dry-run` to prepare files. Do not add
 activation implicitly.
 
+### Provider runtime and ownership
+
+The default host topology routes Caddy to `host.docker.internal:<provider-port>`.
+For a containerized provider, add `--provider-service <service>` to the same
+planning/write command; it implies `--provider-runtime compose`. Select the
+application's root file with `--compose` when necessary. Public HTTPS identities
+remain unchanged; only the private upstream becomes `<service>:<provider-port>`.
+
+The selected service must be declared in that root file, join the shared
+default network, and have no profile, `extends`, `network_mode`, or dependency
+path back to Caddy. Unresolved YAML merge keys in its configuration or dependency
+path are rejected; expand that application-owned configuration before retrying.
+Caddy waits for a declared enabled healthcheck, otherwise for service startup.
+Neither condition proves the provider's OAuth behavior.
+
+Use the selected service's `env_file` to load the reported fragment. A host
+`.envrc`, volume mount alone, or another service's loader does not verify that
+container's environment. The application owns its image, listener, CA trust,
+and mode-change/restart workflow. Do not patch generated Caddy/Compose files
+or hashes to point at the service; rerun bootstrap with the topology inputs.
+
+Changing the recorded service or switching between host and Compose requires
+`--migrate-provider-topology` with both configured modes prepared. To switch
+back to host use `--provider-runtime host`, without `--provider-service`.
+Complete this migration before activation.
+
 ### MCP App lifecycle
 
-1. Preparation writes both owners' environment inputs in `prepared` mode and
+1. Fresh preparation writes both owners' environment inputs in `prepared` mode and
    generates `tama/contracts/mcp-app-provider-v1.json` before environment
    planning. It does not prove the provider loads its fragment.
 2. Configure the provider process to load the reported private fragment and
@@ -131,6 +157,45 @@ The wizard preserves configured lifecycle modes unless migration or activation
 is explicitly selected. For automated operations retain the explicit flags
 and inspect `setup.nextActions`; configured status is not a live probe.
 
+An ordinary flag-driven `--mcp-app` preparation defaults to prepared mode;
+it is not equivalent to the wizard's lifecycle-preserving continuation. Inspect
+existing modes before selecting an action, especially at an enabled or provider
+restart handoff. Do not run a preparation write merely to obtain status.
+
+| `setup.phase` | Interpretation and next action |
+| --- | --- |
+| `planned` | Proposed changes only; review before a write. |
+| `configured` | Files prepared; runtime health was not checked. |
+| `running` | Startup/health completed this run; inspect MCP verification separately. |
+| `verification-required` | Both modes are configured enabled, but this run has not verified them live. |
+| `provider-restart-required` | Tama is configured enabled and the provider prepared; follow the provider-owned enable/restart handoff. |
+| `enabled` | Both enabled modes passed live verification in this run. |
+
+Read `setup.runtimeHealth`, `setup.runtimeVerified`, and the configured modes
+together: a phase inferred from files is not proof that those modes are running.
+`setup.foundation` remains `not-verified`; bootstrap does not provision or
+verify the Terraform foundation. Follow each `setup.nextActions` entry's
+`workingDirectory`. Browser root/provisioner setup, Terraform plan/apply, provider
+restart, and the OAuth client connection remain separate handoffs. Use the
+ordered checklist in `tama/README.md`; provisioner credentials are not MCP-client
+credentials.
+
+Changing a saved HTTPS domain in the wizard asks for migration consent. The
+suggested origin list replaces the previous provider origin if it was present,
+retains unrelated custom origins, and removes duplicates. Explicit origin flags
+remain authoritative. In automation use `--migrate-local-https` and supply the
+desired origins. Existing TLS files must cover the new names; follow the CLI's
+certificate replacement instructions rather than bypassing ownership checks.
+
+Prerequisite/startup failures offer a fresh review and retry in the terminal.
+JSON callers receive `error.category`, `error.exitCode`, and, for captured
+Compose failures, `error.diagnostic` with operation `compose-up` and a bounded
+reason: `port-conflict` (possibly with `port`), `unhealthy-service`,
+`image-unavailable`, `dependency-failed`, or `compose-failed`. Activation recovery
+retains the original diagnostic; if only recovery has one, it reports that one.
+Use it to identify the next corrective action without copying raw Docker logs
+or private environment values. Retry after addressing the cause and reviewing
+the new plan; failure does not authorize repeated starts or topology changes.
 
 - Keep provider identity, provider origin, allowed origins, Tama image, and
   relevant explicit flags consistent with persisted state.
