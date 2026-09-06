@@ -286,6 +286,45 @@ test("advanced identity defaults follow the accepted provider name", async () =>
   assert.equal(result.options.providerEnvironmentFile, "tama/.acme.integration.env");
 });
 
+test("equivalent localhost domains do not require public-DNS risk acknowledgment", async () => {
+  for (const domain of ["APP.LOCALHOST", "app.localhost.", "APP.LOCALHOST.", "app.example"]) {
+    const root = temporaryDirectory("tama-guided-domain-");
+    writeFileSync(join(root, "compose.yaml"), "services: {}\n");
+    const publicDomain = domain === "app.example";
+    const io = ioFor(root, ["no", publicDomain ? "no" : "1"]);
+    const options = parseBootstrap([
+      root,
+      "--dry-run",
+      "--mcp-app",
+      "--compose",
+      "compose.yaml",
+      "--skills",
+      "manual",
+      "--provider-name",
+      "acme",
+      "--local-domain",
+      domain,
+      "--provider-runtime",
+      "host",
+      "--provider-port",
+      "4000",
+      "--allowed-origin",
+      "https://client.example",
+    ]);
+    if (publicDomain) {
+      await assert.rejects(resolveBootstrapInput(options, io), CancelledInput);
+      assert.ok(io.prompts.some((prompt) => prompt.includes("public DNS")));
+    } else {
+      const result = await resolveBootstrapInput(options, io);
+      assert.equal(result.options.localDomain, "app.localhost");
+      assert.equal(result.reviewedPlan.localHttps.providerOrigin, "https://app.localhost");
+      assert.equal(result.reviewedPlan.localHttps.tamaOrigin, "https://tama.app.localhost");
+      assert.ok(io.prompts.every((prompt) => !prompt.includes("public DNS")));
+    }
+    assert.equal(existsSync(join(root, "tama")), false);
+  }
+});
+
 test("a contract-incompatible default image prompts for an offline-compatible pin", async () => {
   const root = temporaryDirectory("tama-guided-image-");
   writeContract(

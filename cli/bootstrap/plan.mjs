@@ -164,6 +164,10 @@ function mcpAppReadmeGuidance(mcpApp) {
   if (!mcpApp) {
     return "";
   }
+  const providerService = mcpApp.localHttps?.providerService;
+  const providerRuntime = providerService
+    ? `provider Compose service \`${providerService}\``
+    : "host-native provider";
   return [
     "",
     "## MCP App provider integration",
@@ -177,12 +181,15 @@ function mcpAppReadmeGuidance(mcpApp) {
     ...(mcpApp.localHttps
       ? [
           `Caddy is the public HTTPS entry point at \`${mcpApp.localHttps.providerOrigin}\` and \`${mcpApp.localHttps.tamaOrigin}\`. The private upstreams (${mcpApp.localHttps.providerUpstream} and ${mcpApp.localHttps.tamaUpstream}) are Docker routing details and must not be used as OAuth identities.`,
-          `The provider remains host-native in MIX_ENV=dev; Tama runs in the official release image with MIX_ENV=prod and trusts the public mkcert CA through the generated derived image.`,
+          providerService
+            ? `The provider runs in the application-owned Compose service \`${providerService}\`. Its development image, listener, environment loader, and lifecycle restart remain application-owned.`
+            : "The provider remains host-native in MIX_ENV=dev.",
+          "Tama runs in the official release image with MIX_ENV=prod and trusts the public mkcert CA through the generated derived image.",
           `Verify the public runtime with \`curl --cacert tama/tls/rootCA.pem ${mcpApp.localHttps.healthUrl}\` after starting Compose.`,
           "",
         ]
       : []),
-    "Activation is staged. Run bootstrap with `--start --activate` to verify prepared state and enable Tama. Tama Kit does not restart the host-native provider: set the provider mode variable to `enabled`, restart the provider, then rerun the same command. An enabled checkpoint is reported only after both live services pass verification.",
+    `Activation is staged. Run bootstrap with \`--start --activate\` to verify prepared state and enable Tama. Tama Kit does not restart the ${providerRuntime}: set the provider mode variable to \`enabled\`, restart the provider, then rerun the same command. An enabled checkpoint is reported only after both live services pass verification.`,
   ].join("\n");
 }
 

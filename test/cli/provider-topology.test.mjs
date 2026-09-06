@@ -75,6 +75,33 @@ test("provider loader evidence must belong to the selected service", () => {
   assert.equal(result.localHttps.providerDependency, "service_started");
 });
 
+test("generated and persisted setup guidance describes the selected provider runtime", () => {
+  for (const providerService of [undefined, "memovee"]) {
+    const root = fixture();
+    const first = plan(root, { providerService });
+    const readmePath = join(root, "tama/README.md");
+    const readme = first.operations.find((op) => op.path === readmePath).content;
+    if (providerService) {
+      assert.match(readme, /provider runs in the application-owned Compose service `memovee`/);
+      assert.match(readme, /does not restart the provider Compose service `memovee`/);
+      assert.match(readme, /http:\/\/memovee:4000/);
+      assert.doesNotMatch(readme, /host-native|MIX_ENV=dev/);
+    } else {
+      assert.match(readme, /provider remains host-native in MIX_ENV=dev/);
+      assert.match(readme, /does not restart the host-native provider/);
+      assert.match(readme, /http:\/\/host\.docker\.internal:4000/);
+    }
+    assert.match(readme, /MIX_ENV=prod/);
+    assert.match(readme, /both live services pass verification/);
+    applyOperations(first.operations);
+    for (const rerun of [plan(root), createBootstrapPlan({ cwd: root })]) {
+      const operation = rerun.operations.find((op) => op.path === readmePath);
+      assert.equal(operation.action, "unchanged");
+    }
+    assert.equal(readFileSync(readmePath, "utf8"), readme);
+  }
+});
+
 test("provider runtime migration is explicit and preserves signing material", () => {
   const root = fixture();
   applyOperations(plan(root).operations);

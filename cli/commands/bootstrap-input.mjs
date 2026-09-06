@@ -307,8 +307,9 @@ export async function resolveBootstrapInput(supplied, io) {
         https = options.migrateLocalHttps;
       }
       if (https) {
-        options.localDomain =
-          supplied.localDomain ?? persisted?.localHttps?.localDomain ?? "app.localhost";
+        options.localDomain = normalizeLocalDomain(
+          supplied.localDomain ?? persisted?.localHttps?.localDomain ?? "app.localhost",
+        );
         if (!resume && !supplied.localDomain)
           options.localDomain = await q.text(
             "Local HTTPS domain",
