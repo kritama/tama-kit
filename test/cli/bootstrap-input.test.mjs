@@ -460,3 +460,49 @@ test("an in-session prerequisite retry renders fresh progress through completion
     else process.env.PATH = originalPath;
   }
 });
+
+test("domain migration replaces the old default origin while preserving custom and explicit origins", async () => {
+  for (const customOnly of [false, true]) {
+    const root = temporaryDirectory("tama-origin-migrate-");
+    const stored = customOnly
+      ? ["https://client.example"]
+      : ["https://app.localhost", "https://client.example", "https://next.localhost"];
+    applyOperations(
+      planWithMcp(
+        root,
+        {
+          ...preparedFor(root),
+          allowedOrigins: stored,
+        },
+        { localDomain: "app.localhost" },
+      ).operations,
+    );
+    for (const explicit of [false, true]) {
+      const answers = ["2", "no", "no", "next.localhost", "yes", "1", ""];
+      if (!explicit) answers.push(""); // Accept the suggested origins.
+      answers.push("1");
+      const io = ioFor(root, answers);
+      const flags = [
+        root,
+        "--dry-run",
+        ...(explicit ? ["--mcp-app", "--allowed-origin", "https://app.localhost"] : []),
+      ];
+      const result = await resolveBootstrapInput(parseBootstrap(flags), io);
+      const expected = explicit
+        ? ["https://app.localhost"]
+        : customOnly
+          ? stored
+          : ["https://next.localhost", "https://client.example"];
+      assert.deepEqual(result.options.allowedOrigins, expected);
+      assert.deepEqual(result.reviewedPlan.mcpApp.allowedOrigins, expected);
+      assert.deepEqual(result.reviewedPlan.localHttps.allowedOrigins, expected);
+      assert.equal(result.reviewedPlan.mcpApp.providerOrigin, "https://next.localhost");
+      assert.equal(
+        JSON.parse(
+          readFileSync(join(root, "tama/.tama-kit.json"), "utf8"),
+        ).mcpAppProvider.allowedOrigins.includes("https://client.example"),
+        true,
+      );
+    }
+  }
+});

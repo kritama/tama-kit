@@ -14,7 +14,7 @@ import {
   validateCompose,
 } from "../bootstrap/start.mjs";
 import { activationStep, assertNever } from "../domain/lifecycle.mjs";
-import { startupError } from "../errors.mjs";
+import { CLIError, startupError } from "../errors.mjs";
 import { applyOperationsTransactionally } from "../shared/write.mjs";
 import { mcpAppOptions } from "./options.mjs";
 
@@ -23,6 +23,17 @@ type BootstrapCommandOptions = import("../types.mjs").BootstrapCommandOptions;
 type McpAppPrepared = import("../types.mjs").McpAppPrepared;
 type McpAppBootstrapOptions = import("../types.mjs").McpAppBootstrapOptions;
 type Progress = ReturnType<typeof import("../terminal.mjs").createProgressBar>;
+
+// Keep the original sanitized failure reason when recovery also fails. Other
+// internal details and raw process output are never copied into the wrapper.
+function diagnosticDetails(...failures: unknown[]) {
+  for (const failure of failures) {
+    if (failure instanceof CLIError && failure.details?.diagnostic) {
+      return { diagnostic: failure.details.diagnostic };
+    }
+  }
+  return undefined;
+}
 
 const runtimeEffects = {
   createBootstrapPlan,
@@ -117,6 +128,7 @@ export function createBootstrapRuntime(overrides: Partial<typeof runtimeEffects>
         recoveryError instanceof Error ? recoveryError.message : String(recoveryError);
       throw startupError(
         `MCP App activation failed: ${original}. Restoring prepared mode also failed: ${recovery}. Inspect the managed configuration and both services before retrying.`,
+        diagnosticDetails(failure, recoveryError),
       );
     }
   }
@@ -154,6 +166,7 @@ export function createBootstrapRuntime(overrides: Partial<typeof runtimeEffects>
       const message = error instanceof Error ? error.message : String(error);
       throw startupError(
         `MCP App verification could not complete. ${recover ? "Tama was restarted in prepared mode and the provider fragment was restored to prepared; restart the provider so its live state also returns to prepared. " : "The integration remains prepared. "}Verification failure: ${message}`,
+        diagnosticDetails(error),
       );
     }
   }
@@ -195,6 +208,7 @@ export function createBootstrapRuntime(overrides: Partial<typeof runtimeEffects>
           throw startupError(
             "Tama failed to start in enabled MCP App mode. Tama was restarted in prepared mode and the provider fragment was restored to prepared; restart the provider so its live state also returns to prepared. " +
               `Startup failure: ${message}`,
+            diagnosticDetails(error),
           );
         }
         throw error;
@@ -217,6 +231,7 @@ export function createBootstrapRuntime(overrides: Partial<typeof runtimeEffects>
             `${wasEnabled ? "MCP App activation" : "MCP App prepared-state"} verification could not resolve the provider transport. ` +
               `${wasEnabled ? "Tama was restarted in prepared mode and the provider fragment was restored to prepared; restart the provider so its live state also returns to prepared. " : "The integration remains prepared. "}` +
               `Transport failure: ${message}`,
+            diagnosticDetails(error),
           );
         }
         const providerFetch = providerTransportHost
@@ -290,6 +305,7 @@ export function createBootstrapRuntime(overrides: Partial<typeof runtimeEffects>
               throw startupError(
                 "Tama failed to start in enabled MCP App mode. Tama was restarted in prepared mode; the provider remained prepared. " +
                   `Startup failure: ${message}`,
+                diagnosticDetails(error),
               );
             }
             progress.update(9, "Verifying enabled Tama state");

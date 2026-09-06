@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { startupError } from "../../cli/errors.mjs";
 import { createBootstrapWorkflow } from "../../cli/workflows/bootstrap.mjs";
 import { createDevWorkflow } from "../../cli/workflows/dev.mjs";
 import { createBootstrapRuntime } from "../../cli/workflows/mcp-app-runtime.mjs";
@@ -39,6 +40,8 @@ function fixture({
   verifyException,
   recoveryFailure,
   transportFailure,
+  startDiagnostic,
+  recoveryDiagnostic,
 } = {}) {
   const events = [];
   let starts = 0;
@@ -63,9 +66,17 @@ function fixture({
     async startCompose(value) {
       starts++;
       events.push(`start:${value.mcpApp.lifecycle}/${value.mcpApp.providerLifecycle}`);
-      if (starts === startFailure) throw new Error("startup fault");
+      if (starts === startFailure)
+        throw startDiagnostic
+          ? startupError("startup fault", { diagnostic: startDiagnostic, internal: "do-not-copy" })
+          : new Error("startup fault");
       if (recoveryFailure && starts > 1 && value.mcpApp.lifecycle === "prepared") {
-        throw new Error("recovery fault");
+        throw recoveryDiagnostic
+          ? startupError("recovery fault", {
+              diagnostic: recoveryDiagnostic,
+              internal: "do-not-copy",
+            })
+          : new Error("recovery fault");
       }
       return "https://tama.app.localhost/";
     },
@@ -247,6 +258,37 @@ test("a failed recovery reports both the activation and recovery failures", asyn
       error.message,
       /startup fault.*Restoring prepared mode also failed: recovery fault/u,
     );
+    return true;
+  });
+});
+
+test("activation recovery preserves the sanitized startup diagnostic", async () => {
+  const diagnostic = { operation: "compose-up", reason: "port-conflict", port: 443 };
+  const recoveryDiagnostic = { operation: "compose-up", reason: "image-unavailable" };
+  for (const initiallyEnabled of [false, true]) {
+    for (const recoveryFailure of [false, true]) {
+      const f = fixture({
+        startFailure: initiallyEnabled ? 1 : 2,
+        startDiagnostic: diagnostic,
+        recoveryFailure,
+        recoveryDiagnostic,
+      });
+      await assert.rejects(
+        f.run(initiallyEnabled ? plan("enabled", "enabled") : plan()),
+        (error) => {
+          assert.equal(error.category, "startup");
+          assert.deepEqual(error.details, { diagnostic });
+          assert.doesNotMatch(JSON.stringify(error.details), /do-not-copy/);
+          if (recoveryFailure) assert.match(error.message, /Restoring prepared mode also failed/);
+          return true;
+        },
+      );
+      assert.equal(f.events.at(-1), "start:prepared/prepared");
+    }
+  }
+  const f = fixture({ startFailure: 1, recoveryFailure: true, recoveryDiagnostic });
+  await assert.rejects(f.run(plan("enabled", "enabled")), (error) => {
+    assert.deepEqual(error.details, { diagnostic: recoveryDiagnostic });
     return true;
   });
 });

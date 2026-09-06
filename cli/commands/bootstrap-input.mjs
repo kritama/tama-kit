@@ -406,8 +406,18 @@ export async function resolveBootstrapInput(supplied, io) {
           );
       }
       if (!supplied.allowedOrigins) {
-        const origins =
+        let origins =
           persisted?.allowedOrigins ?? (https ? [`https://${options.localDomain}`] : []);
+        const previousOrigin = persisted?.providerOrigin;
+        if (https && options.migrateLocalHttps && previousOrigin) {
+          origins = [
+            ...new Set(
+              origins.map((origin) =>
+                origin === previousOrigin ? `https://${options.localDomain}` : origin,
+              ),
+            ),
+          ];
+        }
         options.allowedOrigins = resume
           ? origins
           : (
