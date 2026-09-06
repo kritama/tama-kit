@@ -158,6 +158,9 @@ export async function runBootstrap(argv, io) {
           category: cliError.category,
           exitCode: cliError.exitCode,
           message: cliError.message,
+          ...(cliError.category === "startup" && cliError.details?.diagnostic
+            ? { diagnostic: cliError.details.diagnostic }
+            : {}),
         },
       }),
     );

@@ -47,4 +47,11 @@ modification is part of implementing this feature.
 - Both generated topologies pass real `docker compose config --quiet` using
   isolated temporary projects. No provider/Tama services were started.
 - Terminal questions and continuation (#18, #27–#30) remain the next stage.
+- Initial #17 implementation: bounded stderr capture with an allowlisted
+  diagnostic projection and a stable single JSON startup-error envelope.
+- Final local checks: build/typecheck, Biome, submission validation, installed
+  package validation, and `git diff --check` pass. Full suite: 286 passed,
+  one existing root-only test skipped. HTTP/TLS tests require loopback access.
 - No issues are claimed complete and no live acceptance is claimed yet.
+  Still required: interactive input/review/continuation, runtime verification
+  of the Compose-managed provider, and clean Memovee end-to-end acceptance.

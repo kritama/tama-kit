@@ -263,3 +263,12 @@ starts the provider as Caddy's declared dependency. Provider code, environment
 loading, and the enable/restart handoff remain application-owned. Static
 configuration and loader evidence do not establish live OAuth readiness.
 
+## Startup diagnostics
+
+Quiet JSON startup failures preserve the `startup` category and exit code 6.
+They also return a bounded `error.diagnostic` projection with operation
+`compose-up` and reason `port-conflict`, `unhealthy-service`,
+`image-unavailable`, `dependency-failed`, or `compose-failed`. A recognized
+bind failure includes its port. Unknown stderr is not copied into the result:
+Compose output can contain application secrets, URLs, or private keys.
+Human mode continues to display native Compose diagnostics.
