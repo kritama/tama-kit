@@ -153,7 +153,6 @@ local Tama runtime.
 | `--postgres-port <port>` | Isolated Compose PostgreSQL loopback port; default `55432`. |
 | `--prepare-only` | Generate private environment files without starting services or running Mix. |
 | `--dry-run` | Inspect without writing or starting. |
-| `--non-interactive` | Disable all terminal questions while retaining explicit flags and recorded settings. |
 | `--json` | Emit secret-free machine output. |
 
 Typical sequence:
