@@ -158,6 +158,46 @@ test("provider topology flags require MCP App and cannot migrate while activatin
   );
 });
 
+test("unresolved YAML merges cannot hide provider topology or dependency constraints", () => {
+  const root = fixture();
+  const path = join(root, "compose.yaml");
+  for (const inherited of [
+    "networks: [private]",
+    "profiles: [optional]",
+    "depends_on: [caddy]",
+    "network_mode: host",
+    "extends: base",
+  ]) {
+    writeFileSync(
+      path,
+      `x-provider: &provider_defaults\n  ${inherited}\nservices:\n  memovee:\n    <<: *provider_defaults\n    image: example/provider\n`,
+    );
+    assert.throws(() => providerServiceDependency(path, "memovee"), /unresolved YAML merges/);
+  }
+  writeFileSync(
+    path,
+    `x-dependencies: &dependencies\n  caddy: {condition: service_started}\nservices:\n  memovee:\n    image: example/provider\n    depends_on:\n      <<: *dependencies\n`,
+  );
+  assert.throws(() => providerServiceDependency(path, "memovee"), /unresolved YAML merges/);
+  writeFileSync(
+    path,
+    `x-worker: &worker_defaults\n  depends_on: [caddy]\nservices:\n  memovee:\n    image: example/provider\n    depends_on: [worker]\n  worker:\n    <<: *worker_defaults\n    image: example/worker\n`,
+  );
+  assert.throws(() => providerServiceDependency(path, "memovee"), /unresolved YAML merges/);
+  // A merge in the services mapping can hide a transitive dependency too.
+  writeFileSync(
+    path,
+    `x-services: &services\n  worker:\n    image: example/worker\n    depends_on: [caddy]\nservices:\n  <<: *services\n  memovee:\n    image: example/provider\n    depends_on: [worker]\n`,
+  );
+  assert.throws(() => providerServiceDependency(path, "memovee"), /unresolved YAML merges/);
+  // Ordinary aliases have already been resolved by the YAML parser.
+  writeFileSync(
+    path,
+    `x-provider: &provider\n  image: example/provider\n  healthcheck: {test: [CMD, check]}\nservices:\n  memovee: *provider\n`,
+  );
+  assert.equal(providerServiceDependency(path, "memovee"), "service_healthy");
+});
+
 test("service removal and symlink replacement are refused on ordinary reruns", () => {
   const root = fixture();
   applyOperations(plan(root, { providerService: "memovee" }).operations);

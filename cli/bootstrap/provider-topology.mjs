@@ -4,6 +4,23 @@ import { validateComposeDocument } from "./compose.mjs";
 import { isPlainObject, safeRead } from "./contracts/files.mjs";
 import { resolveLocalHttpsTopology } from "./local-https.mjs";
 
+/** @param {unknown} value @param {string} name */
+function rejectUnresolvedMerges(value, name) {
+  const pending = [value];
+  const visited = new Set();
+  while (pending.length) {
+    const item = pending.pop();
+    if (!item || typeof item !== "object" || visited.has(item)) continue;
+    visited.add(item);
+    if (Object.hasOwn(item, "<<")) {
+      throw usageError(
+        `provider service ${name} uses unresolved YAML merges; expand the inherited configuration in the selected root Compose file`,
+      );
+    }
+    pending.push(...Object.values(item));
+  }
+}
+
 /**
  * Resolve an application-owned service from the selected root Compose file.
  * Do not run Compose or interpolate application environments during planning.
@@ -19,10 +36,12 @@ export function providerServiceDependency(composeFile, name) {
     });
   const document = validateComposeDocument(content, composeFile);
   const services = isPlainObject(document.services) ? document.services : {};
+  if (Object.hasOwn(services, "<<")) rejectUnresolvedMerges(services, name);
   const service = services[name];
   if (!isPlainObject(service)) {
     throw usageError(`provider service ${name} must be declared in the selected root Compose file`);
   }
+  rejectUnresolvedMerges(service, name);
   if (
     service.extends ||
     service.network_mode ||
@@ -51,6 +70,7 @@ export function providerServiceDependency(composeFile, name) {
     visited.add(current);
     const item = services[current ?? ""];
     if (!isPlainObject(item)) continue;
+    rejectUnresolvedMerges(item, current ?? name);
     const dependencies = item.depends_on;
     pending.push(
       ...(Array.isArray(dependencies)

@@ -316,6 +316,16 @@ export async function resolveBootstrapInput(supplied, io) {
             options.localDomain,
             normalizeLocalDomain,
           );
+        if (
+          persisted?.localHttps &&
+          options.localDomain !== normalizeLocalDomain(persisted.localHttps.localDomain) &&
+          !options.migrateLocalHttps
+        ) {
+          options.migrateLocalHttps = await q.confirm(
+            `Migrate public HTTPS identities from ${persisted.localHttps.localDomain} to ${options.localDomain}? This returns the integration to prepared mode and requires certificates for the new names.`,
+          );
+          if (!options.migrateLocalHttps) throw new CancelledInput();
+        }
         if (!options.localDomain.endsWith(".localhost") && !options.acknowledgeLocalDomainRisk) {
           options.acknowledgeLocalDomainRisk = await q.confirm(
             "This name may collide with public DNS. Have you verified local-only resolution and accepted that risk?",

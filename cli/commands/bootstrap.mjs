@@ -106,19 +106,6 @@ async function executeBootstrap(argv, io) {
     options.allowedOrigins = mcpAppPrepared.allowedOrigins;
   }
   const color = Boolean(io.color && !options.noColor && !options.json);
-  const progress = createProgressBar(io, {
-    enabled: !options.json,
-    color,
-    total: options.dryRun
-      ? 1
-      : options.activate
-        ? 10
-        : options.start
-          ? mcpAppPrepared
-            ? 6
-            : 5
-          : 4,
-  });
 
   const q = questions(io);
   if (guided?.statusOnly) {
@@ -135,6 +122,19 @@ async function executeBootstrap(argv, io) {
   let completed;
   while (true) {
     if (guided) mcpAppPrepared = await prepareBootstrapInput(options, io);
+    const progress = createProgressBar(io, {
+      enabled: !options.json,
+      color,
+      total: options.dryRun
+        ? 1
+        : options.activate
+          ? 10
+          : options.start
+            ? mcpAppPrepared
+              ? 6
+              : 5
+            : 4,
+    });
     try {
       completed = await runBootstrapWorkflow({
         options,

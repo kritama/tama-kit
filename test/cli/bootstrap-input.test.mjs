@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { createBootstrapPlan, publicPlan } from "../../cli/bootstrap/plan.mjs";
@@ -392,4 +392,71 @@ test("review is revalidated after CA consent and before certificate generation",
   );
   assert.equal(effects, 0);
   assert.equal(existsSync(join(root, "tama")), false);
+});
+
+test("changing a saved HTTPS domain requires explicit migration consent", async () => {
+  for (const consent of ["yes", "no"]) {
+    const root = temporaryDirectory("tama-domain-migrate-");
+    applyOperations(
+      planWithMcp(
+        root,
+        {
+          ...preparedFor(root),
+          allowedOrigins: ["https://app.localhost"],
+        },
+        { localDomain: "app.localhost" },
+      ).operations,
+    );
+    const before = readFileSync(join(root, "tama/.tama-kit.json"), "utf8");
+    const answers = ["2", "no", "no", "next.localhost", consent];
+    if (consent === "yes") answers.push("1", "", "https://next.localhost", "1");
+    const io = ioFor(root, answers);
+    const resolve = () => resolveBootstrapInput(parseBootstrap([root, "--dry-run"]), io);
+    if (consent === "no") await assert.rejects(resolve(), CancelledInput);
+    else {
+      const result = await resolve();
+      assert.equal(result.options.migrateLocalHttps, true);
+      assert.equal(result.options.preserveLifecycle, false);
+      assert.equal(result.reviewedPlan.mcpApp.providerOrigin, "https://next.localhost");
+      assert.equal(result.reviewedPlan.mcpApp.resource, "https://tama.next.localhost/mcp/app");
+      assert.equal(result.reviewedPlan.mcpApp.lifecycle, "prepared");
+    }
+    assert.ok(io.prompts.some((prompt) => prompt.includes("Migrate public HTTPS identities")));
+    assert.equal(readFileSync(join(root, "tama/.tama-kit.json"), "utf8"), before);
+  }
+});
+
+test("an in-session prerequisite retry renders fresh progress through completion", async () => {
+  const root = temporaryDirectory("tama-guided-retry-");
+  const bin = temporaryDirectory("tama-fake-docker-");
+  const docker = join(bin, "docker");
+  writeFileSync(docker, `#!${process.execPath}\nprocess.exitCode = 1;\n`);
+  chmodSync(docker, 0o755);
+  const originalPath = process.env.PATH;
+  const writes = [];
+  const io = ioFor(root, ["no", "1", "no", "1", "yes", "yes"]);
+  io.write = (value) => writes.push(value);
+  const prompt = io.prompt;
+  io.prompt = async (question) => {
+    if (question.startsWith("Retry with these settings?")) {
+      assert.equal(existsSync(join(root, "tama")), false);
+      // Simulate the user fixing the prerequisite. Compose validation then
+      // succeeds without touching Docker or starting any runtime.
+      writeFileSync(
+        docker,
+        `#!${process.execPath}\nif (process.argv.includes('version')) console.log('2.20.0');\n`,
+      );
+    }
+    return prompt(question);
+  };
+  try {
+    process.env.PATH = `${bin}:${originalPath ?? ""}`;
+    assert.equal(await run(["bootstrap", root, "--port", "4567", "--skills", "manual"], io), 0);
+    assert.equal(writes.filter((line) => line.includes("Planning bootstrap changes")).length, 2);
+    assert.ok(writes.some((line) => line.includes("100% Bootstrap complete")));
+    assert.ok(existsSync(join(root, "tama/.tama-kit.json")));
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+  }
 });
