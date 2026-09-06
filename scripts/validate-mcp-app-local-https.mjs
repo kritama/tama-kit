@@ -19,24 +19,27 @@ import { parseEnv } from "node:util";
 
 import { prepareLocalTestCa } from "./lib/local-test-ca.mjs";
 
+const composeProvider = process.argv.includes("--compose-provider");
 let caRoot;
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const project = mkdtempSync(join(realpathSync(tmpdir()), "tama-kit-mcp-app-https-"));
 const composeFile = join(project, "compose.yaml");
 const fragment = join(project, "tama", ".fixture.integration.env");
 let provider;
-const providerPort = await new Promise((resolvePort, reject) => {
-  const socket = createTcpServer();
-  socket.once("error", reject);
-  socket.listen(0, "0.0.0.0", () => {
-    const address = socket.address();
-    if (!address || typeof address === "string") {
-      reject(new Error("could not allocate a provider fixture port"));
-      return;
-    }
-    socket.close((error) => (error ? reject(error) : resolvePort(address.port)));
-  });
-});
+const providerPort = composeProvider
+  ? 4000
+  : await new Promise((resolvePort, reject) => {
+      const socket = createTcpServer();
+      socket.once("error", reject);
+      socket.listen(0, "0.0.0.0", () => {
+        const address = socket.address();
+        if (!address || typeof address === "string") {
+          reject(new Error("could not allocate a provider fixture port"));
+          return;
+        }
+        socket.close((error) => (error ? reject(error) : resolvePort(address.port)));
+      });
+    });
 
 function execute(command, args, options = {}) {
   return execFileSync(command, args, {
@@ -65,6 +68,7 @@ function bootstrap(...args) {
     "fixture",
     "--provider-port",
     String(providerPort),
+    ...(composeProvider ? ["--provider-service", "fixture"] : []),
     ...args,
   ]);
   const result = JSON.parse(output);
@@ -80,6 +84,26 @@ try {
   );
   mkdirSync(join(project, "tama"), { recursive: true });
 
+  if (composeProvider) {
+    writeFileSync(
+      composeFile,
+      `services:
+  fixture:
+    image: node:24-alpine
+    command: [node, /fixture.mjs, /workspace/tama/.fixture.integration.env, "4000"]
+    env_file: [./tama/.fixture.integration.env]
+    environment:
+      NODE_EXTRA_CA_CERTS: /workspace/tama/tls/rootCA.pem
+    volumes:
+      - ${JSON.stringify(`${join(repositoryRoot, "scripts/fixtures/mcp-app-provider.mjs")}:/fixture.mjs:ro`)}
+      - ./tama:/workspace/tama:ro
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4000/.well-known/oauth-authorization-server').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      retries: 15
+`,
+    );
+  }
   caRoot = prepareLocalTestCa(project);
   const prepared = bootstrap();
   assert.equal(prepared.localHttps.providerOrigin, "https://app.localhost");
@@ -96,23 +120,29 @@ try {
   assert.match(localCaDockerfile, /^COPY tls\/rootCA\.pem /mu);
   assert.doesNotMatch(localCaDockerfile, /local-key|rootCA-key|rootCA\.key/u);
 
-  provider = spawn(
-    process.execPath,
-    [join(repositoryRoot, "scripts/fixtures/mcp-app-provider.mjs"), fragment, String(providerPort)],
-    {
-      cwd: project,
-      env: { ...process.env, NODE_EXTRA_CA_CERTS: join(project, "tama", "tls", "rootCA.pem") },
-      stdio: ["ignore", "pipe", "inherit"],
-    },
-  );
-  await new Promise((resolveReady, reject) => {
-    provider.once("error", reject);
-    provider.stdout.once("data", (chunk) =>
-      chunk.toString("utf8").includes("ready:")
-        ? resolveReady(undefined)
-        : reject(new Error("provider fixture did not report readiness")),
+  if (!composeProvider) {
+    provider = spawn(
+      process.execPath,
+      [
+        join(repositoryRoot, "scripts/fixtures/mcp-app-provider.mjs"),
+        fragment,
+        String(providerPort),
+      ],
+      {
+        cwd: project,
+        env: { ...process.env, NODE_EXTRA_CA_CERTS: join(project, "tama", "tls", "rootCA.pem") },
+        stdio: ["ignore", "pipe", "inherit"],
+      },
     );
-  });
+    await new Promise((resolveReady, reject) => {
+      provider.once("error", reject);
+      provider.stdout.once("data", (chunk) =>
+        chunk.toString("utf8").includes("ready:")
+          ? resolveReady(undefined)
+          : reject(new Error("provider fixture did not report readiness")),
+      );
+    });
+  }
 
   const runningPrepared = bootstrap("--start");
   assert.equal(runningPrepared.mcpApp.verified, true);
@@ -128,16 +158,24 @@ try {
     "test -s /usr/local/share/ca-certificates/tama-kit-local.crt && getent hosts app.localhost >/dev/null && getent hosts tama.app.localhost >/dev/null",
   ]);
 
+  const handoff = bootstrap("--start", "--activate");
+  assert.equal(handoff.mcpApp.providerActivationRequired, true);
+  assert.equal(handoff.setup.phase, "provider-restart-required");
+
   const enabledFragment = readFileSync(fragment, "utf8").replace(
     /^FIXTURE_TAMA_MCP_APP_MODE=prepared$/mu,
     "FIXTURE_TAMA_MCP_APP_MODE=enabled",
   );
   writeFileSync(fragment, enabledFragment, { mode: 0o600 });
+  if (composeProvider) execute("docker", ["compose", "-f", composeFile, "restart", "fixture"]);
   const enabled = bootstrap("--start", "--activate");
   assert.equal(enabled.mcpApp.mode, "enabled");
   assert.equal(enabled.mcpApp.verified, true);
 
-  console.log("MCP App local HTTPS runtime validation passed.");
+  assert.equal(enabled.setup.phase, "enabled");
+  console.log(
+    `MCP App local HTTPS runtime validation passed (${composeProvider ? "Compose provider" : "host provider"}).`,
+  );
 } finally {
   if (provider) provider.kill("SIGTERM");
   if (existsSync(composeFile)) {

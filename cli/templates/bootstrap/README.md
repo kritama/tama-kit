@@ -2,6 +2,8 @@
 
 # Local Tama
 
+{{SETUP_CHECKLIST}}
+
 The project root owns the Docker Compose runtime. From the project root, start
 Tama and its PostgreSQL dependency with:
 

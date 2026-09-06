@@ -25,6 +25,7 @@ decisions.
 | `--skills local\|manual` | Copy Tama Kit skills to `.agents/skills/` or leave their installation external. Supply this explicitly with `--json`. |
 | `--dry-run` | Return a plan without writing or starting services. It cannot be combined with `--start`. |
 | `--start` | Start Compose and wait for the planned Tama health URL after writing. Local HTTPS starts Caddy, Tama, and PostgreSQL behind the public HTTPS names. |
+| `--non-interactive` | Disable all terminal questions while retaining explicit flags and recorded settings. |
 | `--json` | Emit deterministic machine-readable output without secret values or terminal progress. |
 | `--no-color` | Disable color in human output. |
 
@@ -60,7 +61,10 @@ All provider-specific flags require `--mcp-app`.
 | `--tama-origin <origin>` | Set or assert Tama's exact public origin. Fresh local HTTPS derives `https://tama.app.localhost`; retained legacy HTTP plans may use the selected loopback `--port`. |
 | `--allowed-origin <origin>` | Allow an exact browser/MCP client origin. Repeat for multiple origins. At least one is required; non-loopback origins must use HTTPS. Maximum 32 unique origins. |
 | `--local-domain <domain>` | Derive the local HTTPS provider and Tama hostnames. Defaults to `app.localhost`; `.local`, IP literals, and invalid DNS names are rejected. |
-| `--provider-port <port>` | Set the host-native provider's private Caddy upstream port. Defaults to `4000`; it is not part of the public OAuth issuer. |
+| `--provider-port <port>` | Set the provider's private host or container Caddy upstream port. Defaults to `4000`; it is not part of the public OAuth issuer. |
+| `--provider-runtime host\|compose` | Select the host-native or Compose provider runtime. |
+| `--provider-service <name>` | Select an application-owned service declared directly in the root Compose file, on the shared default network. The selected service must load the provider fragment. |
+| `--migrate-provider-topology` | Explicitly change a recorded runtime/service with both runtimes prepared. Preserves public identities and keys; cannot activate in the same command. |
 | `--install-local-ca` | Explicitly authorize `mkcert -install` when writing local HTTPS certificates. It never runs during dry-run. |
 | `--migrate-local-https` | Explicitly migrate a persisted 0.4.3 HTTP MCP App topology to the derived HTTPS topology while preserving keys and application secrets. |
 | `--activate` | Request live activation and verification. Requires both `--mcp-app` and `--start`. |
@@ -86,8 +90,8 @@ npx @kritama/tama-kit bootstrap /path/to/provider \
 
 Fresh MCP App plans use `https://app.localhost` and
 `https://tama.app.localhost/mcp/app`, with Caddy as the public entry point.
-The provider remains development-native and Tama uses the production release
-image. Use `--local-domain` and `--provider-port` for deliberate customization;
+The application owns its provider service and development mode; Tama uses the
+production release image. Use `--local-domain` and `--provider-port` for deliberate customization;
 use the explicit origin flags only as migration assertions or for a retained
 legacy HTTP topology. Verify the HTTPS names with
 `curl --cacert tama/tls/rootCA.pem https://tama.app.localhost/` after starting.
@@ -122,6 +126,12 @@ control, logs, prompts, or chat.
 
 ### MCP App reruns
 
+Interactive users can rerun bare bootstrap and choose continuation or status.
+The wizard preserves configured lifecycle modes unless migration or activation
+is explicitly selected. For automated operations retain the explicit flags
+and inspect `setup.nextActions`; configured status is not a live probe.
+
+
 - Keep provider identity, provider origin, allowed origins, Tama image, and
   relevant explicit flags consistent with persisted state.
 - Change a Tama port through another `--mcp-app` run so the resource,
@@ -143,6 +153,7 @@ local Tama runtime.
 | `--postgres-port <port>` | Isolated Compose PostgreSQL loopback port; default `55432`. |
 | `--prepare-only` | Generate private environment files without starting services or running Mix. |
 | `--dry-run` | Inspect without writing or starting. |
+| `--non-interactive` | Disable all terminal questions while retaining explicit flags and recorded settings. |
 | `--json` | Emit secret-free machine output. |
 
 Typical sequence:

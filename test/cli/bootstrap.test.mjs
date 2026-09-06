@@ -202,7 +202,7 @@ test("interactive bootstrap prompts for local skills and renders colored progres
     color: true,
     prompt: async (question) => {
       questions.push(question);
-      return "yes";
+      return ["no", "1", "no", "yes", "", "1"][questions.length - 1];
     },
     write: (message) => writes.push(message),
     stdout: (message) => output.push(message),
@@ -210,8 +210,10 @@ test("interactive bootstrap prompts for local skills and renders colored progres
   });
 
   assert.equal(exitCode, EXIT_CODES.SUCCESS);
-  assert.equal(questions.length, 1);
-  assert.match(questions[0], /skills in this repository/u);
+  assert.equal(
+    questions.filter((question) => /skills in this repository/u.test(question)).length,
+    1,
+  );
   assert.match(writes.join(""), /100%/u);
   assert.ok(writes.join("").includes("\u001b["));
   assert.match(output.join("\n"), /repository-local/u);
@@ -221,11 +223,12 @@ test("interactive bootstrap prompts for local skills and renders colored progres
 test("manual skill choice prints self-install commands", async () => {
   const root = project();
   const output = [];
+  const answers = ["no", "1", "no", "no", "", "1"];
   const exitCode = await run(["bootstrap", root, "--dry-run", "--no-color"], {
     cwd: root,
     interactive: true,
     color: true,
-    prompt: async () => "no",
+    prompt: async () => answers.shift(),
     write: () => {},
     stdout: (message) => output.push(message),
     stderr: () => {},
@@ -247,8 +250,9 @@ test("bootstrap reuses a recorded skill choice without prompting again", async (
     cwd: root,
     interactive: true,
     color: false,
-    prompt: async () => {
-      throw new Error("bootstrap should not prompt for a recorded choice");
+    prompt: async (question) => {
+      assert.doesNotMatch(question, /skills in this repository/u);
+      return "1";
     },
     write: () => {},
     stdout: (message) => output.push(message),

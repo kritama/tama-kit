@@ -9,6 +9,23 @@ Use Tama Kit to turn the user's requested integration into a safe, repeatable
 repository change. Inspect the target repository and preserve its instructions,
 existing Compose configuration, managed Tama files, and unrelated work.
 
+## Terminal onboarding and agent automation
+
+For a person using their terminal, recommend `tama-kit bootstrap` with no
+flags: the CLI asks for setup mode, project/Compose selection, provider
+configuration, and a reviewed next action. A later bare invocation can resume
+or inspect saved configuration. Explain `:back` and `:cancel` when useful.
+
+When executing through an agent, use the explicit JSON planning/write sequence
+below. JSON and non-TTY invocations never prompt; `--non-interactive` also
+suppresses all questions in a terminal. Do not drive the human questionnaire
+through guessed answers when repository evidence and explicit options suffice.
+
+Read the result's `setup.nextActions`, directories, configured modes, and live
+verification state. File generation and recorded lifecycle state do not prove
+Terraform provisioning or current service health. Keep browser credentials,
+provider lifecycle changes, and Terraform apply as their documented handoffs.
+
 ## Route the request first
 
 When the user asks generally to “bootstrap my app to work with Tama” or gives

@@ -166,7 +166,7 @@ function isUnspecifiedHostname(hostname) {
  * @param {string} value
  * @returns {string}
  */
-function allowedOrigin(value) {
+export function allowedOrigin(value) {
   const origin = normalizeMcpAppOrigin(value, "--allowed-origin");
   const url = new URL(origin);
   if (url.protocol !== "https:" && !isLoopbackHostname(url.hostname)) {

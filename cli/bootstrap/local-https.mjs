@@ -142,6 +142,7 @@ export function usesLocalHttpsTopology(options, persisted = null, contractDocume
   );
   if (persisted?.localHttps) return true;
   if (options?.migrateLocalHttps) return true;
+  if (options?.localDomain && !persisted?.providerOrigin) return true;
   if (persisted?.providerOrigin) return false;
   return !explicitlyLegacyClient && !explicitlyLegacyContract;
 }

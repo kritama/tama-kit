@@ -320,6 +320,45 @@ export function readAgentSkillMode(tamaDirectory) {
   }
 }
 
+/** @param {string} tamaDirectory @returns {{composeFile: string, image: string} | null} */
+export function readBootstrapSettings(tamaDirectory) {
+  if (
+    existsSync(tamaDirectory) &&
+    (lstatSync(tamaDirectory).isSymbolicLink() || !lstatSync(tamaDirectory).isDirectory())
+  ) {
+    throw ownershipError("Tama path is not a directory or is a symbolic-link directory", {
+      path: tamaDirectory,
+    });
+  }
+  const path = join(tamaDirectory, ".tama-kit.json");
+  if (!existsSync(path)) return null;
+  if (!lstatSync(path).isFile() || lstatSync(path).isSymbolicLink()) {
+    throw ownershipError("bootstrap manifest must be a regular file", { path });
+  }
+  let value;
+  try {
+    value = mapping(JSON.parse(readFileSync(path, "utf8")))?.bootstrapSettings;
+  } catch {
+    throw ownershipError("cannot read bootstrap settings", { path });
+  }
+  if (value === undefined) return null;
+  const settings = mapping(value);
+  if (
+    !settings ||
+    typeof settings.composeFile !== "string" ||
+    typeof settings.image !== "string" ||
+    !settings.composeFile ||
+    isAbsolute(settings.composeFile) ||
+    settings.composeFile.includes("\\") ||
+    settings.composeFile.split("/").some((part) => part === ".." || part === "." || !part) ||
+    !settings.image ||
+    /\s/u.test(settings.image)
+  ) {
+    throw ownershipError("invalid recorded bootstrap settings", { path });
+  }
+  return { composeFile: settings.composeFile, image: settings.image };
+}
+
 /** @param {unknown} value */
 function mapping(value) {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -385,8 +424,15 @@ function safeManagedPath(root, filename) {
  * @param {string} tamaDirectory
  * @param {import("../types.mjs").AgentSkillMode} skillMode
  * @param {PersistedMcpAppProvider | null} [mcpAppProvider]
+ * @param {{composeFile: string, image: string}} [bootstrapSettings]
  */
-export function createManagedFilePlanner(root, tamaDirectory, skillMode, mcpAppProvider = null) {
+export function createManagedFilePlanner(
+  root,
+  tamaDirectory,
+  skillMode,
+  mcpAppProvider = null,
+  bootstrapSettings,
+) {
   const manifestPath = join(tamaDirectory, ".tama-kit.json");
   /** @type {Map<string, string>} */
   const recorded = new Map();
@@ -593,6 +639,9 @@ export function createManagedFilePlanner(root, tamaDirectory, skillMode, mcpAppP
       schemaVersion: MANIFEST_SCHEMA_VERSION,
       generator: MANIFEST_GENERATOR,
       agentSkills: skillMode,
+      ...((bootstrapSettings ?? readBootstrapSettings(tamaDirectory))
+        ? { bootstrapSettings: bootstrapSettings ?? readBootstrapSettings(tamaDirectory) }
+        : {}),
       ...(provider
         ? {
             mcpAppProvider: {

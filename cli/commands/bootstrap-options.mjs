@@ -15,7 +15,8 @@ export function bootstrapUsage() {
     "  --skills <mode>        Agent skills: local or manual",
     "  --dry-run              Inspect and report without writing",
     "  --start                Start Compose and wait for Tama health",
-    "  --json                 Emit machine-readable output",
+    "  --json                 Emit machine-readable output (never prompts)",
+    "  --non-interactive      Use flags and saved settings without questions",
     "  --no-color             Disable terminal colors",
     "  -h, --help             Show help",
     "MCP App provider integration:",
@@ -91,6 +92,7 @@ export function parseBootstrap(argv) {
         "dry-run": { type: "boolean", default: false },
         start: { type: "boolean", default: false },
         json: { type: "boolean", default: false },
+        "non-interactive": { type: "boolean", default: false },
         "no-color": { type: "boolean", default: false },
         help: { type: "boolean", short: "h", default: false },
         "mcp-app": { type: "boolean", default: false },
@@ -170,6 +172,9 @@ export function parseBootstrap(argv) {
   ) {
     throw usageError("--provider-runtime must be host or compose");
   }
+  if (providerRuntime === "host" && parsed.values["provider-service"] !== undefined) {
+    throw usageError("--provider-service cannot be combined with --provider-runtime host");
+  }
   if (parsed.values["migrate-provider-topology"] && parsed.values.activate) {
     throw usageError(
       "provider topology migration must complete in prepared mode before activation",
@@ -184,6 +189,7 @@ export function parseBootstrap(argv) {
     dryRun: parsed.values["dry-run"] ?? false,
     start: parsed.values.start ?? false,
     json: parsed.values.json ?? false,
+    nonInteractive: parsed.values["non-interactive"] ?? false,
     noColor: parsed.values["no-color"] ?? false,
     help: parsed.values.help ?? false,
     mcpApp: parsed.values["mcp-app"] ?? false,

@@ -391,6 +391,7 @@ export type PublicBootstrapPlan = {
 };
 
 export type BootstrapResult = PublicBootstrapPlan & {
+  setup: ReturnType<typeof import("./bootstrap/setup-progress.mjs").setupProgress>;
   ok: true;
   mode: "dry-run" | "write";
   started: boolean;
@@ -424,6 +425,8 @@ export type ExitCode = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 export type CLIErrorDetails = Record<string, unknown>;
 
 export type BootstrapCommandOptions = {
+  nonInteractive?: boolean;
+  preserveLifecycle?: boolean;
   targetPath?: string;
   composePath?: string;
   port?: number;

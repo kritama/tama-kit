@@ -6,7 +6,7 @@ import { ownershipError, usageError } from "../errors.mjs";
 import { planRootCompose, validateComposeDocument } from "./compose.mjs";
 import { formatComposePsCommand, formatComposeUpCommand } from "./compose-command.mjs";
 import { BOOTSTRAP_PATHS, BOOTSTRAP_SCHEMA_VERSION, DEFAULTS } from "./constants.mjs";
-import { inspectProject } from "./detect-project.mjs";
+import { discoverProject, inspectProject } from "./detect-project.mjs";
 import { planEnvironment, readEnvironmentValues, resolveEnvironmentPort } from "./environment.mjs";
 import { planGitignore, validateSecretFilesUntracked } from "./gitignore.mjs";
 import {
@@ -15,7 +15,11 @@ import {
   resolveLocalHttpsTopology,
   usesLocalHttpsTopology,
 } from "./local-https.mjs";
-import { createManagedFilePlanner, readMcpAppProvider } from "./manifest.mjs";
+import {
+  createManagedFilePlanner,
+  readBootstrapSettings,
+  readMcpAppProvider,
+} from "./manifest.mjs";
 import { persistedTamaOrigin, planMcpApp, resolveMcpAppState } from "./mcp-app.mjs";
 import {
   contractTamaPort,
@@ -32,6 +36,7 @@ import {
   serializeMcpAppLocalContract,
 } from "./mcp-app-local-contract.mjs";
 import { resolveProviderTopology } from "./provider-topology.mjs";
+import { SETUP_CHECKLIST } from "./setup-progress.mjs";
 import { planAgentSkills } from "./skills.mjs";
 import { renderTemplate } from "./templates.mjs";
 import { planTerraform } from "./terraform.mjs";
@@ -194,7 +199,14 @@ function managedTemplate(planManagedFile, filename, templateName, replacements) 
 
 /** @param {BootstrapPlanOptions} options @returns {BootstrapPlan} */
 export function createBootstrapPlan(options) {
-  const inspection = inspectProject(options);
+  const discovered = discoverProject(options);
+  const recordedSettings = readBootstrapSettings(
+    join(discovered.root, BOOTSTRAP_PATHS.tamaDirectory),
+  );
+  const inspection = inspectProject({
+    ...options,
+    composePath: options.composePath ?? recordedSettings?.composeFile,
+  });
   const skillMode = options.skillMode ?? "manual";
   const mcpAppPrepared = options.mcpApp?.requested ? (options.mcpAppPrepared ?? null) : null;
   if (options.mcpApp?.requested && mcpAppPrepared === null) {
@@ -214,7 +226,9 @@ export function createBootstrapPlan(options) {
   const tamaImage =
     options.image ??
     persistedMcpApp?.tamaImage ??
-    (mcpAppPrepared !== null ? DEFAULTS.mcpAppTamaImage : DEFAULTS.tamaImage);
+    (mcpAppPrepared !== null
+      ? DEFAULTS.mcpAppTamaImage
+      : (recordedSettings?.image ?? DEFAULTS.tamaImage));
   const invalidOfficialTag = invalidOfficialTamaImageTag(tamaImage);
   if (invalidOfficialTag) {
     throw usageError(invalidOfficialTag);
@@ -394,6 +408,10 @@ export function createBootstrapPlan(options) {
             ...(localHttpsTopology ? { localHttps: localHttpsTopology } : {}),
           }
         : null),
+    {
+      composeFile: relative(inspection.root, inspection.selectedCompose).split("\\").join("/"),
+      image: tamaImage,
+    },
   );
   const localContractOperation = mcpAppState
     ? managedFiles.plan(
@@ -611,6 +629,7 @@ export function createBootstrapPlan(options) {
       ),
       COMPOSE_PS_COMMAND: formatComposePsCommand(projectComposePath),
       MCP_APP_GUIDANCE: mcpAppReadmeGuidance(mcpAppDoc),
+      SETUP_CHECKLIST,
     }),
   );
   operations.push(

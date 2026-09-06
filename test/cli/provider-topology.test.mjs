@@ -140,7 +140,7 @@ test("service removal and symlink replacement are refused on ordinary reruns", (
   unlinkSync(composePath);
   const other = fixture();
   symlinkSync(join(other, "compose.yaml"), composePath);
-  assert.throws(() => createBootstrapPlan({ cwd: root }), /regular file/);
+  assert.throws(() => createBootstrapPlan({ cwd: root }), /regular file|resolve inside/);
 });
 
 test("failed topology write restores the previous managed routing and manifest", async () => {
