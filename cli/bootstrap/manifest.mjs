@@ -222,6 +222,10 @@ function parsePersistedProvider(value, manifestPath) {
       expectedTopology = resolveLocalHttpsTopology({
         localDomain: /** @type {string} */ (topology.localDomain),
         providerPort: /** @type {number} */ (topology.providerPort),
+        providerService: /** @type {string | undefined} */ (topology.providerService),
+        providerDependency: /** @type {"service_started" | "service_healthy" | undefined} */ (
+          topology.providerDependency
+        ),
         httpsPort: /** @type {number} */ (topology.httpsPort),
         allowedOrigins: /** @type {string[]} */ (topology.allowedOrigins),
       });

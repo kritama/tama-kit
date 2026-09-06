@@ -336,7 +336,11 @@ export async function prepareMcpApp({
   const defaultTopology = localHttps
     ? resolveLocalHttpsTopology({
         localDomain: options.localDomain,
-        providerPort: options.providerPort,
+        providerPort: options.providerPort ?? persisted?.localHttps?.providerPort,
+        providerService:
+          options.providerRuntime === "host"
+            ? undefined
+            : (options.providerService ?? persisted?.localHttps?.providerService),
       })
     : null;
 
@@ -466,6 +470,7 @@ export function resolveMcpAppState({
     identity.environmentFile,
     contractDocument,
     selectedCompose,
+    topology?.providerService,
   );
   return {
     identity,
@@ -809,6 +814,9 @@ export function planMcpApp(input) {
   const sourceFragmentKidVariable = sourceRoles.access_token_signing_key_id;
   const existingFragmentKey = fragmentValues.get(sourceFragmentKeyVariable);
   const existingFragmentKid = fragmentValues.get(sourceFragmentKidVariable);
+  if (options.migrateProviderTopology && existingProviderMode !== "prepared") {
+    throw ownershipError("provider topology migration requires the provider in prepared mode");
+  }
   let providerSigningKeyId;
   let providerPrivateJwk;
   if (existingFragmentKey || existingFragmentKid) {

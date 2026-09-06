@@ -75,6 +75,8 @@ export type LocalHttpsTopology = {
   providerUpstream: string;
   tamaUpstream: string;
   providerPort: number;
+  providerService?: string;
+  providerDependency?: "service_started" | "service_healthy";
   tamaPort: number;
   httpsPort: number;
   certificateNames: string[];
@@ -171,6 +173,9 @@ export type McpAppBootstrapOptions = {
   localDomain?: string;
   acknowledgeLocalDomainRisk?: boolean;
   providerPort?: number;
+  providerRuntime?: "host" | "compose";
+  providerService?: string;
+  migrateProviderTopology?: boolean;
   httpsPort?: number;
   installLocalCa?: boolean;
   migrateLocalHttps?: boolean;
@@ -438,6 +443,9 @@ export type BootstrapCommandOptions = {
   localDomain?: string;
   acknowledgeLocalDomainRisk: boolean;
   providerPort?: number;
+  providerRuntime?: "host" | "compose";
+  providerService?: string;
+  migrateProviderTopology?: boolean;
   installLocalCa: boolean;
   migrateLocalHttps: boolean;
   tamaOrigin?: string;

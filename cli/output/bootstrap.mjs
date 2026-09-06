@@ -37,6 +37,12 @@ export function resultEnvelope(plan, { dryRun, started, healthUrl }) {
           providerUpstream: plan.localHttps.providerUpstream,
           tamaUpstream: plan.localHttps.tamaUpstream,
           providerPort: plan.localHttps.providerPort,
+          ...(plan.localHttps.providerService
+            ? {
+                providerService: plan.localHttps.providerService,
+                providerDependency: plan.localHttps.providerDependency,
+              }
+            : {}),
           tamaPort: plan.localHttps.tamaPort,
           httpsPort: plan.localHttps.httpsPort,
           certificateNames: plan.localHttps.certificateNames,

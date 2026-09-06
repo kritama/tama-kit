@@ -118,6 +118,30 @@ use conventional bindings immediately; this local artifact does not claim the
 provider runtime implements the OAuth protocol. Application-owned contracts
 under `priv/contracts/` are only read, never generated or modified.
 
+For an application-owned provider service in the root Compose file, select its
+service name and private container port:
+
+```bash
+npx @kritama/tama-kit bootstrap --mcp-app \
+  --provider-name acme --provider-service acme --provider-port 4000
+```
+
+This selects the Compose provider runtime. Caddy reaches `http://acme:4000`
+and depends on the service's health check when one is declared. Public OAuth
+origins remain the HTTPS names above. The application owns its service,
+Dockerfile, development mode, and provider environment loading; the selected
+service must load the reported `tama/` integration fragment and share the
+default Compose network. Services declared only through `extends`, includes,
+or optional profiles are not currently supported as provider selections.
+
+Bootstrap records the effective service and dependency, so reruns reuse them
+without editing generated Caddy or Compose files. To change a recorded runtime
+or service, put both runtimes in `prepared` and explicitly select
+`--migrate-provider-topology`. Use `--provider-runtime host` when moving back
+to a host-native provider. Migration preserves keys and cannot be combined
+with activation. See [provider topology](docs/mcp-app-provider-bootstrap.md#provider-runtime-topology)
+for the ownership and migration contract.
+
 Activation is deliberately two-step:
 
 ```bash

@@ -31,6 +31,7 @@ import {
   mcpAppLocalContractFilename,
   serializeMcpAppLocalContract,
 } from "./mcp-app-local-contract.mjs";
+import { resolveProviderTopology } from "./provider-topology.mjs";
 import { planAgentSkills } from "./skills.mjs";
 import { renderTemplate } from "./templates.mjs";
 import { planTerraform } from "./terraform.mjs";
@@ -235,22 +236,48 @@ export function createBootstrapPlan(options) {
     ...(persistedMcpApp ? [persistedMcpApp.identity.environmentFile] : []),
   ];
   validateSecretFilesUntracked(inspection.root, [...new Set(secretFiles)]);
+  const providerTopology = resolveProviderTopology(
+    options.mcpApp,
+    persistedMcpApp?.localHttps,
+    inspection.selectedCompose,
+  );
   const localHttpsTopology =
     mcpAppPrepared &&
     options.mcpApp &&
     usesLocalHttpsTopology(options.mcpApp, persistedMcpApp, mcpAppPrepared.contractDocument)
       ? resolveLocalHttpsTopology({
+          ...providerTopology,
           localDomain: options.mcpApp.localDomain ?? persistedMcpApp?.localHttps?.localDomain,
           providerPort: options.mcpApp.providerPort ?? persistedMcpApp?.localHttps?.providerPort,
           allowedOrigins: mcpAppPrepared.allowedOrigins ?? persistedMcpApp?.allowedOrigins,
         })
       : persistedMcpApp?.localHttps
         ? resolveLocalHttpsTopology({
+            ...providerTopology,
             localDomain: persistedMcpApp.localHttps.localDomain,
             providerPort: persistedMcpApp.localHttps.providerPort,
             allowedOrigins: persistedMcpApp.allowedOrigins,
           })
         : null;
+  if (
+    !localHttpsTopology &&
+    (options.mcpApp?.providerService ||
+      options.mcpApp?.providerRuntime ||
+      options.mcpApp?.migrateProviderTopology)
+  ) {
+    throw usageError(
+      "provider runtime selection requires local HTTPS; migrate an existing HTTP integration first",
+    );
+  }
+  if (
+    options.mcpApp?.migrateProviderTopology &&
+    readEnvironmentValues(inspection.root, BOOTSTRAP_PATHS.environment).get("TAMA_MCP_APP_MODE") !==
+      "prepared"
+  ) {
+    throw ownershipError(
+      "provider topology migration requires Tama and the provider in prepared mode",
+    );
+  }
   if (localHttpsTopology) {
     const tlsPaths = localHttpsPaths(inspection.root);
     validateSecretFilesUntracked(inspection.root, [
@@ -359,7 +386,14 @@ export function createBootstrapPlan(options) {
     inspection.root,
     inspection.tamaDirectory,
     skillMode,
-    mcpAppState ?? (persistedMcpApp ? { ...persistedMcpApp, tamaImage } : null),
+    mcpAppState ??
+      (persistedMcpApp
+        ? {
+            ...persistedMcpApp,
+            tamaImage,
+            ...(localHttpsTopology ? { localHttps: localHttpsTopology } : {}),
+          }
+        : null),
   );
   const localContractOperation = mcpAppState
     ? managedFiles.plan(
@@ -453,6 +487,10 @@ export function createBootstrapPlan(options) {
     POSTGRES_IMAGE: DEFAULTS.postgresImage,
     TAMA_EXTRA_HOSTS: providerUsesHostGateway ? TAMA_EXTRA_HOSTS_BLOCK : "",
     CADDY_IMAGE: localHttpsTopology?.caddyImage ?? "",
+    CADDY_EXTRA_HOSTS: localHttpsTopology?.providerService ? "" : TAMA_EXTRA_HOSTS_BLOCK,
+    PROVIDER_DEPENDENCY: localHttpsTopology?.providerService
+      ? `      ${localHttpsTopology.providerService}:\n        condition: ${localHttpsTopology.providerDependency}\n`
+      : "",
     HTTPS_PORT: localHttpsTopology?.httpsPort ?? "",
     PROVIDER_HOST: localHttpsTopology?.providerHost ?? "",
     TAMA_HOST: localHttpsTopology?.tamaHost ?? "",

@@ -41,12 +41,10 @@ services:
     depends_on:
       tama:
         condition: service_healthy
-    ports:
+{{PROVIDER_DEPENDENCY}}    ports:
       - "127.0.0.1:{{HTTPS_PORT}}:{{HTTPS_PORT}}"
       - "[::1]:{{HTTPS_PORT}}:{{HTTPS_PORT}}"
-    extra_hosts:
-      - host.docker.internal:host-gateway
-    networks:
+{{CADDY_EXTRA_HOSTS}}    networks:
       default:
         aliases:
           - {{PROVIDER_HOST}}
