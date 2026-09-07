@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -125,6 +126,75 @@ test("doctor and setup dry-run ignore absent or malformed receipts and preserve 
       assert.deepEqual(snapshot(root), before);
     }
   }
+});
+
+test("inspection skips absent optional environment files without selecting them", async () => {
+  const root = standard();
+  writeFileSync(
+    join(root, "optional.yaml"),
+    "services:\n  tama:\n    env_file:\n      - path: ./optional.env\n        required: false\n",
+  );
+  const selection = ["--compose", "compose.yaml", "--compose", "optional.yaml"];
+  const before = snapshot(root);
+  for (const args of [["doctor"], ["setup", "--dry-run"]]) {
+    const response = await command(root, ...args, ...selection, "--json");
+    assert.equal(response.code, 0, JSON.stringify(response.result));
+    assert.equal(response.result.configuration.status, "valid");
+  }
+  const plan = inspectCurrentConfiguration({
+    cwd: root,
+    composeFiles: ["compose.yaml", "optional.yaml"],
+  });
+  assert.equal(plan.runtime.environmentFile, join(root, "tama/.tama.env"));
+  const selected = await command(
+    root,
+    "doctor",
+    ...selection,
+    "--env-file",
+    "optional.env",
+    "--json",
+  );
+  assert.equal(selected.code, 4);
+  assert.match(selected.result.error.message, /not loaded/);
+  assert.deepEqual(snapshot(root), before);
+});
+
+test("existing optional environment files retain private-file validation", async () => {
+  const root = standard();
+  writeFileSync(
+    join(root, "optional.yaml"),
+    "services:\n  tama:\n    env_file:\n      - path: ./optional.env\n        required: false\n",
+  );
+  const path = join(root, "optional.env");
+  writeFileSync(path, "OPTIONAL_SETTING=present\n", { mode: 0o600 });
+  const selection = ["--compose", "compose.yaml", "--compose", "optional.yaml"];
+  assert.equal((await command(root, "doctor", ...selection, "--json")).code, 0);
+  chmodSync(path, 0o644);
+  const before = snapshot(root);
+  const response = await command(root, "doctor", ...selection, "--json");
+  assert.equal(response.code, 4);
+  assert.match(response.result.error.message, /owner-only permissions/);
+  assert.deepEqual(snapshot(root), before);
+});
+
+test("missing required environment files still fail inspection", async () => {
+  const root = standard();
+  writeFileSync(
+    join(root, "required.yaml"),
+    "services:\n  tama:\n    env_file:\n      - path: ./required.env\n        required: true\n",
+  );
+  const before = snapshot(root);
+  const response = await command(
+    root,
+    "doctor",
+    "--compose",
+    "compose.yaml",
+    "--compose",
+    "required.yaml",
+    "--json",
+  );
+  assert.equal(response.code, 4);
+  assert.deepEqual(snapshot(root), before);
 });
 
 test("current inspection follows renamed services, relocated env files and ordered overrides", async () => {

@@ -74,6 +74,28 @@ for (const source of ["flag", "contract"]) {
   });
 }
 
+test("additive generation accepts a missing optional baseline environment file", async () => {
+  const root = await standard();
+  writeFileSync(
+    join(root, "optional.yaml"),
+    "services:\n  tama:\n    env_file:\n      - path: ./optional.env\n        required: false\n",
+  );
+  const selection = ["--compose", "compose.yaml", "--compose", "optional.yaml"];
+  const before = snapshot(root);
+  const preview = await generate(root, ...http, ...selection, "--dry-run");
+  assert.equal(preview.code, 0, JSON.stringify(preview.result));
+  assert.deepEqual(snapshot(root), before);
+  const generated = await generate(root, ...http, ...selection);
+  assert.equal(generated.code, 0, JSON.stringify(generated.result));
+  assert.equal(
+    inspectCurrentConfiguration({
+      cwd: root,
+      composeFiles: ["compose.yaml", "optional.yaml", "tama/compose.mcp-app.yaml"],
+    }).mcpApp.lifecycle,
+    "prepared",
+  );
+});
+
 test("additive HTTP generation preserves original scaffold and supports current setup and native Compose", async () => {
   const root = await standard();
   writeFileSync(join(root, "tama/versions.tf"), "# custom provider selection\n");

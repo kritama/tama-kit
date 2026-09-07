@@ -192,8 +192,14 @@ export function inspectCurrentConfiguration(
       throw ownershipError("invalid effective MCP App resource URL");
     }
   }
-  const files = (declarations.services[serviceName]?.env_file ?? []).map(({ path }) =>
-    resolve(root, path),
+  const files = (declarations.services[serviceName]?.env_file ?? []).flatMap(
+    ({ path, required }) => {
+      const filename = resolve(root, path);
+      // Compose skips missing optional declarations. Existing files still pass
+      // the regular-file, permissions, ignore and content checks below.
+      if (required === false && inspectRegularFile(filename) === null) return [];
+      return [filename];
+    },
   );
   const envFiles = new Map(files.map((path) => [path, readPrivateEnvironment(path)]));
   const selectedEnvironment = options.environmentFile

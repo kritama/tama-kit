@@ -509,3 +509,17 @@ application-owned relocated fragments after generation.
 Local validation: 319 tests passed, one expected platform skip, no failures.
 Build, Biome, installed-package, submission and whitespace checks passed.
 The current commit's CI is tracked on PR #33.
+
+
+## Optional Compose environment files (2026-09-07)
+
+Current inspection retains `env_file.required` and skips absent declarations
+only when explicitly optional. Missing optional files cannot become selected
+environment or activation sources. Existing optional files retain regular-file,
+permissions, Git and content validation; required files still fail when absent.
+
+Regression coverage exercises doctor, setup preview and additive generation,
+explicit selection of an absent optional file, existing optional-file permissions,
+and missing required files. Local validation: 323 tests passed, one expected
+platform skip, no failures. Build, Biome, installed-package, submission and
+whitespace checks passed. The current commit's CI is tracked on PR #33.
