@@ -372,7 +372,7 @@ export function planLocalHttpsCertificates(
   }
 }
 
-/** @param {ReturnType<typeof resolveLocalHttpsTopology>} topology */
+/** @param {import("../types.mjs").LocalHttpsTopology} topology */
 export function renderLocalHttpsCaddyfile(topology) {
   return [
     `# ${MANAGED_MARKER}. Exact local HTTPS MCP App proxy; no catch-all route.`,

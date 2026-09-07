@@ -437,7 +437,6 @@ export type BootstrapCommandOptions = {
   resumePending?: string[];
   resumeId?: string;
   nonInteractive?: boolean;
-  preserveLifecycle?: boolean;
   targetPath?: string;
   composePath?: string;
   port?: number;

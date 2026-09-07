@@ -15,6 +15,7 @@ Never refresh generated files or update manifest hashes to make a check pass.
 
 - Fresh standard runtime: `tama-kit bootstrap`.
 - Fresh MCP App provider integration: `tama-kit bootstrap --mcp-app`.
+- Add MCP App to an existing standard runtime: `tama-kit generate mcp-app`.
 - Existing project configuration: `tama-kit setup` to start and verify services.
 - Read-only configuration diagnosis: `tama-kit doctor`; add `--runtime` for probes.
 - Tama Phoenix source development: `tama-kit dev setup`.
@@ -48,9 +49,22 @@ and original generation options. Only pending destinations may be created;
 existing output is preserved. Do not manufacture or edit a receipt to bypass
 conflicts. Missing or invalid receipts do not prevent setup or doctor.
 
+For a standard project gaining MCP App, use `generate mcp-app --dry-run --json`
+with the provider inputs; do not rerun bootstrap with integration flags. Reuse
+an existing compatible pinned image, or explicitly choose `--image` when the
+current tag is floating or the service has a custom build. Select current
+Compose files in order and the Tama service/environment source as needed.
+The output includes a separate Compose override, private MCP fragment, provider
+contract and `tama/MCP_APP.md`. Carry the emitted Compose selection into setup,
+doctor and native commands. Local HTTPS changes the selected service's build
+and published ports through that override. The separate MCP addition receipt
+supports explicit unfinished resume; it never authorizes repairing completed output.
+
 ## Check prerequisites
 
-Generation dry-run needs neither Docker nor its daemon. A write needs Docker
+Initial bootstrap dry-run needs neither Docker nor its daemon. Additive MCP App
+generation reads current configuration and requires Compose even for dry-run;
+its local HTTPS override requires Compose 2.24.4 or newer. A write needs Docker
 and Compose 2.20.0 or newer (`docker --version`, `docker compose version`).
 Current-configuration inspection additionally needs Compose's native
 `config --format json --no-env-resolution` support, but no daemon. Starting or

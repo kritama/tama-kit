@@ -8,8 +8,12 @@ import { applyOperationsTransactionally } from "../shared/write.mjs";
 import type { BootstrapPlan } from "../types.mjs";
 
 /** Keep crash progress with the transaction, without any permanent content fingerprints. */
-export async function writeScaffold(plan: BootstrapPlan, validate: () => void | Promise<void>) {
-  const path = join(plan.root, "tama/.tama-kit.json");
+export async function writeScaffold(
+  plan: BootstrapPlan,
+  validate: () => void | Promise<void>,
+  receiptPath = "tama/.tama-kit.json",
+) {
+  const path = join(plan.root, receiptPath);
   const completeOperation = plan.operations.find((operation) => operation.path === path);
   if (!completeOperation || !("content" in completeOperation))
     throw new Error("generation receipt is missing from the write plan");

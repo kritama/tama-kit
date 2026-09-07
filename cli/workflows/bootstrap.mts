@@ -42,7 +42,6 @@ export function createBootstrapWorkflow(overrides: Partial<typeof bootstrapEffec
     validateWrittenSecretsIgnored,
     validateComposePrerequisite,
     validateCompose,
-    applyOperationsTransactionally,
     startBootstrapRuntime,
     resolveLocalHttpsNames,
     discoverMkcert,
@@ -144,25 +143,20 @@ export function createBootstrapWorkflow(overrides: Partial<typeof bootstrapEffec
         }
         await validateReview();
         progress.update(2, "Writing project-owned files");
-        const apply = options.developerOwned
-          ? (validate: () => void | Promise<void>) => writeScaffold(plan, validate)
-          : (validate: () => void | Promise<void>) =>
-              applyOperationsTransactionally(plan.operations, validate);
+        const apply = (validate: () => void | Promise<void>) => writeScaffold(plan, validate);
         await apply(() => {
           validateWrittenSecretsIgnored(plan);
           progress.update(3, "Validating Compose configuration");
           return validateCompose(plan, { checkPrerequisite: false });
         });
         if (options.start) {
-          if (options.developerOwned) {
-            const current = inspectCurrentConfiguration({
-              cwd,
-              targetPath: plan.root,
-              composeFiles: [plan.composeFile],
-              providerService: options.providerService,
-            });
-            plan = { ...current, operations: plan.operations };
-          }
+          const current = inspectCurrentConfiguration({
+            cwd,
+            targetPath: plan.root,
+            composeFiles: [plan.composeFile],
+            providerService: options.providerService,
+          });
+          plan = { ...current, operations: plan.operations };
           ({ plan, healthUrl } = await startBootstrapRuntime({
             options,
             cwd,

@@ -5,11 +5,6 @@ import { DEFAULTS } from "../bootstrap/constants.mjs";
 import { discoverProject, inspectProject } from "../bootstrap/detect-project.mjs";
 import { resolveEnvironmentPort } from "../bootstrap/environment.mjs";
 import { normalizeLocalDomain, usesLocalHttpsTopology } from "../bootstrap/local-https.mjs";
-import {
-  readAgentSkillMode,
-  readBootstrapSettings,
-  readMcpAppProvider,
-} from "../bootstrap/manifest.mjs";
 import { allowedOrigin, normalizeMcpAppOrigin, prepareMcpApp } from "../bootstrap/mcp-app.mjs";
 import {
   discoverProviderContract,
@@ -101,35 +96,24 @@ export function printReview(plan, io) {
 export async function resolveBootstrapInput(supplied, io) {
   const q = questions(io);
   /** @type {Options} */
-  let options = { ...supplied };
+  let options = { ...supplied, developerOwned: true };
   let advanced = false;
-  let resume = false;
-  let statusOnly = false;
   let discovered = discoverProject({ cwd: io.cwd, targetPath: options.targetPath });
-  let recorded = readBootstrapSettings(join(discovered.root, "tama"));
-  let persisted = readMcpAppProvider(join(discovered.root, "tama"));
   /** @type {ReturnType<typeof discoverProviderContract>} */
   let contract = { path: null, document: null };
   io.stdout(
     "Tama Kit guided bootstrap. Press Enter for a suggested value; use :back or :cancel at any question.",
   );
-  if (existsSync(join(discovered.root, "tama/.tama-kit.json"))) {
-    const intent = await q.choice("An existing Tama setup was found.", [
-      "Continue setup",
-      "Review or change settings",
-      "Inspect configured status",
-      "Finish",
-    ]);
-    if (intent === 3) throw new CancelledInput();
-    resume = intent !== 1;
-    statusOnly = intent === 2;
-    options.preserveLifecycle = true;
-    options.mcpApp ||= Boolean(persisted);
-  }
+  if (
+    ["tama/.tama-kit.json", "tama/.tama.env", "tama/compose.yaml"].some((path) =>
+      existsSync(join(discovered.root, path)),
+    )
+  )
+    throw new ExistingBootstrapTarget({ ...options, targetPath: discovered.root });
 
   const steps = [
     async () => {
-      if (!supplied.targetPath && !resume) {
+      if (!supplied.targetPath) {
         options.targetPath = await q.text(
           "Project directory",
           discovered.root,
@@ -139,29 +123,21 @@ export async function resolveBootstrapInput(supplied, io) {
       discovered = discoverProject({ cwd: io.cwd, targetPath: options.targetPath });
       options.targetPath = discovered.root;
       if (
-        options.developerOwned &&
         ["tama/.tama-kit.json", "tama/.tama.env", "tama/compose.yaml"].some((path) =>
           existsSync(join(discovered.root, path)),
         )
       ) {
         throw new ExistingBootstrapTarget({ ...options, targetPath: discovered.root });
       }
-      recorded = readBootstrapSettings(join(discovered.root, "tama"));
-      persisted = readMcpAppProvider(join(discovered.root, "tama"));
-      options.preserveLifecycle = Boolean(persisted);
       io.stdout(`Detected ${discovered.framework} project: ${discovered.root}`);
-      options.composePath = supplied.composePath ?? recorded?.composeFile;
+      options.composePath = supplied.composePath;
       if (!options.composePath && discovered.composeCandidates.length > 1) {
         const names = discovered.composeCandidates.map((name) => relative(discovered.root, name));
         options.composePath = names[await q.choice("Choose the application's Compose file", names)];
       } else if (!options.composePath && discovered.composeCandidates.length === 0) {
         io.stdout("A new root compose.yaml will be created.");
       }
-      if (
-        !resume &&
-        !supplied.composePath &&
-        (await q.confirm("Select a different existing Compose file?"))
-      ) {
+      if (!supplied.composePath && (await q.confirm("Select a different existing Compose file?"))) {
         options.composePath = await q.text(
           "Compose path inside the project",
           options.composePath ?? "compose.yaml",
@@ -178,39 +154,27 @@ export async function resolveBootstrapInput(supplied, io) {
       });
     },
     async () => {
-      if (!supplied.mcpApp && !persisted && !resume) {
+      if (!supplied.mcpApp) {
         options.mcpApp =
           (await q.choice("What should this application use?", [
             "Local Tama runtime and Terraform",
             "MCP App: application OAuth provider for Tama",
           ])) === 1;
       }
-      if (persisted) options.mcpApp = true;
       if (options.mcpApp)
         io.stdout(
           "MCP App preparation configures trust and routing. Your application must implement the OAuth provider; live verification happens later.",
         );
-      advanced =
-        !resume &&
-        (await q.confirm("Customize advanced settings (image, contracts, identity, migrations)?"));
+      advanced = await q.confirm("Customize advanced settings (image, contracts, identity)?");
     },
     async () => {
-      const skills = readAgentSkillMode(join(discovered.root, "tama"));
-      if (skills === "local" && supplied.skillMode === "manual")
-        throw usageError("--skills manual does not uninstall managed local skills");
       options.skillMode =
         supplied.skillMode ??
-        skills ??
         ((await q.confirm("Install Tama Kit's agent skills in this repository?", true))
           ? "local"
           : "manual");
-      if (skills === "manual" && advanced && !supplied.skillMode) {
-        options.skillMode = (await q.confirm("Install repository-local skills now?"))
-          ? "local"
-          : "manual";
-      }
       if (!options.mcpApp) {
-        if (!supplied.port && !resume)
+        if (!supplied.port)
           options.port = Number(
             await q.text("Tama host port", String(resolveEnvironmentPort(discovered.root)), port),
           );
@@ -220,33 +184,19 @@ export async function resolveBootstrapInput(supplied, io) {
         options.mcpAppContract =
           (await q.text(
             "Provider contract path (blank discovers the application contract)",
-            options.mcpAppContract ?? persisted?.contractPath ?? "",
+            options.mcpAppContract ?? "",
             (value) => {
               discoverProviderContract(discovered.root, value || undefined);
               return value;
             },
           )) || undefined;
       }
-      contract = discoverProviderContract(
-        discovered.root,
-        options.mcpAppContract ?? persisted?.contractPath ?? undefined,
-      );
+      contract = discoverProviderContract(discovered.root, options.mcpAppContract);
       if (contract.path) io.stdout(`Provider contract: ${contract.path}`);
-      if (
-        persisted &&
-        advanced &&
-        !supplied.migrateProviderIdentity &&
-        (await q.confirm(
-          "Migrate the provider identity? This requires prepared mode and an updated application loader.",
-        ))
-      ) {
-        options.migrateProviderIdentity = true;
-      }
-      if (options.migrateProviderIdentity) options.preserveLifecycle = false;
       const identityInput = {
         root: discovered.root,
         framework: discovered.framework,
-        manifestProvider: options.migrateProviderIdentity ? null : (persisted?.identity ?? null),
+        manifestProvider: null,
         contractDocument: contract.document,
         name: supplied.providerName,
         prefix: supplied.providerPrefix,
@@ -272,31 +222,22 @@ export async function resolveBootstrapInput(supplied, io) {
         );
         identity = resolveProviderIdentity({ ...identityInput, name: "provider" });
       }
-      if (
-        !supplied.providerName &&
-        (!persisted || options.migrateProviderIdentity) &&
-        identity.source !== "contract"
-      ) {
+      if (!supplied.providerName && identity.source !== "contract") {
         options.providerName = await q.text("Provider name", identity.name, (value) => {
           const name = normalizeProviderName(value);
           resolveProviderIdentity({ ...identityInput, name });
           return name;
         });
       } else options.providerName = supplied.providerName ?? identity.name;
-      // Recompute defaults after accepting a new name, while retaining custom
-      // persisted prefixes and paths when resuming an existing identity.
+      // Recompute defaults after accepting a new provider name.
       identity = resolveProviderIdentity({
         root: discovered.root,
         framework: discovered.framework,
-        manifestProvider: options.migrateProviderIdentity ? null : (persisted?.identity ?? null),
+        manifestProvider: null,
         contractDocument: contract.document,
         name: options.providerName,
-        prefix:
-          supplied.providerPrefix ??
-          (persisted && !options.migrateProviderIdentity ? identity.environmentPrefix : undefined),
-        environmentFile:
-          supplied.providerEnvironmentFile ??
-          (persisted && !options.migrateProviderIdentity ? identity.environmentFile : undefined),
+        prefix: supplied.providerPrefix,
+        environmentFile: supplied.providerEnvironmentFile,
       });
       options.providerPrefix = supplied.providerPrefix ?? identity.environmentPrefix;
       options.providerEnvironmentFile =
@@ -316,55 +257,35 @@ export async function resolveBootstrapInput(supplied, io) {
     },
     async () => {
       if (!options.mcpApp) return;
-      let https = usesLocalHttpsTopology(mcpAppOptions(options), persisted, contract.document);
-      if (!https && !resume && !supplied.migrateLocalHttps) {
-        options.migrateLocalHttps = await q.confirm(
-          "Migrate this legacy HTTP integration to local HTTPS? Public identities will change.",
-        );
-        https = options.migrateLocalHttps;
-      }
+      const https = usesLocalHttpsTopology(mcpAppOptions(options), null, contract.document);
       if (https) {
-        options.localDomain = normalizeLocalDomain(
-          supplied.localDomain ?? persisted?.localHttps?.localDomain ?? "app.localhost",
-        );
-        if (!resume && !supplied.localDomain)
+        options.localDomain = normalizeLocalDomain(supplied.localDomain ?? "app.localhost");
+        if (!supplied.localDomain)
           options.localDomain = await q.text(
             "Local HTTPS domain",
             options.localDomain,
             normalizeLocalDomain,
           );
-        if (
-          persisted?.localHttps &&
-          options.localDomain !== normalizeLocalDomain(persisted.localHttps.localDomain) &&
-          !options.migrateLocalHttps
-        ) {
-          options.migrateLocalHttps = await q.confirm(
-            `Migrate public HTTPS identities from ${persisted.localHttps.localDomain} to ${options.localDomain}? This returns the integration to prepared mode and requires certificates for the new names.`,
-          );
-          if (!options.migrateLocalHttps) throw new CancelledInput();
-        }
         if (!options.localDomain.endsWith(".localhost") && !options.acknowledgeLocalDomainRisk) {
           options.acknowledgeLocalDomainRisk = await q.confirm(
             "This name may collide with public DNS. Have you verified local-only resolution and accepted that risk?",
           );
           if (!options.acknowledgeLocalDomainRisk) throw new CancelledInput();
         }
-        const existingService = persisted?.localHttps?.providerService;
         options.providerRuntime =
-          supplied.providerRuntime ??
-          (supplied.providerService || existingService ? "compose" : "host");
-        options.providerService = supplied.providerService ?? existingService;
-        if (!resume && !supplied.providerRuntime && !supplied.providerService) {
+          supplied.providerRuntime ?? (supplied.providerService ? "compose" : "host");
+        options.providerService = supplied.providerService;
+        if (!supplied.providerRuntime && !supplied.providerService) {
           options.providerRuntime =
             (await q.choice(
               "Where does the application's provider run?",
               ["On this host", "An existing Compose service"],
-              existingService ? 1 : 0,
+              0,
             )) === 1
               ? "compose"
               : "host";
         }
-        if (options.providerRuntime === "compose" && !supplied.providerService && !resume) {
+        if (options.providerRuntime === "compose" && !supplied.providerService) {
           options.providerService = await q.text(
             "Provider Compose service",
             options.providerService ?? options.providerName,
@@ -381,32 +302,16 @@ export async function resolveBootstrapInput(supplied, io) {
             },
           );
         } else if (options.providerRuntime === "host") options.providerService = undefined;
-        if (
-          persisted?.localHttps &&
-          options.providerService !== existingService &&
-          !options.migrateProviderTopology
-        ) {
-          options.migrateProviderTopology = await q.confirm(
-            "Migrate the recorded provider runtime/service? Both runtimes must be prepared.",
-          );
-          if (!options.migrateProviderTopology) throw new PreviousQuestion();
-        }
-        if (options.migrateProviderTopology || options.migrateLocalHttps)
-          options.preserveLifecycle = false;
-        if (!supplied.providerPort && !resume)
+        if (!supplied.providerPort)
           options.providerPort = Number(
-            await q.text(
-              "Provider private listening port",
-              String(persisted?.localHttps?.providerPort ?? 4000),
-              port,
-            ),
+            await q.text("Provider private listening port", "4000", port),
           );
         io.stdout(
           `Public identities: https://${options.localDomain} and https://tama.${options.localDomain}/mcp/app`,
         );
       } else {
-        options.providerOrigin = supplied.providerOrigin ?? persisted?.providerOrigin;
-        options.tamaOrigin = supplied.tamaOrigin ?? persisted?.tamaOrigin;
+        options.providerOrigin = supplied.providerOrigin;
+        options.tamaOrigin = supplied.tamaOrigin;
         if (!options.providerOrigin)
           options.providerOrigin = await q.text(
             "Exact provider origin reachable from Tama",
@@ -417,57 +322,42 @@ export async function resolveBootstrapInput(supplied, io) {
           options.tamaOrigin = await q.text("Exact Tama origin", "http://127.0.0.1:4001", (value) =>
             normalizeMcpAppOrigin(value, "Tama origin"),
           );
-        if (!supplied.port && !resume)
+        if (!supplied.port)
           options.port = Number(
             await q.text("Tama host port", new URL(options.tamaOrigin).port || "4001", port),
           );
       }
       if (!supplied.allowedOrigins) {
-        let origins =
-          persisted?.allowedOrigins ?? (https ? [`https://${options.localDomain}`] : []);
-        const previousOrigin = persisted?.providerOrigin;
-        if (https && options.migrateLocalHttps && previousOrigin) {
-          origins = [
-            ...new Set(
-              origins.map((origin) =>
-                origin === previousOrigin ? `https://${options.localDomain}` : origin,
-              ),
-            ),
-          ];
-        }
-        options.allowedOrigins = resume
-          ? origins
-          : (
-              await q.text(
-                "Allowed browser/MCP client origins (comma separated; replace the list to add/remove)",
-                origins.join(", "),
-                (value) => {
-                  const normalized = [
-                    ...new Set(value.split(",").map((item) => allowedOrigin(item.trim()))),
-                  ];
-                  if (!normalized.length || normalized.length > 32)
-                    throw usageError("Choose 1 to 32 unique origins.");
-                  return normalized.join(",");
-                },
-              )
-            )
-              .split(",")
-              .map((item) => item.trim());
+        const origins = https ? [`https://${options.localDomain}`] : [];
+        options.allowedOrigins = (
+          await q.text(
+            "Allowed browser/MCP client origins (comma separated; replace the list to add/remove)",
+            origins.join(", "),
+            (value) => {
+              const normalized = [
+                ...new Set(value.split(",").map((item) => allowedOrigin(item.trim()))),
+              ];
+              if (!normalized.length || normalized.length > 32)
+                throw usageError("Choose 1 to 32 unique origins.");
+              return normalized.join(",");
+            },
+          )
+        )
+          .split(",")
+          .map((item) => item.trim());
       }
       if (advanced) {
         for (const key of /** @type {const} */ (["providerOrigin", "tamaOrigin"])) {
           if (!supplied[key] && https)
             options[key] =
-              (await q.text(`${key}: optional exact migration assertion`, options[key] ?? "")) ||
+              (await q.text(`${key}: optional exact origin assertion`, options[key] ?? "")) ||
               undefined;
         }
       }
     },
     async () => {
       let image =
-        supplied.image ??
-        persisted?.tamaImage ??
-        (options.mcpApp ? DEFAULTS.mcpAppTamaImage : (recorded?.image ?? DEFAULTS.tamaImage));
+        supplied.image ?? (options.mcpApp ? DEFAULTS.mcpAppTamaImage : DEFAULTS.tamaImage);
       /** @param {string} value */
       const validate = (value) => {
         if (!value || /\s/u.test(value))
@@ -533,13 +423,6 @@ export async function resolveBootstrapInput(supplied, io) {
         });
       let reviewedPlan = build();
       printReview(reviewedPlan, io);
-      if (statusOnly)
-        return {
-          options: { ...options, dryRun: true, start: false, activate: false },
-          prepared,
-          reviewedPlan,
-          statusOnly: true,
-        };
       if (supplied.dryRun) {
         const next = await q.choice("Dry run complete", ["Finish", "Edit answers"]);
         if (next === 0) return { options, prepared, reviewedPlan, statusOnly: false };
@@ -547,12 +430,7 @@ export async function resolveBootstrapInput(supplied, io) {
         const choices = [
           "Prepare files",
           "Prepare and start services",
-          ...(options.mcpApp &&
-          !options.migrateProviderTopology &&
-          !options.migrateProviderIdentity &&
-          !options.migrateLocalHttps
-            ? ["Start and activate/verify MCP App (provider must be ready)"]
-            : []),
+          ...(options.mcpApp ? ["Start and activate/verify MCP App (provider must be ready)"] : []),
           "Edit answers",
           "Finish without changes",
         ];
@@ -583,16 +461,13 @@ export async function resolveBootstrapInput(supplied, io) {
           return { options, prepared, reviewedPlan, statusOnly: false };
         }
       }
-      resume = false;
       index = 0;
     } catch (error) {
       if (error instanceof PreviousQuestion) {
-        resume = false;
         index = steps.length - 1;
       } else if (error instanceof CLIError && error.category === "usage") {
         io.stderr(error.message);
         if (!(await q.confirm("Edit the answers and try again?", true))) throw new CancelledInput();
-        resume = false;
         index = 0;
       } else throw error;
     }

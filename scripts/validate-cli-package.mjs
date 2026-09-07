@@ -48,6 +48,9 @@ try {
     "cli/bootstrap/current-config.mjs",
     "cli/bootstrap/owned-files.mjs",
     "cli/commands/setup.mjs",
+    "cli/commands/generate.mjs",
+    "cli/workflows/generate-mcp-app.mjs",
+    "cli/workflows/mcp-app-certificates.mjs",
     "cli/commands/existing-bootstrap.mjs",
     "cli/domain/lifecycle.mjs",
     "cli/domain/generation.mjs",
@@ -86,6 +89,7 @@ try {
     ["--help"],
     ["bootstrap", "--help"],
     ["setup", "--help"],
+    ["generate", "mcp-app", "--help"],
     ["doctor", "--help"],
     ["dev", "setup", "--help"],
     ["oauth", "generate-key", "--help"],
@@ -122,8 +126,51 @@ try {
   );
   assert.equal(statSync(key).mode & 0o777, 0o600);
   assert.equal(existsSync(join(project, "tama")), false, "package dry runs must not write");
+  execute(
+    process.execPath,
+    [installed, "bootstrap", project, "--image", "ghcr.io/upmaru/tama:0.13.2-server", "--json"],
+    consumer,
+  );
+  const generated = JSON.parse(
+    execute(
+      process.execPath,
+      [
+        installed,
+        "generate",
+        "mcp-app",
+        project,
+        "--provider-name",
+        "acme",
+        "--provider-origin",
+        "http://host.docker.internal:4100",
+        "--allowed-origin",
+        "http://localhost:4000",
+        "--json",
+      ],
+      consumer,
+    ),
+  );
+  assert.equal(generated.generation.status, "complete");
+  const inspected = JSON.parse(
+    execute(
+      process.execPath,
+      [
+        installed,
+        "setup",
+        project,
+        "--compose",
+        "compose.yaml",
+        "--compose",
+        "tama/compose.mcp-app.yaml",
+        "--dry-run",
+        "--json",
+      ],
+      consumer,
+    ),
+  );
+  assert.equal(inspected.configuration.status, "valid");
   console.log(
-    `Installed ${metadata.name}@${metadata.version}: ESM, assets, plans, terminal preview/cancellation, aliases, help, and private-key output verified without development dependencies.`,
+    `Installed ${metadata.name}@${metadata.version}: ESM, assets, plans, terminal preview/cancellation, aliases, help, additive generation/setup, and private-key output verified without development dependencies.`,
   );
 } finally {
   rmSync(temporary, { recursive: true, force: true });

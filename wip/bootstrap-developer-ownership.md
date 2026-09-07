@@ -1,7 +1,7 @@
 # Bootstrap with developer-owned output
 
-Status: bootstrap/setup/doctor command migration implemented; explicit MCP App
-addition remains pending. Recorded 2026-09-07 after the graph-guidance work on
+Status: bootstrap/setup/doctor migration and additive `generate mcp-app` implemented.
+Validation and release status are recorded at the end of this plan. Recorded 2026-09-07 after the graph-guidance work on
 `feature/progressive-bootstrap-skills` (commit `180e4b0`, PR #32).
 
 ## Goal and delivery boundary
@@ -18,7 +18,7 @@ to the skills PR, provision a new Memovee instance, or reset an existing project
 This plan supersedes prior WIP requirements for permanent generated-file ownership
 where they conflict; those documents remain historical records.
 
-## Current implementation and the problem
+## Original implementation and the problem
 
 - `cli/bootstrap/manifest.mjs` stores `managedFiles` digests, rejects changed or
   missing files, adopts legacy marked files and validates persisted topology
@@ -60,7 +60,7 @@ also stop regenerating files from the original topology.
 
 ## Proposed command responsibilities
 
-These interfaces describe the target release; they are not currently available.
+These interfaces are implemented on `feature/bootstrap-developer-ownership`; publishing the release is separate.
 
 | Command | Responsibility | Project writes |
 | --- | --- | --- |
@@ -365,9 +365,65 @@ Validation on macOS / Node 24:
   Compose run reported an unhealthy service; an instrumented retry passed, then
   the final provider-ownership scenario also passed.
 
-Remaining plan scope: explicit additive `generate mcp-app` (work package 4), final
-legacy planner cleanup/release preparation, and the complete Memovee/Linux/Node 20
-acceptance matrix. Existing low-level v1 planner paths remain for compatibility
-coverage, but setup/doctor/activation do not call them. This slice does not claim
-those remaining acceptance cases. No existing Memovee checkout, credentials,
-Terraform state, volumes or services were changed.
+Validation correction (2026-09-07): the complete previous migration matrix passed
+on commit `02c834f` in GitHub Actions run
+[34084244747](https://github.com/kritama/tama-kit/actions/runs/34084244747).
+All four Ubuntu/macOS and Node 20.12/24 combinations, bootstrap runtime integration,
+and isolated Memovee local HTTPS integration were green. The earlier statement
+that Memovee/Linux/Node 20 acceptance remained pending was stale. That evidence
+applies to the migration commit, not automatically to subsequent additions.
+
+## Additive generation and final command cleanup (2026-09-07)
+
+Implemented work package 4 as `tama-kit generate mcp-app [path]`:
+
+- Reads current Compose configuration with ordered `--compose`, `--service`, and
+  `--env-file` selection. Does not re-enter the bootstrap/template reconciliation
+  planner or recover desired topology from a legacy manifest.
+- Generates a separate `tama/compose.mcp-app.yaml` override, private MCP environment
+  fragment, provider fragment, local bridge contract, and `tama/MCP_APP.md` handoff.
+  Existing runtime keys, Terraform, Compose files, instructions and bootstrap receipt
+  stay intact. Only missing secret-ignore lines are appended to the ignore file.
+- Requires a compatible pinned image. An existing compatible image is reused;
+  floating tags and custom builds need an explicit `--image` selection. Local HTTPS
+  uses a derived CA image, removes old Tama host-port publications through the
+  override, and requires Docker Compose 2.24.4 or newer.
+- Local HTTPS creates a dedicated `tama/mcp-app-tls/` public root and atomic private
+  certificate/key PEM bundle. Interrupted generation cannot split a certificate
+  from its private key. Resume validates existing certificate/key/CA/name agreement.
+- Uses a separate v2 capability receipt at `tama/.tama-kit-mcp-app.json`. Completed
+  reruns preserve edits/deletions. Explicit unfinished `--resume <id>` is limited
+  to pending destinations; concurrent writes and conflicting files fail closed.
+- Both terminal review and JSON output expose paths/actions and exact setup/native
+  commands without private contents. Generation reports configuration only and
+  never starts the provider or activates a runtime. Setup retains provider restart
+  ownership. The override must stay last in the emitted Compose selection.
+
+Command cleanup removed the retired existing-project migration questionnaire,
+manifest-based lifecycle replanning, and the workflow's managed-write fallback.
+Fresh bootstrap always uses the developer-owned writer and reads current configuration
+before runtime actions. Historical low-level v1 planner fixtures remain for regression
+coverage; no command uses them to upgrade an existing project. CLI routing, package
+checks, README and the packaged CLI skill/reference now document the additive command.
+
+Validation for this addition:
+
+- Full local suite: 343 passed, one expected POSIX secondary-group skip, no failures.
+  TypeScript build, Biome, submission validation, CLI skill validation, installed
+  package checks and whitespace checks passed. The host HTTPS fixture also verified
+  interrupted public-CA recovery while preserving the existing certificate/private key.
+
+- Isolated host-provider and Compose-provider local HTTPS generation, prepared
+  verification, Tama activation, provider-owned enable/restart, and enabled
+  verification passed locally. The Compose-provider container identity was preserved.
+- Regression coverage includes unchanged/customized/deleted initial output, renamed
+  services, moved private environments, ordered overrides, conflict refusal, inline
+  environment shadowing, explicit interrupted resume, private-key preservation,
+  ignored-secret rollback, and JSON/noninteractive behavior.
+- The CI integration job now exercises additive host and Compose providers in
+  addition to the original bootstrap runtime scenarios. The current additive
+  commit is tracked by the check suite on PR #33; the previous green run above
+  is historical migration evidence, not a substitute for those checks.
+
+No existing Memovee checkout, credentials, Terraform state, volumes or services
+were changed. Publishing/tagging a release remains a separate release action.

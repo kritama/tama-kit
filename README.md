@@ -103,6 +103,36 @@ Generate and start the local services:
 npx @kritama/tama-kit bootstrap --start
 ```
 
+### Add MCP App to an existing standard project
+
+Use the dedicated capability generator:
+
+```bash
+npx @kritama/tama-kit generate mcp-app --provider-name my-app \
+  --image ghcr.io/upmaru/tama:0.13.2-server --dry-run --json
+```
+
+Remove `--dry-run` to write the reviewed additions. It reads current Compose
+configuration, preserves existing runtime keys and Terraform, and creates
+`tama/compose.mcp-app.yaml`, a separate private `tama/.mcp-app.env`, the provider
+fragment, local bridge contract, and `tama/MCP_APP.md`. Only missing secret-ignore
+entries are appended to existing integration files. An existing pinned compatible
+image is reused; a floating tag or custom build requires an explicit `--image`.
+
+For custom layouts, select ordered `--compose` files, `--service`, and `--env-file`.
+Follow the emitted `setup` and native Docker commands: they append the generated
+Compose override to your existing selection. Local HTTPS uses Caddy, a derived CA
+image, and an atomic private certificate/key bundle under `tama/mcp-app-tls/`.
+The override clears Tama's old published ports and requires Compose 2.24.4+.
+Even its dry run requires the Compose CLI for current configuration inspection;
+no daemon is needed. Generation never starts the provider or activates either side.
+
+The separate `tama/.tama-kit-mcp-app.json` receipt records this operation only.
+Completed reruns preserve changes and deletions. Use `--resume <id>` with the
+original options only for an unfinished addition. Use `setup` for subsequent
+activation and verification; provider loading, CA trust, and restarts remain
+application-owned. See `tama/MCP_APP.md` for the exact handoff.
+
 ### Bootstrap an MCP App provider integration
 
 Use `--mcp-app` from the provider application's repository. Contract-aware

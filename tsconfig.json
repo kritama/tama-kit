@@ -15,6 +15,7 @@
     "cli/types.mjs",
     "cli/workflows/*.mjs",
     "cli/domain/*.mjs",
-    "cli/bootstrap/current-config.mjs"
+    "cli/bootstrap/current-config.mjs",
+    "cli/commands/generate.mjs"
   ]
 }

@@ -3,7 +3,10 @@ import { chmodSync, existsSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import test from "node:test";
 import { createBootstrapPlan, publicPlan } from "../../cli/bootstrap/plan.mjs";
-import { resolveBootstrapInput } from "../../cli/commands/bootstrap-input.mjs";
+import {
+  ExistingBootstrapTarget,
+  resolveBootstrapInput,
+} from "../../cli/commands/bootstrap-input.mjs";
 import { parseBootstrap } from "../../cli/commands/bootstrap-options.mjs";
 import { CancelledInput } from "../../cli/commands/questions.mjs";
 import { prerequisiteError } from "../../cli/errors.mjs";
@@ -43,6 +46,8 @@ test("bare guided setup resolves the project and produces the same read-only pla
   const io = ioFor(root, ["", "no", "1", "no", "no", "4567", "1"]);
   const result = await resolveBootstrapInput(parseBootstrap(["--dry-run"]), io);
   const equivalent = createBootstrapPlan({
+    developerOwned: true,
+    generationId: "pending-bootstrap-operation",
     cwd: root,
     targetPath: root,
     port: 4567,
@@ -120,7 +125,7 @@ test("JSON and explicit non-interactive modes never request user input", async (
   }
 });
 
-test("recorded Compose and image choices survive relocation and resume", async () => {
+test("existing Compose and image choices are redirected before the fresh questionnaire", async () => {
   const root = temporaryDirectory("tama-guided-resume-");
   writeFileSync(join(root, "compose.yaml"), "services: {}\n");
   writeFileSync(join(root, "docker-compose.yml"), "services: {}\n");
@@ -132,12 +137,12 @@ test("recorded Compose and image choices survive relocation and resume", async (
       skillMode: "manual",
     }).operations,
   );
-  const io = ioFor(root, ["1", "1"]);
-  const result = await resolveBootstrapInput(parseBootstrap([root, "--dry-run"]), io);
-  assert.equal(result.options.image, "example/tama:pinned");
-  assert.equal(result.options.composePath, "docker-compose.yml");
-  assert.ok(result.reviewedPlan.operations.every((operation) => operation.action === "unchanged"));
-  assert.ok(io.prompts.every((question) => !question.includes("skills")));
+  const io = ioFor(root, []);
+  await assert.rejects(
+    resolveBootstrapInput(parseBootstrap([root, "--dry-run"]), io),
+    ExistingBootstrapTarget,
+  );
+  assert.deepEqual(io.prompts, []);
 });
 
 test("a changed plan after approval is refused before secrets, writes, or startup", async () => {
@@ -210,21 +215,16 @@ test("enabled resume preserves custom provider identity, modes, and signing mate
   }
   const files = ["tama/.tama.env", "tama/.custom.env"];
   const before = files.map((file) => readFileSync(join(root, file), "utf8"));
-  const io = ioFor(root, ["1", "1"]);
-  const result = await resolveBootstrapInput(parseBootstrap([root, "--dry-run"]), io);
-  assert.equal(result.reviewedPlan.mcpApp.lifecycle, "enabled");
-  assert.equal(result.reviewedPlan.mcpApp.providerLifecycle, "enabled");
-  assert.equal(result.options.providerPrefix, "CUSTOM");
-  assert.equal(result.options.providerEnvironmentFile, "tama/.custom.env");
+  const io = ioFor(root, []);
+  await assert.rejects(
+    resolveBootstrapInput(parseBootstrap([root, "--dry-run"]), io),
+    ExistingBootstrapTarget,
+  );
   assert.deepEqual(
     files.map((file) => readFileSync(join(root, file), "utf8")),
     before,
   );
-  assert.ok(
-    result.reviewedPlan.operations.every(
-      (op) => !files.includes(op.path.slice(root.length + 1)) || op.action === "unchanged",
-    ),
-  );
+  assert.deepEqual(io.prompts, []);
 });
 
 test("explicit flags skip their questions and remain authoritative", async () => {
@@ -395,36 +395,22 @@ test("review is revalidated after CA consent and before certificate generation",
   assert.equal(existsSync(join(root, "tama")), false);
 });
 
-test("changing a saved HTTPS domain requires explicit migration consent", async () => {
-  for (const consent of ["yes", "no"]) {
-    const root = temporaryDirectory("tama-domain-migrate-");
-    applyOperations(
-      planWithMcp(
-        root,
-        {
-          ...preparedFor(root),
-          allowedOrigins: ["https://app.localhost"],
-        },
-        { localDomain: "app.localhost" },
-      ).operations,
-    );
-    const before = readFileSync(join(root, "tama/.tama-kit.json"), "utf8");
-    const answers = ["2", "no", "no", "next.localhost", consent];
-    if (consent === "yes") answers.push("1", "", "https://next.localhost", "1");
-    const io = ioFor(root, answers);
-    const resolve = () => resolveBootstrapInput(parseBootstrap([root, "--dry-run"]), io);
-    if (consent === "no") await assert.rejects(resolve(), CancelledInput);
-    else {
-      const result = await resolve();
-      assert.equal(result.options.migrateLocalHttps, true);
-      assert.equal(result.options.preserveLifecycle, false);
-      assert.equal(result.reviewedPlan.mcpApp.providerOrigin, "https://next.localhost");
-      assert.equal(result.reviewedPlan.mcpApp.resource, "https://tama.next.localhost/mcp/app");
-      assert.equal(result.reviewedPlan.mcpApp.lifecycle, "prepared");
-    }
-    assert.ok(io.prompts.some((prompt) => prompt.includes("Migrate public HTTPS identities")));
-    assert.equal(readFileSync(join(root, "tama/.tama-kit.json"), "utf8"), before);
-  }
+test("existing HTTPS settings cannot enter the retired migration questionnaire", async () => {
+  const root = temporaryDirectory("tama-domain-migrate-");
+  applyOperations(
+    planWithMcp(root, preparedFor(root), { localDomain: "app.localhost" }).operations,
+  );
+  const before = readFileSync(join(root, "tama/.tama-kit.json"), "utf8");
+  const io = ioFor(root, []);
+  await assert.rejects(
+    resolveBootstrapInput(
+      parseBootstrap([root, "--mcp-app", "--local-domain", "next.localhost"]),
+      io,
+    ),
+    ExistingBootstrapTarget,
+  );
+  assert.deepEqual(io.prompts, []);
+  assert.equal(readFileSync(join(root, "tama/.tama-kit.json"), "utf8"), before);
 });
 
 test("an in-session prerequisite retry renders fresh progress through completion", async () => {
@@ -462,48 +448,32 @@ test("an in-session prerequisite retry renders fresh progress through completion
   }
 });
 
-test("domain migration replaces the old default origin while preserving custom and explicit origins", async () => {
-  for (const customOnly of [false, true]) {
-    const root = temporaryDirectory("tama-origin-migrate-");
-    const stored = customOnly
-      ? ["https://client.example"]
-      : ["https://app.localhost", "https://client.example", "https://next.localhost"];
-    applyOperations(
-      planWithMcp(
+test("bootstrap rejects old migration flags without modifying existing origins", async () => {
+  const root = temporaryDirectory("tama-origin-migrate-");
+  applyOperations(
+    planWithMcp(root, preparedFor(root), { localDomain: "app.localhost" }).operations,
+  );
+  const paths = ["tama/.tama-kit.json", "tama/.tama.env", "tama/.memovee.integration.env"];
+  const before = paths.map((path) => readFileSync(join(root, path), "utf8"));
+  const io = ioFor(root, []);
+  assert.equal(
+    await run(
+      [
+        "bootstrap",
         root,
-        {
-          ...preparedFor(root),
-          allowedOrigins: stored,
-        },
-        { localDomain: "app.localhost" },
-      ).operations,
-    );
-    for (const explicit of [false, true]) {
-      const answers = ["2", "no", "no", "next.localhost", "yes", "1", ""];
-      if (!explicit) answers.push(""); // Accept the suggested origins.
-      answers.push("1");
-      const io = ioFor(root, answers);
-      const flags = [
-        root,
-        "--dry-run",
-        ...(explicit ? ["--mcp-app", "--allowed-origin", "https://app.localhost"] : []),
-      ];
-      const result = await resolveBootstrapInput(parseBootstrap(flags), io);
-      const expected = explicit
-        ? ["https://app.localhost"]
-        : customOnly
-          ? stored
-          : ["https://next.localhost", "https://client.example"];
-      assert.deepEqual(result.options.allowedOrigins, expected);
-      assert.deepEqual(result.reviewedPlan.mcpApp.allowedOrigins, expected);
-      assert.deepEqual(result.reviewedPlan.localHttps.allowedOrigins, expected);
-      assert.equal(result.reviewedPlan.mcpApp.providerOrigin, "https://next.localhost");
-      assert.equal(
-        JSON.parse(
-          readFileSync(join(root, "tama/.tama-kit.json"), "utf8"),
-        ).mcpAppProvider.allowedOrigins.includes("https://client.example"),
-        true,
-      );
-    }
-  }
+        "--mcp-app",
+        "--migrate-local-https",
+        "--local-domain",
+        "next.localhost",
+        "--json",
+      ],
+      io,
+    ),
+    2,
+  );
+  assert.deepEqual(
+    paths.map((path) => readFileSync(join(root, path), "utf8")),
+    before,
+  );
+  assert.deepEqual(io.prompts, []);
 });

@@ -3,6 +3,7 @@
 | Command | Purpose | Writes |
 | --- | --- | --- |
 | `bootstrap [path]` / `init [path]` | Initial generation; existing projects offer continuation | New files and reviewed integration edits |
+| `generate mcp-app [path]` | Add MCP App to an existing standard project | Capability additions and missing ignore entries |
 | `setup [path]` | Start and verify current configuration | Runtime operations |
 | `setup --activate` | Verify prepared services and enable Tama | One unshadowed Tama mode assignment |
 | `setup --dry-run` | Inspect configuration and preview activation when requested | None |
@@ -30,6 +31,31 @@ keys and reviewing public identity, routing, certificates and bindings together.
 An unfinished receipt permits `--resume <operation-id>` with the original
 options; it may create only still-pending files and preserves existing output.
 The receipt is optional provenance after generation. Setup and doctor ignore it.
+
+## Add MCP App to a standard project
+
+`generate mcp-app` accepts provider/contract/local HTTPS inputs from fresh
+MCP App generation, plus ordered repeatable `--compose`, `--service`, and
+`--env-file` selections. It reuses a compatible pinned runtime image; use
+`--image` explicitly for a floating tag or custom build. `--start`, `--activate`,
+`--port`, `--skills` and old migration flags are not additive generation options.
+
+Preview with `--dry-run --json`; this needs Compose but not a daemon. Local HTTPS
+requires Compose 2.24.4+, mkcert for writes, and explicitly authorized CA trust
+installation if necessary. The override appends a new private environment fragment,
+selects a derived CA image, and removes old Tama port publications. Existing files,
+keys and Terraform are preserved; conflicting destinations fail before writes.
+
+Use the output's `commands.setup`, `commands.activate`, `commands.doctor`, and
+native Compose commands, also recorded in `tama/MCP_APP.md`. The override must
+remain last in that selection. The new private TLS PEM bundle combines the
+certificate and key atomically. Host providers load its public root from
+`tama/mcp-app-tls/rootCA.pem`. Providers own loading their fragment, enabling
+their mode, and restarting; generation reports no runtime acceptance.
+
+`tama/.tama-kit-mcp-app.json` is a separate v2 capability receipt. An explicit
+`--resume <id>` needs that unfinished receipt and the original options. Completed
+reruns do not write, regardless of later edits or deletions.
 
 ## Current configuration selection
 

@@ -137,6 +137,12 @@ jobs:
       - name: Validate Compose-managed MCP App provider runtime
         run: node scripts/validate-mcp-app-local-https.mjs --compose-provider
 
+      - name: Validate additive MCP App with host provider
+        run: node scripts/validate-mcp-app-local-https.mjs --addition
+
+      - name: Validate additive MCP App with Compose provider
+        run: node scripts/validate-mcp-app-local-https.mjs --addition --compose-provider
+
   memovee-local-https-integration:
     name: Memovee local HTTPS integration
     needs: test

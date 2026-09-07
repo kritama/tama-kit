@@ -289,6 +289,7 @@ function withoutEnvironmentVariables(content, variables) {
  * @property {McpAppBootstrapOptions} options
  * @property {boolean} nonInteractive
  * @property {CommandIO} io
+ * @property {boolean} [ignoreGenerationHistory]
  */
 
 /**
@@ -307,8 +308,9 @@ export async function prepareMcpApp({
   options,
   nonInteractive,
   io,
+  ignoreGenerationHistory = false,
 }) {
-  const persisted = readMcpAppProvider(tamaDirectory);
+  const persisted = ignoreGenerationHistory ? null : readMcpAppProvider(tamaDirectory);
   if (
     options.localDomain !== undefined &&
     !normalizeLocalDomain(options.localDomain).endsWith(".localhost") &&
@@ -511,6 +513,7 @@ export function resolveMcpAppState({
  * @property {(kidPrefix: string) => OAuthKeyPair} [generateKeyPair] Injectable key
  *   generation for deterministic tests.
  * @property {boolean} [materializeKeys]
+ * @property {string} [tamaEnvironmentFile] Selected fragment for additive generation.
  */
 
 /**
@@ -848,7 +851,10 @@ export function planMcpApp(input) {
     }
   }
 
-  const tamaValues = readEnvironmentValues(root, BOOTSTRAP_PATHS.environment);
+  const tamaValues = readEnvironmentValues(
+    root,
+    input.tamaEnvironmentFile ?? BOOTSTRAP_PATHS.environment,
+  );
   const existingTamaKey = tamaValues.get(TAMA_INTROSPECTION_KEY_VARIABLE);
   const existingTamaKid = tamaValues.get(TAMA_INTROSPECTION_KID_VARIABLE);
   let introspectionSigningKeyId;

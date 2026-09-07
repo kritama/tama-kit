@@ -24,6 +24,8 @@ export async function runExistingBootstrap(options, io, root) {
     return null;
   }
   if (evidence.kind === "receipt" && evidence.receipt.progress.status === "incomplete") {
+    if (evidence.receipt.operation.kind !== "bootstrap")
+      throw ownershipError("use generate mcp-app to resume MCP App generation");
     if (options.resumeId !== evidence.receipt.operation.id)
       throw ownershipError(
         `generation is incomplete; review its pending destinations and rerun with --resume ${evidence.receipt.operation.id} and the original generation options`,
