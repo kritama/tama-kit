@@ -326,10 +326,11 @@ const JWK_PRIVATE_MEMBERS = Object.freeze(["d", "p", "q", "dp", "dq", "qi", "oth
  * @param {string} root
  * @param {string} filename
  * @param {string} variable
+ * @param {Map<string, string>} [values]
  * @returns {ExpectedPublicMembers}
  */
-function expectedPublicMembers(root, filename, variable) {
-  const encoded = readEnvironmentValues(root, filename).get(variable);
+function expectedPublicMembers(root, filename, variable, values) {
+  const encoded = (values ?? readEnvironmentValues(root, filename)).get(variable);
   if (typeof encoded !== "string" || encoded.length === 0) {
     return { n: null, e: null };
   }
@@ -532,7 +533,7 @@ async function introspectInactiveToken({ root, plan, fetch, providerTransport })
   const audience = `${plan.providerOrigin}${introspectionPath}`;
   const assertion = await signClientAssertion({
     privateJwk:
-      readEnvironmentValues(root, BOOTSTRAP_PATHS.environment).get(
+      (plan.tamaEnvironment ?? readEnvironmentValues(root, BOOTSTRAP_PATHS.environment)).get(
         TAMA_INTROSPECTION_KEY_VARIABLE,
       ) ?? "",
     kid: plan.introspectionSigningKeyId,
@@ -717,6 +718,7 @@ export async function verifyMcpApp({
     root,
     plan.provider.environmentFile,
     plan.bindings.roles.access_token_private_signing_key,
+    plan.providerEnvironment,
   );
   const providerJwksResult = await fetchJson(
     providerFetch,
@@ -769,6 +771,7 @@ export async function verifyMcpApp({
     root,
     BOOTSTRAP_PATHS.environment,
     TAMA_INTROSPECTION_KEY_VARIABLE,
+    plan.tamaEnvironment,
   );
   const tamaJwksResult = await fetchJson(fetch, `${plan.tamaOrigin}/.well-known/jwks.json`);
   const tamaReachable = jwksPublishesExpectedKey(

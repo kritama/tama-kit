@@ -56,20 +56,25 @@ function execute(command, args, options = {}) {
 }
 
 function bootstrap(...args) {
+  const continuing = args.includes("--start");
   const output = execute(process.execPath, [
     join(repositoryRoot, "bin", "tama-kit.mjs"),
-    "bootstrap",
+    continuing ? "setup" : "bootstrap",
     project,
     "--json",
-    "--skills",
-    "manual",
-    "--mcp-app",
-    "--provider-name",
-    "fixture",
-    "--provider-port",
-    String(providerPort),
+    ...(continuing
+      ? []
+      : [
+          "--skills",
+          "manual",
+          "--mcp-app",
+          "--provider-name",
+          "fixture",
+          "--provider-port",
+          String(providerPort),
+        ]),
     ...(composeProvider ? ["--provider-service", "fixture"] : []),
-    ...args,
+    ...args.filter((arg) => arg !== "--start"),
   ]);
   const result = JSON.parse(output);
   assert.equal(result.ok, true);
@@ -144,6 +149,19 @@ try {
     });
   }
 
+  // The application's workflow starts its provider; setup must never recreate it.
+  let providerContainer;
+  if (composeProvider) {
+    execute("docker", ["compose", "-f", composeFile, "up", "-d", "fixture"]);
+    providerContainer = execute("docker", [
+      "compose",
+      "-f",
+      composeFile,
+      "ps",
+      "-q",
+      "fixture",
+    ]).trim();
+  }
   const runningPrepared = bootstrap("--start");
   assert.equal(runningPrepared.mcpApp.verified, true);
   execute("docker", [
@@ -173,9 +191,39 @@ try {
   assert.equal(enabled.mcpApp.verified, true);
 
   assert.equal(enabled.setup.phase, "enabled");
+  if (composeProvider)
+    assert.equal(
+      execute("docker", ["compose", "-f", composeFile, "ps", "-q", "fixture"]).trim(),
+      providerContainer,
+      "setup must not recreate the application provider",
+    );
   console.log(
     `MCP App local HTTPS runtime validation passed (${composeProvider ? "Compose provider" : "host provider"}).`,
   );
+} catch (error) {
+  // Fixture-only diagnostics, redacted against every private environment value.
+  const secrets = [
+    fragment,
+    join(project, "tama/.tama.env"),
+    join(project, "tama/.tama.postgres.env"),
+  ]
+    .filter(existsSync)
+    .flatMap((path) => Object.values(parseEnv(readFileSync(path, "utf8"))))
+    .filter((value) => value.length >= 5)
+    .sort((a, b) => b.length - a.length);
+  for (const args of [
+    ["ps", "--all"],
+    ["logs", "--no-color", "--tail", "80"],
+  ]) {
+    try {
+      let output = execute("docker", ["compose", "-f", composeFile, ...args]);
+      for (const value of secrets) output = output.replaceAll(value, "[redacted]");
+      console.error(output);
+    } catch {
+      /* Preserve the primary validation failure. */
+    }
+  }
+  throw error;
 } finally {
   if (provider) provider.kill("SIGTERM");
   if (existsSync(composeFile)) {

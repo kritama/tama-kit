@@ -219,6 +219,10 @@ export type FrameworkDetection = {
 };
 
 export type BootstrapPlanOptions = {
+  developerOwned?: boolean;
+  generationId?: string;
+  resumePending?: string[];
+  resumeId?: string;
   cwd: string;
   targetPath?: string;
   composePath?: string;
@@ -261,6 +265,8 @@ export type TerraformPlan = {
 };
 
 export type McpAppPlan = {
+  tamaEnvironment?: Map<string, string>;
+  providerEnvironment?: Map<string, string>;
   provider: ProviderIdentity;
   contractSource: "contract" | "conventional";
   contractPath: string | null;
@@ -298,6 +304,7 @@ export type McpAppVerification = {
 };
 
 export type BootstrapPlan = {
+  runtime?: import("./domain/runtime.mjs").RuntimeSelection;
   schemaVersion: number;
   root: string;
   framework: Framework;
@@ -425,6 +432,10 @@ export type ExitCode = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 export type CLIErrorDetails = Record<string, unknown>;
 
 export type BootstrapCommandOptions = {
+  developerOwned?: boolean;
+  generationId?: string;
+  resumePending?: string[];
+  resumeId?: string;
   nonInteractive?: boolean;
   preserveLifecycle?: boolean;
   targetPath?: string;

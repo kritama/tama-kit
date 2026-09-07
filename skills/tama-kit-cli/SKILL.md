@@ -5,208 +5,83 @@ description: Bootstrap application repositories with a local Tama runtime, prepa
 
 # Tama Kit CLI
 
-Use Tama Kit to turn the user's requested integration into a safe, repeatable
-repository change. Inspect the target repository and preserve its instructions,
-existing Compose configuration, managed Tama files, and unrelated work.
+Inspect the application's instructions, Git status, current Compose files,
+Terraform root, local MCP App contract, and private environment loader before
+choosing an operation. All generated files are developer-owned immediately.
+Edit them directly; receipts and generator comments are provenance only.
+Never refresh generated files or update manifest hashes to make a check pass.
 
-## Terminal onboarding and agent automation
+## Choose the command
 
-For a person using their terminal, recommend `tama-kit bootstrap` with no
-flags: the CLI asks for setup mode, project/Compose selection, provider
-configuration, and a reviewed next action. A later bare invocation can resume
-or inspect saved configuration. Explain `:back` and `:cancel` when useful.
+- Fresh standard runtime: `tama-kit bootstrap`.
+- Fresh MCP App provider integration: `tama-kit bootstrap --mcp-app`.
+- Existing project configuration: `tama-kit setup` to start and verify services.
+- Read-only configuration diagnosis: `tama-kit doctor`; add `--runtime` for probes.
+- Tama Phoenix source development: `tama-kit dev setup`.
+- Standalone System OAuth signing key: `tama-kit oauth generate-key`.
 
-When executing through an agent, use the explicit JSON planning/write sequence
-below. JSON and non-TTY invocations never prompt; `--non-interactive` also
-suppresses all questions in a terminal. Do not drive the human questionnaire
-through guessed answers when repository evidence and explicit options suffice.
+If setup mode is unclear, establish whether the application needs a standard
+runtime or is an OAuth provider for Tama's `/mcp/app`. Do not infer the latter
+merely because an application uses MCP.
 
-Read the result's `setup.nextActions`, directories, configured modes, and live
-verification state. File generation and recorded lifecycle state do not prove
-Terraform provisioning or current service health. Keep browser credentials,
-provider lifecycle changes, and Terraform apply as their documented handoffs.
-Use the [CLI reference](references/cli-reference.md) for provider topology,
-migration, continuation phases, and startup diagnostic details. Opening the
-terminal questionnaire is distinct from opening Tama's private browser setup.
+Use an installed `tama-kit`, otherwise `npx @kritama/tama-kit`. Check `--help`
+if the installed interface differs. Do not inspect Tama Kit source to operate
+the CLI. Application bootstrap does not require a Tama source checkout; do
+not search sibling repositories or clone Tama to integrate an application.
 
-## Route the request first
+## Generation and continuation
 
-For agent execution, reuse the setup mode recorded in the target repository.
-When neither the user's request nor recorded state identifies the mode, ask
-this before choosing a command:
+Bare bootstrap guides a person through initial settings and a review.
+Agents use explicit flags and JSON; JSON/non-TTY execution never prompts.
+For initial generation, preview with `bootstrap --dry-run --json` and execute
+without `--dry-run` when local generation is authorized. Choose `--skills local`
+for repository copies, or `--skills manual` for externally installed skills.
+Copied skills become project-owned and bootstrap will not refresh them.
 
-> Is this application an MCP App provider that needs OAuth-protected access to
-> Tama's `/mcp/app` endpoint, or a standard app that only needs a local Tama
-> runtime and Terraform root?
+Existing bootstrap reruns produce no generation changes. They preserve edited
+and deliberately deleted output. The interactive command offers setup or doctor.
+Compatibility `bootstrap --start` and `--activate` route existing projects to
+setup; prefer setup directly. Configuration-changing and migration flags do
+not upgrade existing projects. Edit their current configuration instead.
+An unfinished receipt may be resumed only with its explicit `--resume <id>`
+and original generation options. Only pending destinations may be created;
+existing output is preserved. Do not manufacture or edit a receipt to bypass
+conflicts. Missing or invalid receipts do not prevent setup or doctor.
 
-Do not ask when the user has already identified the path. Do not infer MCP App
-mode merely because the application uses MCP somewhere else.
+## Check prerequisites
 
-Choose among these workflows:
+Generation dry-run needs neither Docker nor its daemon. A write needs Docker
+and Compose 2.20.0 or newer (`docker --version`, `docker compose version`).
+Current-configuration inspection additionally needs Compose's native
+`config --format json --no-env-resolution` support, but no daemon. Starting or
+probing services requires `docker info --format '{{.ServerVersion}}'` to succeed.
+A failed daemon check must not block a generation dry run. Let the user install
+or initialize missing tools; do not install or start Docker on their behalf.
+Local HTTPS generation needs mkcert; CA trust is an explicit host operation.
 
-- Standard application repository: `tama-kit bootstrap` without `--mcp-app`.
-- MCP App provider repository: `tama-kit bootstrap --mcp-app`.
-- A checkout of Tama itself for native Phoenix development: `tama-kit dev setup`.
-- A deployment that only needs a System OAuth signing key: `tama-kit oauth generate-key`.
+## Use current project configuration
 
-The workflow below is self-contained. You may run the installed command with
-`--help` to detect an older or newer installed version, but do not inspect Tama
-Kit source code to determine how to perform the setup.
+Run `doctor --json` or `setup --dry-run --json` first when inspection is useful.
+Select nonstandard layouts with repeatable `--compose <path>` (root first,
+overrides in order), `--service`, `--proxy-service`, `--env-file`, `--contract`,
+`--provider-service`, and `--ca-file`. Doctor also accepts `--terraform-root`.
+Selections apply consistently to Compose validation, start, status, and probes.
+The actual Compose model, environment bindings, contract, Terraform source and
+state are authoritative. Do not require historical files, hashes, topology, or
+loader checkpoints. Ambiguous service or writable mode sources need an explicit
+selection or manual edit. Keep secrets private, ignored, and untracked.
 
-## Do not require a Tama source checkout
-
-Application bootstrap is self-contained: `tama-kit bootstrap` adds the local
-Tama Compose runtime and Terraform root to the application repository. Do not
-search sibling directories, guess a Tama source path, clone Tama, or switch
-repositories just to set up an application integration. A missing Tama checkout
-is expected and is not a blocker.
-
-Use `tama-kit dev setup` only when the user explicitly identifies the target as
-a Tama source checkout for native Phoenix development. Otherwise recommend the
-appropriate `tama-kit bootstrap` command from the application repository.
-
-## Inspect before running
-
-1. For repository workflows, read the target repository's `AGENTS.md` and
-   inspect its Git status, framework, Compose files, existing `tama/`
-   directory, `tama/.tama.env*` files, and `tama/.tama-kit.json` when present.
-2. Confirm Node.js 20.12 or newer. Prefer an already installed `tama-kit`
-   executable; otherwise use `npx @kritama/tama-kit` without installing it
-   globally.
-3. If the installed command rejects a documented flag, run that command's
-   `--help` and report the version/interface mismatch; do not inspect CLI source
-   code as a substitute for repository evidence.
-4. Ask only for values that cannot be established from repository evidence.
-   Never ask the user to paste private JWKs, tokens, passwords, or the private
-   Tama setup URL into chat.
-
-## Check Docker before writes or runtime use
-
-The JSON dry run is a pure planning step and may run before Docker is installed
-or initialized. Before any bootstrap write, verify that the Docker client and
-Compose plugin are installed. Run these checks without printing unrelated
-environment values:
-
-```bash
-docker --version
-docker compose version
-```
-
-Parse the reported Compose version and require 2.20.0 or newer. Before starting
-or inspecting Compose services, opening browser root setup, or activating an MCP App
-integration, also verify that the daemon is initialized and reachable:
-
-```bash
-docker info --format '{{.ServerVersion}}'
-```
-
-`docker --version` alone only proves that the client exists. Treat a missing
-Docker executable, missing Compose plugin, or a Compose version older than
-2.20.0 as a hard preflight failure for a bootstrap write. Treat failed
-`docker info` as a hard preflight failure only for operations that start or
-inspect services. It must not block a dry run or a bootstrap write that does
-not start services. Pause and tell the user which prerequisite is missing or
-too old so they can install or start/initialize Docker first. Do not install
-Docker or start a daemon on the user's behalf. Do not run Compose, open the
-setup URL, or activate the integration unless the user explicitly requested
-that operation. After the user confirms Docker is ready, rerun the checks
-required for the next operation. These checks are not required for the
-standalone `dev setup --prepare-only` or `oauth generate-key` workflows when
-they do not use Docker.
-
-## Plan bootstrap, then write
-
-For `bootstrap` workflows, use `--dry-run --json` first. Since JSON mode cannot
-prompt, always make the agent-skill choice explicit. First inspect
-`tama/.tama-kit.json`. An existing `local` mode must remain `--skills local`;
-`--skills manual` does not uninstall managed repository-local skills and the
-CLI rejects that switch. Reuse a recorded `manual` mode unless the user
-explicitly requests installing repository-local skills. When no mode is
-recorded, use `--skills manual` by default because this skill is already active,
-unless the user explicitly wants future agents in the repository to receive a
-local copy.
-
-Do not carry these flags into other workflows. `dev setup` has its own
-`--dry-run`, `--prepare-only`, and `--json` sequence, while
-`oauth generate-key` requires exactly one of `--stdout` or `--output` and
-accepts none of those planning or skill-installation flags. Use the command
-contracts below for the exact supported invocation.
-
-Review the JSON plan for the selected root, Compose file, host port, image,
-managed-file operations, sensitive-file markers, and Terraform foundation
-ownership. A dry run does not generate reusable secret material and must not be
-treated as proof that the runtime is ready.
-
-If the plan matches the user's request, rerun the same command without
-`--dry-run`. Keep `--json` so output is deterministic and token-redacted. Add
-`--start` only when the user wants the local services started and the required
-Docker Compose runtime is available.
-
-Stop and explain managed-file drift, ambiguous foundation ownership, tracked
-secret files, unsafe paths, unsupported images, or conflicting topology. Do not
-overwrite files, delete state, rotate keys, or reset the manifest to bypass a
-safety refusal. Never run `terraform apply` without explicit authorization.
-
-## Standard application command contract
-
-Use these commands from the application repository. Replace
-`/path/to/app` only when the agent is operating from another directory.
-
-```bash
-npx @kritama/tama-kit bootstrap /path/to/app \
-  --skills <resolved-skill-mode> --dry-run --json
-
-npx @kritama/tama-kit bootstrap /path/to/app \
-  --skills <resolved-skill-mode> --json
-```
-
-Use `tama-kit` instead of `npx @kritama/tama-kit` when the executable is already
-installed. Replace `<resolved-skill-mode>` with `local` when that mode is
-recorded in `tama/.tama-kit.json`. Otherwise use `manual` by default, or
-`local` when the user explicitly requests repository-local skills. `--json`
-is deterministic, does not prompt, and redacts secret values. `--dry-run`
-plans only; it never writes files or starts Compose. Add `--start` to the
-second command only when the user explicitly requests the runtime to start.
-`--start` and `--dry-run` cannot be combined.
-
-Optional standard flags are:
-
-- `--compose <path>` to select an existing Compose file when discovery is
-  ambiguous;
-- `--port <port>` to change Tama's host port from the default `4000`; and
-- `--image <reference>` to select a different supported image.
-
-After a write, expect private `tama/.tama.env` and optional
-`tama/.tama.postgres.env` files, a managed Compose include, and a `tama/` Terraform root
-containing `README.md`, `AGENTS.md`, `.gitignore`, and the manifest
-`.tama-kit.json`. Verify private files are ignored and untracked and that the
-reported non-sensitive changes are expected.
-
-## Standard application bootstrap
-
-Run from the application root or pass its path. Let Tama Kit detect the
-framework and Compose file unless discovery is ambiguous; use `--compose` to
-select the intended existing file. Use `--port` or `--image` only for an actual
-project requirement.
-
-If the user has not asked you to make the change, recommend the exact
-`tama-kit bootstrap --dry-run --json` command and explain what it will plan. If
-the user instructs you to run bootstrap, review that plan first, then run the
-same command without `--dry-run`; add `--start` only when they also want the
-local runtime started.
-
-After the write, verify that sensitive generated files such as `tama/.tama.env*` are
-ignored and untracked. Non-sensitive Terraform, documentation, skill, manifest,
-and application-owned Compose changes may be intended for version control;
-verify that all reported changes are expected rather than untracking them. If
-the runtime was started, verify the reported health result. Hand off the
-generated `tama/README.md` and `tama/AGENTS.md` instructions for onboarding and
-Terraform planning, while keeping the private setup URL out of the response.
+Doctor never initializes Terraform or rewrites configuration. Missing tooling,
+uninitialized providers, and invalid Terraform are distinct from runtime health.
+Use native `docker compose` and `terraform init`, `fmt`, `validate`, and `plan`
+commands as needed; these workflows do not require Tama Kit or its receipt.
+Review a Terraform plan before an authorized apply. File presence does not
+prove the global foundation or an active root recipient exists.
 
 ## Complete browser root setup when requested
 
 After a successful non-dry-run bootstrap, if browser root setup was requested, start
-the managed Compose runtime and wait for the reported health endpoint. Then
+the current Compose runtime and wait for the reported health endpoint. Then
 load `tama/.tama.env` without echoing it and
 open the private `/setup/root?token=...` URL in the in-app browser. Walk the
 user through creating the root user, signing in, and creating provisioner
@@ -246,130 +121,43 @@ The complete standard setup sequence is:
 
 ## MCP App provider bootstrap
 
-Run this workflow from the provider application's repository. First inspect
-the Tama Kit bootstrap state before inspecting or changing provider behavior.
-Check `tama/.tama-kit.json`, `tama/AGENTS.md`, `tama/README.md`,
-`tama/contracts/mcp-app-provider-v1.json`, `tama/.tama.env*`, and the optional
-`priv/contracts/tama-mcp-app-bootstrap-v1.json` for presence, ownership, and
-loader wiring; also inspect the intended Compose file and `.gitignore` rules.
-Classify the state as complete, incomplete, or absent without printing private
-values. If it is absent or incomplete, first run and review:
-`tama-kit bootstrap --mcp-app --dry-run --json`. Then perform the approved
-write before provider implementation or activation.
+For a fresh integration, read the application-owned provider contract when
+present and use the `app-integration` skill for OAuth readiness and implementation.
+Preview `bootstrap --mcp-app --dry-run --json` with explicit provider inputs.
+The local contract `tama/contracts/mcp-app-provider-v1.json` becomes editable
+project configuration. The contract under `priv/contracts/` remains application
+runtime documentation. Neither artifact proves live readiness.
 
-After the bootstrap gate passes, inspect whether the application already
-provides the exact OAuth 2.1 capabilities required by the bundled
-`app-integration` skill. Classify it as ready, partial, or absent; generic OAuth
-for another resource is not sufficient.
+Fresh generation defaults to local HTTPS identities `https://app.localhost`
+and `https://tama.app.localhost/mcp/app`. Use `--provider-name`, `--provider-port`,
+`--local-domain`, and optionally `--provider-service` for an existing Compose
+provider. Private container and host transport names are not OAuth identities.
+Use the official server image tag `<version>-server` pinned to the intersection
+of the bundled range `>= 0.13.2 and < 0.14.0` and the provider contract's range.
+Without a narrower provider range, `0.13.2-server` is the default.
+Supply at most 32 unique allowed origins with `--allowed-origin`; every
+non-loopback allowed origin must use HTTPS. Custom non-`.localhost` domains
+require `--acknowledge-local-domain-risk` and operator-managed DNS.
 
-If it is ready, reuse the implementation and verify the exact contract before
-provisioning. If it is partial, explain the missing capabilities. If it has no
-OAuth provider, explicitly tell the user that an application-side OAuth
-provider integration is a prerequisite for usable `/mcp/app` access. Tama Kit
-only provisions configuration and trust material. Unless provider
-implementation was already authorized, ask whether the user wants that larger
-prerequisite implemented and do not activate or describe the app as ready.
-Route authorized provider work through `app-integration` when available.
+The application owns its provider listener, environment loader, code, keys,
+mode and restart. Make it load the private fragment specified in the current
+local contract. Keep fragments ignored and untracked; never print private JWKs
+or credentials. Readiness is checked against current bindings, not receipt data.
 
-Before planning the CLI command, also establish:
+After both prepared services are ready, authorized `setup --activate` verifies
+them, changes only Tama's unshadowed mode assignment, restarts Tama, and reports
+the provider mode/restart handoff. Set the provider mode to enabled through its
+application workflow and run `setup` again. Existing enabled verification
+failures do not revert configuration. Recovery after this invocation's Tama
+mode edit restores only that assignment and preserves unrelated developer edits.
+If its mode source is ambiguous, edit it manually and run setup for verification.
 
-- the explicit provider identity when a committed provider contract does not
-  supply it;
-- the public provider/Tama HTTPS identities and the provider's private
-  listening port;
-- whether the provider runs on the host or in an application-owned Compose
-  service, reusing recorded topology when present;
-- every browser or MCP client origin that should be allowed; and
-- a pinned Tama image accepted by the installed bootstrap contract.
-
-Allow Tama Kit to discover
-`priv/contracts/tama-mcp-app-bootstrap-v1.json`, or use `--mcp-app-contract` for
-an intentional non-default contract. The application owns that file; do not
-generate or rewrite it. Tama Kit owns the generated non-secret local projection
-at `tama/contracts/mcp-app-provider-v1.json` and the managed environment
-fragments. Contract presence is not proof that the provider loads its fragment
-or implements the live OAuth endpoints.
-
-The CLI does not implement the application's authorization, consent,
-persistence, token, revocation, or introspection behavior. An explicitly
-requested configuration-only write may stage an incomplete provider in
-`prepared`, but report it as unverified and never follow it with activation.
-
-Prepare first without `--activate`. Provider and Tama modes remain staged while
-the application is configured to load the reported provider fragment. Use
-`--start --activate` only when the user explicitly wants activation and the
-provider can be run in prepared mode. Follow the command's two-step handoff:
-Tama Kit may enable and verify Tama, but the user or provider-owned workflow
-must set the reported provider mode to `enabled` and restart the provider before
-the same activation command is rerun. Report prepared, activation-required,
-enabled, and verification states distinctly.
-
-Treat provider identity and public scheme/host as stable topology. Use
-`--migrate-provider-identity` only for a deliberate migration that the user
-requested and only after the new provider loader is ready; do not combine it
-with activation.
-
-### MCP App command contract
-
-Fresh MCP App bootstrap uses a production-compatible local HTTPS topology:
-
-```bash
-npx @kritama/tama-kit bootstrap /path/to/provider \
-  --mcp-app \
-  --provider-name acme \
-  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection>-server \
-  --skills <resolved-skill-mode> \
-  --dry-run --json
-```
-
-The default public identities are `https://app.localhost` for the provider and
-`https://tama.app.localhost/mcp/app` for Tama's protected resource. Caddy is the
-public entry point. The provider upstream is `host.docker.internal:<provider-port>`
-for host execution or `<provider-service>:<provider-port>` for Compose; Tama's
-upstream is `tama:4000`. These are private routing details, never OAuth identities.
-The application owns the provider's development environment and restart;
-the official Tama image remains `MIX_ENV=prod`.
-
-For a Compose provider, add `--provider-service <service>` to the reviewed
-command. It must name an existing application-owned service in the selected
-root Compose file, join the shared default network, and load the provider
-fragment through its own `env_file`. A host `.envrc` or an unrelated service's
-loader is not evidence for that container. Tama Kit manages Caddy routing and
-dependencies; the application owns its service, image, listener, and CA trust.
-Use `--local-domain` and `--provider-port` for deliberate customization. A
-non-`.localhost` name also requires `--acknowledge-local-domain-risk` after
-local-only DNS resolution is verified.
-`--provider-origin` and `--tama-origin` are advanced migration assertions.
-Without explicit origins, a fresh HTTPS setup defaults to the provider origin.
-Supplying `--allowed-origin` replaces the list: include every desired origin,
-including the provider origin when its browser must have access.
-Loopback client origins may use HTTP, but every non-loopback allowed origin must use HTTPS;
-at most 32 unique allowed origins are supported.
-
-Provider-specific flags require `--mcp-app`; `--activate` also requires
-`--start`. Use the [CLI reference](references/cli-reference.md) for deliberate
-runtime/service, public-domain, and identity migrations. Keep generated files
-reproducible through those inputs rather than editing managed Caddy/Compose
-files or manifest hashes.
-Use the official server image tag `<version>-server` with a pinned version in
-the supported Tama range; the floating `latest` tag is not valid for MCP App
-preparation.
-
-After reviewing the dry run, repeat the exact command without `--dry-run` to
-write prepared configuration. Configure the provider to load the reported
-private fragment, restart it in `prepared`, and verify metadata, public JWKS,
-authenticated inactive-token introspection, and the absence of resource
-advertisement and token issuance. Only after explicit activation authority run
-the exact command with `--start --activate`; set the provider mode to
-`enabled`, restart it, and rerun the same activation command. Accept success
-only when Tama Kit reports both services live and the enabled checkpoint.
-
-The generated local contract at
-`tama/contracts/mcp-app-provider-v1.json` is safe to commit. The provider
-fragment and `tama/.tama.env` contain private keys and must remain ignored and
-untracked. The optional provider contract at
-`priv/contracts/tama-mcp-app-bootstrap-v1.json` is application-owned: read it,
-but never create or rewrite it.
+`setup.phase`, `runtimeHealth`, and `runtimeVerified` distinguish configured,
+provider-restart-required, verification-required and live enabled states.
+Follow `setup.nextActions` and each `workingDirectory`. Complete browser root
+setup, Terraform provisioning and OAuth client connection independently.
+Use authorization code with PKCE for clients; provisioner credentials are not
+MCP client credentials. See the [CLI reference](references/cli-reference.md).
 
 ### Tama source-development command contract
 
@@ -387,7 +175,7 @@ foundation setup on a full write, and does not replace application bootstrap.
 
 ### Standalone System OAuth key command contract
 
-Use this only when bootstrap does not own the environment:
+Use this for a deliberately selected standalone environment:
 
 ```bash
 tama-kit oauth generate-key --kid staging-key-1 \

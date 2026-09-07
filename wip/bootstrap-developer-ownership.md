@@ -1,7 +1,7 @@
 # Bootstrap with developer-owned output
 
-Status: implementation started; command migration is not yet complete. Recorded
-2026-09-07 after the graph-guidance work on
+Status: bootstrap/setup/doctor command migration implemented; explicit MCP App
+addition remains pending. Recorded 2026-09-07 after the graph-guidance work on
 `feature/progressive-bootstrap-skills` (commit `180e4b0`, PR #32).
 
 ## Goal and delivery boundary
@@ -243,7 +243,8 @@ preceding guidance release, not this proposed ownership behavior.
 
 ### First implementation slice (2026-09-07)
 
-Branch: `codex/bootstrap-developer-ownership`, created from develop at `65b1b74`
+Branch: `feature/bootstrap-developer-ownership` (renamed from the initial
+`codex/` branch per Git Flow), created from develop at `65b1b74`
 after PR #32 merged. Review confirmed that generation, activation and recovery
 still share `createBootstrapPlan`; removing the old manifest checks before
 separating those workflows would allow regeneration of developer-owned files.
@@ -308,3 +309,65 @@ No existing Memovee checkout, credentials, state or services were changed. The
 Memovee-specific acceptance harness and the Linux/Node 20 CI matrix were not run
 in this slice. These results validate the first slice and existing workflows;
 they do not establish acceptance of the still-unimplemented command migration.
+
+
+### Command migration slice (2026-09-07)
+
+Implemented on `feature/bootstrap-developer-ownership`, continuing PR #33:
+
+- Bootstrap and init now route completed v2/v1 projects before the generator or
+  questionnaire. Reruns preserve customized and deleted output. Existing runtime
+  flags delegate to setup with a deprecation notice. Existing configuration-change
+  flags no longer upgrade projects. A newly selected existing project and startup
+  retries also leave the generation path before continuation.
+- Initial generation uses create/preserve/conflict planning and v2 receipts.
+  Progress is journaled transactionally as pending destinations; completion drops
+  that inventory. Explicit `--resume <id>` with original options creates only
+  remaining destinations and preserves existing output. Receipt writes retain
+  reviewed preconditions and roll back only this invocation's successful changes.
+- `setup` and `doctor` share current-configuration inspection using native Compose
+  JSON, declared/effective environment bindings and the selected local contract.
+  They ignore receipts and historical topology/hashes. Explicit root/override,
+  service, environment, contract, proxy and CA selections support reorganized
+  projects. Existing contracts can name relocated provider fragments and endpoint
+  paths outside generation defaults. Private keys, overlap sets, identities,
+  origins, mode sources and loader wiring are validated without exposing values.
+- Setup starts and verifies current configuration without template planning.
+  `--activate` verifies prepared services, edits only an unshadowed Tama mode
+  assignment, restarts Tama and returns the application provider handoff. Recovery
+  restores only that assignment while preserving unrelated edits; concurrent mode
+  edits require manual resolution. Already-enabled verification does not reset
+  configuration. Native Compose startup excludes the selected application provider
+  and uses `--no-deps`, leaving its start/restart to the application.
+- Doctor never writes, starts services, initializes Terraform or installs providers.
+  Optional `--runtime` enables probes; `--terraform-root` selects native Terraform
+  validation. Missing tools, uninitialized providers, invalid configuration and
+  runtime evidence are distinct. Setup dry runs preview mode edits without writes.
+- Generated provenance comments, native-operation instructions, setup checklists,
+  CLI/app-integration/graph-builder guidance, command reference and package checks
+  now describe developer ownership and the command mappings. Removed obsolete
+  documentation assertions that required a permanent bootstrap/manifest gate.
+
+Validation on macOS / Node 24:
+
+- Full suite: 333 passed, one expected POSIX secondary-group skip, zero failures.
+  Command tests cover edited/deleted files, v1 history, absent/malformed receipts,
+  custom Compose roots/overrides, renamed services, moved private fragments,
+  custom endpoints, explicit resume, narrow recovery, provider exclusion and
+  concurrent receipt protection. Runtime workflow tests cover failure recovery.
+- TypeScript build, Biome checks, submission validation, skill validation and
+  diff whitespace checks passed. Skill validation used a temporary PyYAML venv.
+- Installed-package verification passed without development dependencies and
+  checks emitted setup/doctor/activation/current-inspection modules.
+- Isolated standard runtime acceptance passed with Compose, Terraform and package
+  checks. Host-provider HTTPS setup/activation passed. Compose-provider HTTPS
+  setup/activation passed with provider container identity preserved. One earlier
+  Compose run reported an unhealthy service; an instrumented retry passed, then
+  the final provider-ownership scenario also passed.
+
+Remaining plan scope: explicit additive `generate mcp-app` (work package 4), final
+legacy planner cleanup/release preparation, and the complete Memovee/Linux/Node 20
+acceptance matrix. Existing low-level v1 planner paths remain for compatibility
+coverage, but setup/doctor/activation do not call them. This slice does not claim
+those remaining acceptance cases. No existing Memovee checkout, credentials,
+Terraform state, volumes or services were changed.

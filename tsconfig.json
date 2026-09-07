@@ -11,5 +11,10 @@
     "types": ["node"]
   },
   "include": ["bin/**/*.mjs", "cli/**/*.mjs", "cli/**/*.mts"],
-  "exclude": ["cli/types.mjs", "cli/workflows/*.mjs", "cli/domain/*.mjs"]
+  "exclude": [
+    "cli/types.mjs",
+    "cli/workflows/*.mjs",
+    "cli/domain/*.mjs",
+    "cli/bootstrap/current-config.mjs"
+  ]
 }

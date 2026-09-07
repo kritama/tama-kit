@@ -136,6 +136,7 @@ export function planRootCompose(filename, managedComposeFilename, newRootContent
     );
   }
 
+  if (matches.length === 1) return operationForContent(filename, original, { owner: "user" });
   const updated = [...currentIncludes];
   if (matches.length === 0) {
     updated.push(includePath);

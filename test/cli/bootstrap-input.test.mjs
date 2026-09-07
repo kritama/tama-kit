@@ -181,9 +181,10 @@ test("configured status does not claim provisioning or live health", async () =>
   const root = temporaryDirectory("tama-guided-status-");
   applyOperations(createBootstrapPlan({ cwd: root, skillMode: "manual" }).operations);
   const before = readFileSync(join(root, "tama/.tama-kit.json"), "utf8");
-  const io = ioFor(root, ["3"]);
+  const io = ioFor(root, []);
+  io.interactive = false;
   assert.equal(await run(["bootstrap", root], io), 0);
-  assert.match(io.output.join("\n"), /Runtime health and Terraform provisioning were not checked/);
+  assert.match(io.output.join("\n"), /Project already exists/);
   assert.equal(readFileSync(join(root, "tama/.tama-kit.json"), "utf8"), before);
 });
 

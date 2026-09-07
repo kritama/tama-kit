@@ -61,10 +61,9 @@ when that would unnecessarily change deployed addresses.
 
 Reuse exactly one global foundation. Pass its IDs and corpus outputs to child
 modules; keep the provider configuration and state at the existing root. Preserve
-Tama Kit-managed file contents and manifest hashes. Put application resources in
-application-owned files, and resolve managed-file drift through the supported
-ownership workflow instead of forging hashes or rerunning bootstrap for graph
-validation.
+project-owned generated files. Edit Terraform and Compose directly; Tama Kit
+receipts and generator comments are provenance only. No manifest hashes need
+updating. Use native Terraform source and state to assess configuration.
 
 For an intentionally staged foundation, declare the fixed interfaces explicitly,
 keep incomplete entry nodes disabled, and document the issue that supplies each

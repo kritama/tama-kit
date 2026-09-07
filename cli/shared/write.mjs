@@ -180,19 +180,35 @@ function atomicWrite(operation, before, onWrite = () => {}, restoreOwner) {
 
 /** @typedef {{operation: FileOperation, before: FileState, after: FileState}} AppliedEntry */
 
-/** @param {ReturnType<typeof prepareOperations>} prepared @param {AppliedEntry[]} applied @param {Directories} created */
-function writeOperations(prepared, applied, created) {
+/** @param {AppliedEntry[]} applied @param {AppliedEntry} entry */
+function recordApplied(applied, entry) {
+  const existing = applied.find(
+    (previous) => resolve(previous.operation.path) === resolve(entry.operation.path),
+  );
+  if (existing) existing.after = entry.after;
+  else applied.push(entry);
+}
+
+/** @param {ReturnType<typeof prepareOperations>} prepared @param {AppliedEntry[]} applied @param {Directories} created @param {(operation: FileOperation, write: (operation: FileOperation) => void) => void} [afterWrite] */
+function writeOperations(prepared, applied, created, afterWrite) {
   for (const { operation, before } of prepared.entries) {
     checkDirectories(operation.path, prepared.directories);
     if (!sameState(readState(operation.path), before)) throw changed(operation.path);
     if (operation.action === "unchanged") continue;
     if (operation.action === "delete") {
       unlinkSync(operation.path);
-      applied.push({ operation, before, after: null });
+      recordApplied(applied, { operation, before, after: null });
     } else {
       ensureDirectory(dirname(resolve(operation.path)), prepared.directories, created);
-      atomicWrite(operation, before, (after) => applied.push({ operation, before, after }));
+      atomicWrite(operation, before, (after) =>
+        recordApplied(applied, { operation, before, after }),
+      );
     }
+    afterWrite?.(operation, (progressOperation) => {
+      const progress = prepareOperations([progressOperation]);
+      for (const [path, metadata] of prepared.directories) progress.directories.set(path, metadata);
+      writeOperations(progress, applied, created);
+    });
   }
 }
 
@@ -246,15 +262,15 @@ export function applyOperations(operations) {
   writeOperations(prepareOperations(operations), [], new Map());
 }
 
-/** @param {FileOperation[]} operations @param {() => void | Promise<void>} validate */
-export async function applyOperationsTransactionally(operations, validate) {
+/** @param {FileOperation[]} operations @param {() => void | Promise<void>} validate @param {(operation: FileOperation, write: (operation: FileOperation) => void) => void} [afterWrite] */
+export async function applyOperationsTransactionally(operations, validate, afterWrite) {
   const prepared = prepareOperations(operations);
   /** @type {AppliedEntry[]} */
   const applied = [];
   /** @type {Directories} */
   const created = new Map();
   try {
-    writeOperations(prepared, applied, created);
+    writeOperations(prepared, applied, created, afterWrite);
     await validate();
   } catch (error) {
     try {

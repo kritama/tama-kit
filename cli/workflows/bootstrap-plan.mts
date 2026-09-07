@@ -43,6 +43,9 @@ export function planBootstrap(
   }
   const input = {
     cwd,
+    developerOwned: options.developerOwned,
+    resumePending: options.resumePending,
+    generationId: materializeSecrets ? options.generationId : "pending-bootstrap-operation",
     targetPath: options.targetPath,
     composePath: options.composePath,
     port: options.port,

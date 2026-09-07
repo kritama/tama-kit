@@ -1,9 +1,11 @@
 // @ts-check
 
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { formatAgentSetupPrompt } from "../bootstrap/agent-prompt.mjs";
 import { discoverProject, inspectProject } from "../bootstrap/detect-project.mjs";
 import { readSetupUrl } from "../bootstrap/environment.mjs";
+import { readGenerationEvidence } from "../bootstrap/generation-receipt.mjs";
 import { readAgentSkillMode, readBootstrapSettings } from "../bootstrap/manifest.mjs";
 import { prepareMcpApp } from "../bootstrap/mcp-app.mjs";
 import { setupProgress } from "../bootstrap/setup-progress.mjs";
@@ -13,9 +15,16 @@ import { createProgressBar } from "../terminal.mjs";
 import { runBootstrapWorkflow } from "../workflows/bootstrap.mjs";
 import { planBootstrap } from "../workflows/bootstrap-plan.mjs";
 import { mcpAppOptions } from "../workflows/options.mjs";
-import { prepareBootstrapInput, printReview, resolveBootstrapInput } from "./bootstrap-input.mjs";
+import {
+  ExistingBootstrapTarget,
+  prepareBootstrapInput,
+  printReview,
+  resolveBootstrapInput,
+} from "./bootstrap-input.mjs";
 import { bootstrapUsage, parseBootstrap } from "./bootstrap-options.mjs";
+import { runExistingBootstrap } from "./existing-bootstrap.mjs";
 import { CancelledInput, PreviousQuestion, questions } from "./questions.mjs";
+import { runSetup } from "./setup.mjs";
 
 /** @typedef {import("../types.mjs").BootstrapCommandOptions} BootstrapCommandOptions */
 /** @typedef {import("../types.mjs").CommandIO} CommandIO */
@@ -75,10 +84,25 @@ async function executeBootstrap(argv, io) {
     return EXIT_CODES.SUCCESS;
   }
 
+  const initialRoot = discoverProject({ cwd: io.cwd, targetPath: options.targetPath }).root;
+  const existing = await runExistingBootstrap(options, io, initialRoot);
+  if (existing !== null) return existing;
+  options.developerOwned = true;
+  options.generationId ??= randomUUID();
+
   const interactive = Boolean(
     io.interactive && io.prompt && !options.json && !options.nonInteractive,
   );
-  const guided = interactive ? await resolveBootstrapInput(options, io) : null;
+  let guided = null;
+  try {
+    guided =
+      interactive && !options.resumePending ? await resolveBootstrapInput(options, io) : null;
+  } catch (error) {
+    if (!(error instanceof ExistingBootstrapTarget)) throw error;
+    const result = await runExistingBootstrap(error.options, io, error.options.targetPath);
+    if (result !== null) return result;
+    throw usageError("selected project state changed; rerun bootstrap to review it");
+  }
   if (guided) options = guided.options;
   const root = discoverProject({ cwd: io.cwd, targetPath: options.targetPath }).root;
   options.composePath ??= readBootstrapSettings(join(root, "tama"))?.composeFile;
@@ -163,6 +187,19 @@ async function executeBootstrap(argv, io) {
         "Completed file changes are retained. Fix the reported prerequisite or provider state before retrying.",
       );
       if (!(await q.confirm("Retry with these settings?"))) throw new CancelledInput();
+      // Generation may already have committed before startup failed. Continue from
+      // actual files; never retry through the template planner after that boundary.
+      if (readGenerationEvidence(join(inspection.root, "tama/.tama-kit.json")).kind !== "absent") {
+        return runSetup(
+          [
+            inspection.root,
+            ...(options.composePath ? ["--compose", options.composePath] : []),
+            ...(options.activate ? ["--activate"] : []),
+            "--non-interactive",
+          ],
+          io,
+        );
+      }
       mcpAppPrepared = await prepareBootstrapInput(options, io);
       reviewedPlan = planBootstrap({
         options,

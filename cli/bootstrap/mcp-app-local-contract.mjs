@@ -4,6 +4,7 @@
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 
+import { isGenerationPath } from "../domain/generation.mjs";
 import { usageError } from "../errors.mjs";
 import { contentDigest } from "../shared/files.mjs";
 import { BOOTSTRAP_PATHS } from "./constants.mjs";
@@ -110,9 +111,10 @@ function providerContractDigest(path, expectedDocument) {
  * Validates Tama Kit's normalized, non-secret local provider contract.
  *
  * @param {unknown} document
+ * @param {{currentConfiguration?: boolean}} [options]
  * @returns {import("../types.mjs").McpAppLocalContract}
  */
-export function validateMcpAppLocalContract(document) {
+export function validateMcpAppLocalContract(document, options = {}) {
   if (!isPlainObject(document)) {
     throw usageError("local MCP App contract must be a JSON object");
   }
@@ -168,7 +170,11 @@ export function validateMcpAppLocalContract(document) {
       typeof topology.tama_origin !== "string" ||
       typeof topology.resource !== "string" ||
       typeof topology.health_url !== "string" ||
-      topology.https_port !== 443 ||
+      (options.currentConfiguration
+        ? !Number.isInteger(topology.https_port) ||
+          Number(topology.https_port) < 1 ||
+          Number(topology.https_port) > 65535
+        : topology.https_port !== 443) ||
       !Number.isInteger(topology.provider_port) ||
       !Array.isArray(topology.certificate_names) ||
       topology.certificate_names.some((name) => typeof name !== "string") ||
@@ -225,11 +231,19 @@ export function validateMcpAppLocalContract(document) {
   ) {
     throw usageError("local MCP App contract provider.environment_prefix is invalid");
   }
-  const environmentFile = safeRelativePath(
-    document.provider.environment_file,
-    "local MCP App contract provider.environment_file",
-  );
-  assertUnreservedFragmentPath(environmentFile, "local MCP App contract provider.environment_file");
+  if (options.currentConfiguration) {
+    if (!isGenerationPath(document.provider.environment_file))
+      throw usageError("current provider environment_file must be a safe project-relative path");
+  } else {
+    const environmentFile = safeRelativePath(
+      document.provider.environment_file,
+      "local MCP App contract provider.environment_file",
+    );
+    assertUnreservedFragmentPath(
+      environmentFile,
+      "local MCP App contract provider.environment_file",
+    );
+  }
 
   if (!isPlainObject(document.lifecycle)) {
     throw usageError("local MCP App contract lifecycle must be an object");
@@ -276,7 +290,7 @@ export function validateMcpAppLocalContract(document) {
     if (typeof value !== "string" || !ENDPOINT_PATH_PATTERN.test(value)) {
       throw usageError(`local MCP App contract public_endpoints.${name} is invalid`);
     }
-    if (supportedEndpoints[name] !== value) {
+    if (!options.currentConfiguration && supportedEndpoints[name] !== value) {
       throw usageError(
         `local MCP App contract public_endpoints.${name} must be ${supportedEndpoints[name]}`,
       );

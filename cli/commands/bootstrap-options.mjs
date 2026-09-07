@@ -13,6 +13,7 @@ export function bootstrapUsage() {
     "  --port <port>          Host port for Tama (default: 4000)",
     "  --image <reference>    Override Tama image (official versions use <version>-server; latest is unsuffixed)",
     "  --skills <mode>        Agent skills: local or manual",
+    "  --resume <operation-id> Resume only pending creation from an unfinished receipt",
     "  --dry-run              Inspect and report without writing",
     "  --start                Start Compose and wait for Tama health",
     "  --json                 Emit machine-readable output (never prompts)",
@@ -32,11 +33,11 @@ export function bootstrapUsage() {
     "  --provider-port <port> Provider private upstream port (default: 4000)",
     "  --provider-runtime <mode> Provider runtime: host or compose",
     "  --provider-service <name> Application-owned Compose provider service",
-    "  --migrate-provider-topology Explicitly change the recorded provider runtime",
+    "  --migrate-provider-topology Deprecated; edit existing configuration directly",
     "  --install-local-ca     Explicitly authorize mkcert -install",
-    "  --migrate-local-https  Explicitly migrate an existing HTTP MCP App topology",
+    "  --migrate-local-https  Deprecated; edit existing configuration directly",
     "  --allowed-origin <origin> Allowed client origin; HTTPS off loopback, max 32 unique (repeatable)",
-    "  --migrate-provider-identity Migrate the persisted provider identity",
+    "  --migrate-provider-identity Deprecated; edit existing configuration directly",
     "  --activate             Activate the integration after verification",
   ].join("\n");
 }
@@ -85,6 +86,7 @@ export function parseBootstrap(argv) {
     parsed = parseArgs({
       args: argv,
       options: {
+        resume: { type: "string" },
         compose: { type: "string" },
         port: { type: "string" },
         image: { type: "string" },
@@ -181,6 +183,7 @@ export function parseBootstrap(argv) {
     );
   }
   return {
+    resumeId: parsed.values.resume,
     targetPath: parsed.positionals[0],
     composePath: parsed.values.compose,
     port: parsePort(parsed.values.port),

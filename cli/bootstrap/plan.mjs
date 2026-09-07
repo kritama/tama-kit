@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { ownershipError, usageError } from "../errors.mjs";
+import { contentDigest } from "../shared/files.mjs";
 import { planRootCompose, validateComposeDocument } from "./compose.mjs";
 import { formatComposePsCommand, formatComposeUpCommand } from "./compose-command.mjs";
 import { BOOTSTRAP_PATHS, BOOTSTRAP_SCHEMA_VERSION, DEFAULTS } from "./constants.mjs";
@@ -35,6 +36,7 @@ import {
   mcpAppLocalContractFilename,
   serializeMcpAppLocalContract,
 } from "./mcp-app-local-contract.mjs";
+import { createOwnedFilePlanner } from "./owned-files.mjs";
 import { resolveProviderTopology } from "./provider-topology.mjs";
 import { SETUP_CHECKLIST } from "./setup-progress.mjs";
 import { planAgentSkills } from "./skills.mjs";
@@ -403,23 +405,29 @@ export function createBootstrapPlan(options) {
       );
     }
   }
-  const managedFiles = createManagedFilePlanner(
-    inspection.root,
-    inspection.tamaDirectory,
-    skillMode,
-    mcpAppState ??
-      (persistedMcpApp
-        ? {
-            ...persistedMcpApp,
-            tamaImage,
-            ...(localHttpsTopology ? { localHttps: localHttpsTopology } : {}),
-          }
-        : null),
-    {
-      composeFile: relative(inspection.root, inspection.selectedCompose).split("\\").join("/"),
-      image: tamaImage,
-    },
-  );
+  const managedFiles = options.developerOwned
+    ? createOwnedFilePlanner(
+        inspection.root,
+        options.generationId ?? "bootstrap",
+        Boolean(options.resumePending),
+      )
+    : createManagedFilePlanner(
+        inspection.root,
+        inspection.tamaDirectory,
+        skillMode,
+        mcpAppState ??
+          (persistedMcpApp
+            ? {
+                ...persistedMcpApp,
+                tamaImage,
+                ...(localHttpsTopology ? { localHttps: localHttpsTopology } : {}),
+              }
+            : null),
+        {
+          composeFile: relative(inspection.root, inspection.selectedCompose).split("\\").join("/"),
+          image: tamaImage,
+        },
+      );
   const localContractOperation = mcpAppState
     ? managedFiles.plan(
         mcpAppLocalContractFilename(inspection.root),
@@ -651,6 +659,45 @@ export function createBootstrapPlan(options) {
     operations.push(...planAgentSkills(inspection.root, managedFiles.plan));
   }
   operations.push(managedFiles.manifestOperation());
+  if (options.resumePending) {
+    const pending = new Set(options.resumePending);
+    for (let index = 0; index < operations.length; index++) {
+      const operation = operations[index];
+      const path = relative(inspection.root, operation.path).split("\\").join("/");
+      if (path === BOOTSTRAP_PATHS.manifest) continue;
+      if (operation.action === "create" && !pending.has(path))
+        throw ownershipError(
+          "resume cannot recreate a destination not listed as pending in the unfinished receipt",
+          { path },
+        );
+      if (operation.action === "update" && operation.owner !== "user") {
+        const content = readFileSync(operation.path, "utf8");
+        operations[index] = {
+          action: "unchanged",
+          path: operation.path,
+          owner: "user",
+          sensitive: operation.sensitive,
+          beforeDigest: contentDigest(content),
+          afterDigest: contentDigest(content),
+          reason: "resume preserves existing output",
+        };
+      }
+    }
+    for (const path of pending)
+      if (
+        !(
+          localHttpsTopology &&
+          ["tama/tls/local.pem", "tama/tls/local-key.pem", "tama/tls/rootCA.pem"].includes(path)
+        ) &&
+        !operations.some(
+          (operation) => relative(inspection.root, operation.path).split("\\").join("/") === path,
+        )
+      )
+        throw ownershipError(
+          "resume options do not include all pending destinations; supply the original generation options",
+          { path },
+        );
+  }
 
   return {
     schemaVersion: BOOTSTRAP_SCHEMA_VERSION,

@@ -159,3 +159,33 @@ test("rollback cannot replace a new arrival at a deleted destination", async () 
   );
   assert.equal(readFileSync(path, "utf8"), "new arrival");
 });
+
+test("progress receipt writes roll back to their original bytes after validation failure", async () => {
+  for (const existing of [false, true]) {
+    const root = temporaryDirectory("tama-progress-rollback-");
+    const receipt = join(root, "receipt");
+    if (existing) writeFileSync(receipt, "original receipt");
+    const operations = [
+      update(receipt, "pending two"),
+      update(join(root, "a"), "a"),
+      update(join(root, "b"), "b"),
+    ];
+    await assert.rejects(
+      applyOperationsTransactionally(
+        operations,
+        () => {
+          throw new Error("validation failed");
+        },
+        (operation, write) => {
+          if (operation.path !== receipt)
+            write(update(receipt, operation.path.endsWith("a") ? "pending one" : "complete"));
+        },
+      ),
+      /validation failed/,
+    );
+    if (existing) assert.equal(readFileSync(receipt, "utf8"), "original receipt");
+    else assert.equal(existsSync(receipt), false);
+    assert.equal(existsSync(join(root, "a")), false);
+    assert.equal(existsSync(join(root, "b")), false);
+  }
+});

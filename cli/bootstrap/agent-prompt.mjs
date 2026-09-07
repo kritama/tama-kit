@@ -26,7 +26,7 @@ export function formatAgentSetupPrompt(plan, { setupUrl } = {}) {
               `Caddy is the public HTTPS entry point. Verify Tama with \`curl --cacert tama/tls/rootCA.pem ${plan.localHttps.healthUrl}\`; the application owns its provider runtime and development mode while the official Tama image runs in MIX_ENV=prod.`,
             ]
           : []),
-        "Do not activate or restart the provider on my behalf. If activation is requested, verify the prepared checkpoint first, enable and restart Tama through bootstrap, then give me the provider-owned mode change and restart step.",
+        "Do not activate or restart the provider on my behalf. If activation is requested, verify the prepared checkpoint first, enable and restart Tama through tama-kit setup, then give me the provider-owned mode change and restart step.",
       ]
     : [];
 

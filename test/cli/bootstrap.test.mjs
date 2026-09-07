@@ -260,7 +260,7 @@ test("bootstrap reuses a recorded skill choice without prompting again", async (
   });
 
   assert.equal(exitCode, EXIT_CODES.SUCCESS);
-  assert.match(output.join("\n"), /manual installation/u);
+  assert.match(output.join("\n"), /Project already exists/u);
 });
 
 test("JSON bootstrap accepts an explicit local skill mode without prompting", async () => {
@@ -453,27 +453,25 @@ test("bootstrap upgrades previously generated Terraform templates", () => {
   assert.match(readFileSync(versions, "utf8"), /version = "~> 0\.6\.3"/u);
 });
 
-test("dry-run reports and bootstrap repairs unsafe sensitive-file permissions", async () => {
+test("bootstrap reruns preserve permissions and doctor diagnoses unsafe private files", async () => {
   const root = project();
   applyOperations(planFor(root).operations);
-  const environmentFile = join(root, "tama", ".tama.env");
-  chmodSync(environmentFile, 0o644);
-
-  const output = [];
-  const exitCode = await run(["bootstrap", root, "--dry-run", "--json"], {
-    cwd: root,
-    stdout: (message) => output.push(message),
-    stderr: () => {},
-  });
-  const payload = JSON.parse(output.join("\n"));
-  const environmentChange = payload.changes.find((change) => change.path === environmentFile);
-
-  assert.equal(exitCode, EXIT_CODES.SUCCESS);
-  assert.equal(environmentChange.action, "update");
-  assert.equal(statSync(environmentFile).mode & 0o777, 0o644);
-
-  applyOperations(planFor(root).operations);
-  assert.equal(statSync(environmentFile).mode & 0o777, 0o600);
+  const path = join(root, "tama/.tama.env");
+  chmodSync(path, 0o644);
+  for (const extra of [[], ["--dry-run"]]) {
+    const output = [];
+    assert.equal(
+      await run(["bootstrap", root, "--json", ...extra], {
+        cwd: root,
+        interactive: false,
+        stdout: (line) => output.push(line),
+        stderr() {},
+      }),
+      0,
+    );
+    assert.deepEqual(JSON.parse(output.at(-1)).changes, []);
+    assert.equal(statSync(path).mode & 0o777, 0o644);
+  }
 });
 
 test("framework detection distinguishes Rails, Phoenix, and Node projects", () => {

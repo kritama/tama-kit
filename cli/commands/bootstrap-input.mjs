@@ -27,6 +27,15 @@ import { CancelledInput, PreviousQuestion, questions } from "./questions.mjs";
 /** @typedef {import("../types.mjs").BootstrapCommandOptions} Options */
 /** @typedef {import("../types.mjs").CommandIO} IO */
 
+/** Redirect a newly selected existing project before reading historical planner settings. */
+export class ExistingBootstrapTarget extends Error {
+  /** @param {Options & {targetPath: string}} options */
+  constructor(options) {
+    super("existing project selected");
+    this.options = options;
+  }
+}
+
 /** @param {string} value */
 function port(value) {
   if (!/^\d+$/u.test(value) || Number(value) < 1 || Number(value) > 65535) {
@@ -129,6 +138,14 @@ export async function resolveBootstrapInput(supplied, io) {
       }
       discovered = discoverProject({ cwd: io.cwd, targetPath: options.targetPath });
       options.targetPath = discovered.root;
+      if (
+        options.developerOwned &&
+        ["tama/.tama-kit.json", "tama/.tama.env", "tama/compose.yaml"].some((path) =>
+          existsSync(join(discovered.root, path)),
+        )
+      ) {
+        throw new ExistingBootstrapTarget({ ...options, targetPath: discovered.root });
+      }
       recorded = readBootstrapSettings(join(discovered.root, "tama"));
       persisted = readMcpAppProvider(join(discovered.root, "tama"));
       options.preserveLifecycle = Boolean(persisted);
