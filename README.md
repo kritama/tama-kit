@@ -86,7 +86,9 @@ select repeatable `--compose` roots/overrides, `--service`, `--proxy-service`,
 `--terraform-root` and reports uninitialized providers without running init.
 `setup --dry-run --json` previews without writes or startup; `doctor --runtime`
 adds probes of existing services. Current inspection requires Compose's native
-`config --format json --no-env-resolution` support. Native Docker Compose and
+`config --format json --no-env-resolution` support. Older Compose releases that
+discard declarations use a native model-rendering fallback for literal environment
+file paths; interpolated paths require a newer Compose release. Native Docker Compose and
 Terraform commands remain usable without Tama Kit or any receipt.
 
 Inspect the proposed changes without writing:

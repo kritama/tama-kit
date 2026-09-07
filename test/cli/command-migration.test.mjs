@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -343,6 +344,64 @@ test("generation journaling refuses a receipt that arrived after the reviewed pl
   await assert.rejects(
     writeScaffold(plan, () => {}),
     { category: "ownership" },
+  );
+  assert.deepEqual(snapshot(root), before);
+});
+
+// Reproduce Compose 2.x's ToProject path discarding declarations despite the flag.
+function legacyCompose(command, args, options) {
+  return execFileSync(
+    command,
+    args.includes("--no-interpolate")
+      ? args
+      : args.filter((argument) => argument !== "--no-env-resolution"),
+    options,
+  );
+}
+
+test("legacy Compose declaration fallback preserves mode-source and provider ownership evidence", () => {
+  const { root } = mcp();
+  const contract = JSON.parse(
+    readFileSync(join(root, "tama/contracts/mcp-app-provider-v1.json"), "utf8"),
+  );
+  writeFileSync(
+    join(root, "provider.yaml"),
+    `services:\n  application:\n    image: node:24-alpine\n    env_file: [./${contract.provider.environment_file}]\n`,
+  );
+  const options = {
+    cwd: root,
+    composeFiles: ["compose.yaml", "provider.yaml"],
+    environmentFile: "tama/.tama.env",
+  };
+  const before = snapshot(root);
+  const plan = inspectCurrentConfiguration(options, legacyCompose);
+  assert.equal(plan.runtime.modeSource.path, join(root, "tama/.tama.env"));
+  assert.equal(plan.mcpApp.environmentLoading, "verified");
+  assert.equal(composeUpArguments(plan).includes("application"), false);
+  assert.deepEqual(snapshot(root), before);
+  writeFileSync(
+    join(root, "shadow.yaml"),
+    "services:\n  tama:\n    environment:\n      TAMA_MCP_APP_MODE: prepared\n",
+  );
+  const shadowed = inspectCurrentConfiguration(
+    { ...options, composeFiles: [...options.composeFiles, "shadow.yaml"] },
+    legacyCompose,
+  );
+  assert.equal(shadowed.runtime.modeSource, undefined);
+});
+
+test("legacy Compose fallback diagnoses unresolved env_file interpolation without guessing a path", () => {
+  const root = standard();
+  const path = join(root, "tama/compose.yaml");
+  writeFileSync(
+    path,
+    readFileSync(path, "utf8").replace("./.tama.env", `\${TAMA_ENV_FILE:-./.tama.env}`),
+  );
+  const before = snapshot(root);
+  assert.throws(
+    () => inspectCurrentConfiguration({ cwd: root }, legacyCompose),
+    (error) =>
+      error.category === "prerequisite" && /interpolated env_file paths/.test(error.message),
   );
   assert.deepEqual(snapshot(root), before);
 });

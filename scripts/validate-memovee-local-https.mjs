@@ -44,19 +44,24 @@ function execute(command, args, options = {}) {
 }
 
 function bootstrap(...args) {
+  const continuing = args.includes("--start");
   const output = execute(process.execPath, [
     join(repositoryRoot, "bin", "tama-kit.mjs"),
-    "bootstrap",
+    continuing ? "setup" : "bootstrap",
     project,
     "--json",
-    "--skills",
-    "manual",
-    "--mcp-app",
-    "--provider-name",
-    "memovee",
-    "--provider-port",
-    String(providerPort),
-    ...args,
+    ...(continuing
+      ? []
+      : [
+          "--skills",
+          "manual",
+          "--mcp-app",
+          "--provider-name",
+          "memovee",
+          "--provider-port",
+          String(providerPort),
+        ]),
+    ...args.filter((argument) => argument !== "--start"),
   ]);
   const result = JSON.parse(output);
   assert.equal(result.ok, true);
@@ -123,6 +128,8 @@ try {
   const prepared = bootstrap("--start");
   assert.equal(prepared.mcpApp.verified, true);
 
+  const handoff = bootstrap("--start", "--activate");
+  assert.equal(handoff.setup.phase, "provider-restart-required");
   await stopProvider();
   const enabledFragment = readFileSync(fragment, "utf8").replace(
     /^MEMOVEE_TAMA_MCP_APP_MODE=prepared$/mu,
@@ -133,6 +140,7 @@ try {
   const enabled = bootstrap("--start", "--activate");
   assert.equal(enabled.mcpApp.mode, "enabled");
   assert.equal(enabled.mcpApp.verified, true);
+  assert.equal(enabled.setup.phase, "enabled");
 
   console.log("Memovee MIX_ENV=dev local HTTPS runtime validation passed.");
 } finally {

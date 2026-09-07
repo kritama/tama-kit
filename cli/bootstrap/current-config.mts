@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { parseEnv } from "node:util";
 import type { InspectOptions, RuntimePlan } from "../domain/runtime.mjs";
-import { ambiguityError, ownershipError, usageError } from "../errors.mjs";
+import { ambiguityError, ownershipError, prerequisiteError, usageError } from "../errors.mjs";
 import { composeArguments } from "../shared/compose.mjs";
 import { isValidVaultKey, parseEnvironment } from "../shared/environment.mjs";
 import { contentDigest, inspectRegularFile } from "../shared/files.mjs";
@@ -115,7 +115,7 @@ export function inspectCurrentConfiguration(
     if (!inspectRegularFile(path)) throw usageError("selected Compose file is missing");
   const selection = { composeFile: composeFiles[0], runtime: { composeFiles } };
   validateComposePrerequisite();
-  function load(noEnvironment: boolean): Model {
+  function load(noEnvironment: boolean, noInterpolation = false): Model {
     try {
       const output = execute(
         "docker",
@@ -125,6 +125,7 @@ export function inspectCurrentConfiguration(
           "--format",
           "json",
           ...(noEnvironment ? ["--no-env-resolution"] : []),
+          ...(noInterpolation ? ["--no-interpolate"] : []),
         ],
         {
           cwd: root,
@@ -143,7 +144,20 @@ export function inspectCurrentConfiguration(
       );
     }
   }
-  const declarations = load(true);
+  let declarations = load(true);
+  if (!Object.values(declarations.services).some((service) => service.env_file?.length)) {
+    // Compose 2.x can discard env_file even with --no-env-resolution. Its
+    // model-rendering path preserves declarations; effective values still come
+    // from the separate, fully resolved native configuration below.
+    declarations = load(true, true);
+    for (const service of Object.values(declarations.services)) {
+      if (service.env_file?.some(({ path }) => path.includes("$"))) {
+        throw prerequisiteError(
+          "this Docker Compose version cannot preserve interpolated env_file paths during inspection; upgrade Compose to a version that supports --no-env-resolution without discarding declarations",
+        );
+      }
+    }
+  }
   const model = load(false);
   const services = model.services;
   const serviceName = selectService(
