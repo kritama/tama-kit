@@ -1,7 +1,7 @@
 # Bootstrap with developer-owned output
 
-Status: approved direction; implementation plan only. CLI behavior is not changed
-by this document. Recorded 2026-09-07 after the graph-guidance work on
+Status: implementation started; command migration is not yet complete. Recorded
+2026-09-07 after the graph-guidance work on
 `feature/progressive-bootstrap-skills` (commit `180e4b0`, PR #32).
 
 ## Goal and delivery boundary
@@ -235,9 +235,76 @@ fmt/validate/native tests for generated Terraform; keep runtime acceptance separ
 
 ## Current evidence and remaining work
 
-This document is based on source inspection of the skills branch and the reviewed
-Memovee foundation. No ownership implementation, migration, new command, service
-operation or deployment has been performed for this plan. The preceding skills
+The original plan was based on source inspection of the skills branch and the
+reviewed Memovee foundation. The preceding skills
 commit passed 307 tests (one expected skip), lint/type checking via the build,
 submission validation and installed-package validation. Those checks validate the
 preceding guidance release, not this proposed ownership behavior.
+
+### First implementation slice (2026-09-07)
+
+Branch: `codex/bootstrap-developer-ownership`, created from develop at `65b1b74`
+after PR #32 merged. Review confirmed that generation, activation and recovery
+still share `createBootstrapPlan`; removing the old manifest checks before
+separating those workflows would allow regeneration of developer-owned files.
+
+Implemented foundations for work package 1:
+
+- `cli/domain/generation.mts` defines generation results and a validated v2
+  receipt. Completed receipts have no file inventory. Incomplete receipts contain
+  an operation identifier and only pending project-relative destinations. Neither
+  form stores desired topology, credential values or content hashes.
+- `cli/bootstrap/generation-receipt.mjs` reads optional evidence without writes.
+  Its dedicated v1 adapter recognizes historical scaffolds without reading their
+  recorded destinations, comparing hashes, or deriving operational topology.
+  Malformed structural metadata fails with the existing `ownership` category
+  (exit 4); JSON parse errors do not disclose source content.
+- `cli/workflows/generation.mts` plans create/preserve/conflict operations.
+  Existing completed/v1 evidence yields `existing` with no writes, including when
+  files have been edited or removed. An explicit matching operation identifier
+  permits resume of an incomplete receipt's pending destinations only. Existing
+  files encountered during resume remain untouched. Callers must establish fresh
+  generation intent separately; absent metadata alone does not authorize writes.
+- `cli/shared/files.mjs` adds generation planning that grants no overwrite
+  authority to generated comments. Identical files keep their bytes and modes.
+  Differing files conflict before any generation writes occur. Destination and
+  ancestor checks reject symlinks, including dangling links.
+- The existing shared transaction writer now checks the entire plan before writes
+  and rechecks files before each change. New files are published exclusively;
+  unchanged operations do not chmod files. Rollback visits only successfully
+  changed paths, checks content, inode, permissions and directory identities, and
+  preserves intervening edits. It continues restoring independent files after a
+  recovery conflict and retains the original failure in an aggregate diagnostic.
+
+The shared writer changes are active in existing CLI workflows. The new generation
+planner and receipt reader are internal building blocks and are **not yet routed
+from bootstrap**. Existing bootstrap still uses v1 manifests, managed-file checks
+and marker-based planning. No setup/doctor/generate commands, receipt persistence
+or conversion, runtime configuration reader, or activation recovery cutover are
+implemented in this slice. In particular, the full developer-ownership acceptance
+criteria above are not yet met.
+
+Next: extract current-configuration inspection (work package 2), then separate
+setup and activation recovery (work package 3). Wire the generation planner,
+receipt progress persistence and command compatibility only once these paths can
+no longer regenerate the original scaffold. Keep the prepared/enabled protocol
+and provider-owned restarts intact through that cutover.
+
+Validation on macOS with Node 24:
+
+- Lint, TypeScript build/type checking, submission validation and diff whitespace
+  checks passed.
+- Full suite: 321 passed, one expected POSIX secondary-group skip, zero failures.
+  This includes 14 new generation/transaction behavior tests. The HTTP/HTTPS
+  socket tests required execution outside the restricted filesystem sandbox.
+- Installed-package validation passed without development dependencies; it also
+  checks inclusion of the new emitted generation modules.
+- Isolated standard bootstrap runtime validation passed (Docker startup, Compose,
+  Terraform and package checks).
+- Isolated MCP App HTTPS runtime validation passed for both host and Compose
+  providers, including the existing staged activation behavior.
+
+No existing Memovee checkout, credentials, state or services were changed. The
+Memovee-specific acceptance harness and the Linux/Node 20 CI matrix were not run
+in this slice. These results validate the first slice and existing workflows;
+they do not establish acceptance of the still-unimplemented command migration.
