@@ -14,6 +14,8 @@ import test from "node:test";
 import { inspectCurrentConfiguration } from "../../cli/bootstrap/current-config.mjs";
 import { run } from "../../cli/index.mjs";
 import { contentDigest } from "../../cli/shared/files.mjs";
+import { applyOperationsTransactionally } from "../../cli/shared/write.mjs";
+import { planTamaModeChange } from "../../cli/workflows/activation.mjs";
 import { memoveeContract, writeContract } from "../helpers/mcp-app.mjs";
 import { temporaryDirectory } from "../helpers/temporary.mjs";
 
@@ -144,6 +146,63 @@ test("additive HTTP generation preserves original scaffold and supports current 
   const edited = snapshot(root);
   assert.equal((await generate(root)).result.generation.status, "existing");
   assert.deepEqual(snapshot(root), edited);
+});
+
+test("core env-file selection leaves separate activation mode discovery unambiguous", async () => {
+  const root = await standard();
+  assert.equal((await generate(root, ...http)).code, 0);
+  const composeFiles = ["compose.yaml", "tama/compose.mcp-app.yaml"];
+  const environmentFile = "tama/.tama.env";
+  const corePath = join(root, environmentFile);
+  const core = readFileSync(corePath, "utf8");
+  const selection = { cwd: root, composeFiles, environmentFile };
+  const plan = inspectCurrentConfiguration(selection);
+  assert.equal(plan.runtime.environmentFile, corePath);
+  assert.equal(plan.runtime.modeSource.path, join(root, "tama/.mcp-app.env"));
+  const before = snapshot(root);
+  const preview = await command(
+    root,
+    "setup",
+    "--dry-run",
+    "--activate",
+    "--compose",
+    composeFiles[0],
+    "--compose",
+    composeFiles[1],
+    "--env-file",
+    environmentFile,
+    "--json",
+  );
+  assert.equal(preview.code, 0, JSON.stringify(preview.result));
+  assert.equal(preview.result.setup.phase, "planned");
+  assert.deepEqual(snapshot(root), before);
+  const change = planTamaModeChange(plan);
+  await applyOperationsTransactionally([change.operation], () => {});
+  assert.equal(readFileSync(corePath, "utf8"), core);
+  assert.deepEqual(
+    snapshot(root).filter(([path]) => path !== change.operation.path),
+    before.filter(([path]) => path !== change.operation.path),
+  );
+  assert.equal(inspectCurrentConfiguration(selection).mcpApp.lifecycle, "enabled");
+  await applyOperationsTransactionally([change.restore()], () => {});
+  assert.deepEqual(snapshot(root), before);
+
+  // Explicit selection must not bypass either multiple mode files or inline shadowing.
+  writeFileSync(corePath, `${core}\nTAMA_MCP_APP_MODE=prepared\n`);
+  const ambiguous = inspectCurrentConfiguration(selection);
+  assert.equal(ambiguous.runtime.modeSource, undefined);
+  assert.throws(() => planTamaModeChange(ambiguous), /no single safely editable/);
+  writeFileSync(corePath, core);
+  writeFileSync(
+    join(root, "shadow.yaml"),
+    "services:\n  tama:\n    environment:\n      TAMA_MCP_APP_MODE: prepared\n",
+  );
+  const shadowed = inspectCurrentConfiguration({
+    ...selection,
+    composeFiles: [...composeFiles, "shadow.yaml"],
+  });
+  assert.equal(shadowed.runtime.modeSource, undefined);
+  assert.throws(() => planTamaModeChange(shadowed), /no single safely editable/);
 });
 
 test("conflicts, unsupported actions, and shadowed environment fail before writing", async () => {

@@ -523,3 +523,24 @@ explicit selection of an absent optional file, existing optional-file permission
 and missing required files. Local validation: 323 tests passed, one expected
 platform skip, no failures. Build, Biome, installed-package, submission and
 whitespace checks passed. The current commit's CI is tracked on PR #33.
+
+
+## Independent activation source selection (2026-09-07)
+
+`--env-file` selects the reported private environment without overriding discovery
+of the sole `TAMA_MCP_APP_MODE` assignment. Additive setups can select core secrets
+and still activate through their separate MCP fragment. Duplicate assignments and
+inline shadowing continue to require manual edits.
+
+Regression coverage verifies activation preview, isolated mode writes and recovery,
+core/provider-file preservation, duplicate sources and inline shadowing. Local
+validation: 324 tests passed, one expected platform skip, no failures. Build,
+Biome, installed-package, submission and whitespace checks passed.
+
+The previous CI failure was a GitHub 504 fetching Terraform provider checksums;
+its retry passed the previously failing bootstrap/Compose/Terraform runtime step.
+The latest commit's complete CI results remain tracked on PR #33.
+
+No extra Compose 2.24.4 gate was added for HTTP `!reset`: Compose 2.20.0 uses
+compose-go 1.16.0, whose reset processor already handles that tag. The documented
+2.24.4 requirement applies to `!override`, used by the existing HTTPS path.

@@ -209,7 +209,8 @@ export function inspectCurrentConfiguration(
     throw ownershipError("--env-file is not loaded by the selected Tama service");
   const modeFiles = [...envFiles].filter(([, env]) => env.has("TAMA_MCP_APP_MODE"));
   const inline = declarations.services[serviceName]?.environment ?? {};
-  const modeFile = selectedEnvironment ?? (modeFiles.length === 1 ? modeFiles[0][0] : undefined);
+  // Private-environment selection does not select the activation assignment.
+  const modeFile = modeFiles.length === 1 ? modeFiles[0][0] : undefined;
   // Only an unshadowed, single declared source is eligible for automatic activation edits.
   const modeSource =
     modeFile &&
