@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { rootCertificates } from "node:tls";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { prepareLocalTestCa } from "./lib/local-test-ca.mjs";
@@ -70,7 +71,7 @@ function bootstrap(...args) {
 
 async function startProvider() {
   const values = parseEnv(readFileSync(fragment, "utf8"));
-  // Trust the fixture CA inside this provider VM before its HTTP clients start.
+  // Trust public roots and the fixture CA inside this provider VM before its HTTP clients start.
   // Host certificate stores and the pinned provider source stay unchanged.
   const start =
     ':ok = :public_key.cacerts_load(String.to_charlist(System.fetch_env!("TAMA_TEST_CA_CERT"))); Mix.Task.run("app.start")';
@@ -81,7 +82,7 @@ async function startProvider() {
       ...values,
       MIX_ENV: "dev",
       PHX_SERVER: "true",
-      TAMA_TEST_CA_CERT: join(caRoot, "rootCA.pem"),
+      TAMA_TEST_CA_CERT: join(temporary, "provider-ca-bundle.pem"),
       DATABASE_HOST: "127.0.0.1",
       DATABASE_PORT: "5432",
     },
@@ -123,6 +124,10 @@ try {
   execute("mix", ["ecto.setup"]);
 
   caRoot = prepareLocalTestCa(temporary);
+  writeFileSync(
+    join(temporary, "provider-ca-bundle.pem"),
+    `${rootCertificates.join("\n")}\n${readFileSync(join(caRoot, "rootCA.pem"), "utf8")}`,
+  );
   bootstrap();
   provider = await startProvider();
   const prepared = bootstrap("--start");

@@ -405,3 +405,18 @@ test("legacy Compose fallback diagnoses unresolved env_file interpolation withou
   );
   assert.deepEqual(snapshot(root), before);
 });
+
+test("current inspection and activation validate absolute secret paths inside a Git worktree", async () => {
+  const { root } = mcp();
+  execFileSync("git", ["init", "--quiet", root]);
+  const plan = inspectCurrentConfiguration({ cwd: root });
+  const change = planTamaModeChange(plan);
+  await applyOperationsTransactionally([change.operation], () => {});
+  await applyOperationsTransactionally([change.restore()], () => {});
+  execFileSync("git", ["-C", root, "add", "--force", "tama/.tama.env"]);
+  assert.throws(() => inspectCurrentConfiguration({ cwd: root }), /tracked by Git/);
+  execFileSync("git", ["-C", root, "rm", "--cached", "--force", "tama/.tama.env"]);
+  const ignore = join(root, "tama/.gitignore");
+  writeFileSync(ignore, `${readFileSync(ignore, "utf8")}\n!.tama.env\n`);
+  assert.throws(() => inspectCurrentConfiguration({ cwd: root }), /not effectively ignored/);
+});
