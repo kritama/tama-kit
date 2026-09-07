@@ -200,6 +200,37 @@ test("MCP inspection reads current bindings; activation and recovery preserve ke
   assert.equal(existsSync(join(root, "tama/.tama-kit.json")), false);
 });
 
+test("disabled MCP integrations still validate current provider configuration", async () => {
+  const { root, plan } = mcp();
+  const environmentPath = join(root, "tama/.tama.env");
+  writeFileSync(
+    environmentPath,
+    readFileSync(environmentPath, "utf8").replace(
+      "TAMA_MCP_APP_MODE=prepared",
+      "TAMA_MCP_APP_MODE=disabled",
+    ),
+  );
+  assert.equal(inspectCurrentConfiguration({ cwd: root }).mcpApp.lifecycle, "disabled");
+  const providerPath = join(root, plan.mcpApp.provider.environmentFile);
+  writeFileSync(providerPath, "# missing provider keys and bindings\n");
+  const before = snapshot(root);
+  for (const args of [["doctor"], ["setup", "--dry-run"]]) {
+    const response = await command(root, ...args, "--json");
+    assert.equal(response.code, 4, JSON.stringify(response.result));
+    assert.deepEqual(snapshot(root), before);
+  }
+});
+
+test("the default MCP contract requires validation even without an effective mode", async () => {
+  const { root } = mcp();
+  const path = join(root, "tama/.tama.env");
+  writeFileSync(path, readFileSync(path, "utf8").replace(/^TAMA_MCP_APP_MODE=.*\n/mu, ""));
+  const before = snapshot(root);
+  const response = await command(root, "doctor", "--json");
+  assert.equal(response.code, 4, JSON.stringify(response.result));
+  assert.deepEqual(snapshot(root), before);
+});
+
 test("a concurrent mode edit blocks recovery without overwriting developer configuration", async () => {
   const { root } = mcp();
   const plan = inspectCurrentConfiguration({ cwd: root });
@@ -270,6 +301,36 @@ test("unfinished generation requires its operation ID and resumes only pending d
   );
   assert.equal(JSON.parse(readFileSync(path, "utf8")).progress.status, "complete");
 });
+
+for (const [flag, value, pending] of [
+  ["--port", "4567", ["tama/compose.yaml", "tama/.tama.env.example", "tama/README.md"]],
+  ["--image", "ghcr.io/upmaru/tama:99.0.0-server", ["tama/README.md"]],
+]) {
+  test(`resume rejects changed ${flag} without writing pending files or completing its receipt`, async () => {
+    const root = standard();
+    const path = join(root, "tama/.tama-kit.json");
+    const receipt = JSON.parse(readFileSync(path, "utf8"));
+    receipt.progress = { status: "incomplete", pendingDestinations: pending };
+    writeFileSync(path, JSON.stringify(receipt));
+    for (const destination of pending) unlinkSync(join(root, destination));
+    const before = snapshot(root);
+    const response = await command(
+      root,
+      "bootstrap",
+      "--resume",
+      receipt.operation.id,
+      flag,
+      value,
+      "--json",
+    );
+    assert.equal(response.code, 4, JSON.stringify(response.result));
+    assert.match(response.result.error.message, /original generation options/);
+    assert.deepEqual(snapshot(root), before);
+    const resumed = await command(root, "bootstrap", "--resume", receipt.operation.id, "--json");
+    assert.equal(resumed.code, 0, JSON.stringify(resumed.result));
+    assert.equal(JSON.parse(readFileSync(path, "utf8")).progress.status, "complete");
+  });
+}
 
 test("bootstrap compatibility setup dry-run cannot start services or edit activation mode", async () => {
   const root = standard();

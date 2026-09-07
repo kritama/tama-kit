@@ -125,7 +125,7 @@ test("conflicts, unsupported actions, and shadowed environment fail before writi
     "--dry-run",
   );
   assert.notEqual(result.code, 0);
-  assert.match(result.result.error.message, /shadows/);
+  assert.match(result.result.error.message, /requires its current local contract/);
   assert.deepEqual(snapshot(root), shadowed);
 });
 

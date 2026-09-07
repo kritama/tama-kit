@@ -1,9 +1,7 @@
 // @ts-check
 
-import { readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { ownershipError, usageError } from "../errors.mjs";
-import { contentDigest } from "../shared/files.mjs";
 import { planRootCompose } from "./compose.mjs";
 import { formatComposePsCommand, formatComposeUpCommand } from "./compose-command.mjs";
 import { BOOTSTRAP_PATHS, BOOTSTRAP_SCHEMA_VERSION, DEFAULTS } from "./constants.mjs";
@@ -329,29 +327,35 @@ export function createBootstrapPlan(options) {
   operations.push(...terraform.operations);
   const projectComposePath = relative(inspection.root, inspection.selectedCompose);
   operations.push(
-    generatedTemplate(ownedFiles.plan, join(inspection.tamaDirectory, "README.md"), "README.md", {
-      PORT: environment.port,
-      TAMA_PUBLIC_URL: mcpAppDoc?.localHttps?.healthUrl ?? `http://localhost:${environment.port}/`,
-      COMPOSE_UP_COMMAND: formatComposeUpCommand(
-        projectComposePath,
-        mcpAppDoc?.localHttps ? "caddy" : "tama",
-        Boolean(mcpAppDoc?.localHttps),
-      ),
-      COMPOSE_PS_COMMAND: formatComposePsCommand(projectComposePath),
-      MCP_APP_GUIDANCE: mcpAppReadmeGuidance(mcpAppDoc),
-      SETUP_CHECKLIST,
-    }),
+    generatedTemplate(
+      ownedFiles.documentation,
+      join(inspection.tamaDirectory, "README.md"),
+      "README.md",
+      {
+        PORT: environment.port,
+        TAMA_PUBLIC_URL:
+          mcpAppDoc?.localHttps?.healthUrl ?? `http://localhost:${environment.port}/`,
+        COMPOSE_UP_COMMAND: formatComposeUpCommand(
+          projectComposePath,
+          mcpAppDoc?.localHttps ? "caddy" : "tama",
+          Boolean(mcpAppDoc?.localHttps),
+        ),
+        COMPOSE_PS_COMMAND: formatComposePsCommand(projectComposePath),
+        MCP_APP_GUIDANCE: mcpAppReadmeGuidance(mcpAppDoc),
+        SETUP_CHECKLIST,
+      },
+    ),
   );
   operations.push(
     generatedTemplate(
-      ownedFiles.plan,
+      ownedFiles.documentation,
       join(inspection.tamaDirectory, "AGENTS.md"),
       "AGENTS.md",
       {},
     ),
   );
   if (skillMode === "local") {
-    operations.push(...planAgentSkills(inspection.root, ownedFiles.plan));
+    operations.push(...planAgentSkills(inspection.root, ownedFiles.documentation));
   }
   operations.push(ownedFiles.receiptOperation());
   if (options.resumePending) {
@@ -366,16 +370,10 @@ export function createBootstrapPlan(options) {
           { path },
         );
       if (operation.action === "update" && operation.owner !== "user") {
-        const content = readFileSync(operation.path, "utf8");
-        operations[index] = {
-          action: "unchanged",
-          path: operation.path,
-          owner: "user",
-          sensitive: operation.sensitive,
-          beforeDigest: contentDigest(content),
-          afterDigest: contentDigest(content),
-          reason: "resume preserves existing output",
-        };
+        throw ownershipError(
+          "resume configuration disagrees with existing output; use the original generation options. No files were written",
+          { path },
+        );
       }
     }
     for (const path of pending)

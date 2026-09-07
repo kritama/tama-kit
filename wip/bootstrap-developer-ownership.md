@@ -467,4 +467,27 @@ runtime, credentials, Terraform state or volumes were changed.
 
 Local cleanup validation: 312 tests passed, one expected POSIX secondary-group
 skip, no failures. TypeScript build, Biome, submission validation, installed-package
-validation and whitespace checks passed. CI for the cleanup is pending.
+validation and whitespace checks passed. All six cleanup CI jobs passed at
+`1f7bb72` in [run 34089393205](https://github.com/kritama/tama-kit/actions/runs/34089393205).
+
+
+## Review corrections (2026-09-07)
+
+Current-configuration inspection recognizes every declared MCP App mode,
+including disabled, and the default local contract. Disabled integrations cannot
+bypass provider bindings, key, origin or topology validation. Additive generation
+inspects the original standard runtime separately from its pending contract and
+validates the complete MCP composition before committing output.
+
+Interrupted generation compares preserved runtime configuration with the resumed
+plan. Changed options that disagree with existing files fail before pending files
+are written or the receipt is completed. Documentation and copied skills remain
+preserved; private additive environments preserve formatting and validated overlap
+keys only after expected values agree. Final effective environment checks also
+apply to resumed additions.
+
+Local validation: 316 tests passed, one expected platform skip, no failures;
+TypeScript build, Biome, submission, installed-package and whitespace checks passed.
+Regression tests cover disabled and missing-mode contracts, changed port/image
+resumes, unchanged failed-resume snapshots, and successful original-option recovery.
+The review-fix commit's runtime checks are tracked on PR #33.

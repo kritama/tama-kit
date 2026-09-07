@@ -217,8 +217,9 @@ export function inspectCurrentConfiguration(
     options.contractPath ?? "tama/contracts/mcp-app-provider-v1.json",
   );
   const hasMcp =
-    ["prepared", "enabled"].includes(values.get("TAMA_MCP_APP_MODE") ?? "") ||
-    options.contractPath !== undefined;
+    values.has("TAMA_MCP_APP_MODE") ||
+    options.contractPath !== undefined ||
+    (options.discoverMcpContract !== false && existsSync(contractPath));
   const plan: RuntimePlan = {
     schemaVersion: 1,
     root,

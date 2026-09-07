@@ -110,7 +110,10 @@ export async function runGenerate(argv: string[], io: CommandIO): Promise<ExitCo
     if (initial.kind === "receipt" && initial.receipt.progress.status === "incomplete")
       throw ownershipError("finish the unfinished bootstrap operation before adding MCP App");
     // Current configuration, rather than an old manifest inventory, establishes the project.
-    const current = inspectCurrentConfiguration(options.selection);
+    const current = inspectCurrentConfiguration({
+      ...options.selection,
+      discoverMcpContract: false,
+    });
     if (
       current.mcpApp ||
       (progress.status === "new" && inspectRegularFile(join(root, MCP_ADDITION.contract)))
@@ -164,7 +167,10 @@ export async function runGenerate(argv: string[], io: CommandIO): Promise<ExitCo
       if (!(await questions(io).confirm("Write these MCP App additions?")))
         throw new CancelledInput();
     }
-    const refreshed = inspectCurrentConfiguration(options.selection);
+    const refreshed = inspectCurrentConfiguration({
+      ...options.selection,
+      discoverMcpContract: false,
+    });
     const freshPrepared = await prepareMcpApp({
       root,
       tamaDirectory: join(root, "tama"),

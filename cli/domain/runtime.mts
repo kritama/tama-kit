@@ -23,6 +23,8 @@ export type InspectOptions = {
   contractPath?: string;
   providerService?: string;
   caFile?: string;
+  /** Internal additive-generation baseline: pending contracts are validated by its writer. */
+  discoverMcpContract?: boolean;
 };
 
 export type RuntimePlan = BootstrapPlan & { runtime: RuntimeSelection };
