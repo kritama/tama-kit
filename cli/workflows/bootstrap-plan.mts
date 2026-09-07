@@ -24,7 +24,6 @@ export function planBootstrap(
   const requested = mcpAppPrepared ? mcpAppOptions(options) : undefined;
   const input = {
     cwd,
-    developerOwned: true,
     resumePending: options.resumePending,
     generationId: materializeSecrets ? options.generationId : "pending-bootstrap-operation",
     targetPath: options.targetPath,
@@ -37,7 +36,7 @@ export function planBootstrap(
   };
   return createPlan({
     ...input,
-    mcpApp: requested ? { ...requested, activate: false, targetMode: "prepared" } : undefined,
+    mcpApp: requested,
   });
 }
 

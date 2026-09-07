@@ -127,7 +127,6 @@ export async function runGenerate(argv: string[], io: CommandIO): Promise<ExitCo
       framework: current.framework,
       options: mcpAppOptions(options),
       nonInteractive: !interactive,
-      ignoreGenerationHistory: true,
       io,
     });
     const build = (materialize: boolean) =>
@@ -172,7 +171,6 @@ export async function runGenerate(argv: string[], io: CommandIO): Promise<ExitCo
       framework: refreshed.framework,
       options: mcpAppOptions(options),
       nonInteractive: true,
-      ignoreGenerationHistory: true,
       io,
     });
     const fresh = planMcpAppAddition(refreshed, options, freshPrepared, progress, false);

@@ -121,12 +121,11 @@ export function resolveLocalHttpsTopology(input = {}) {
 }
 
 /**
- * Fresh MCP App runs use local HTTPS unless an explicit old topology input is
- * supplied. This keeps 0.4.3 projects migratable without making the legacy
- * transport the default again.
+ * Fresh MCP App runs default to local HTTPS. Explicit HTTP origins or a
+ * provider contract can select the supported HTTP transport.
  */
-/** @param {import("../types.mjs").McpAppBootstrapOptions | null | undefined} options @param {import("../types.mjs").PersistedMcpAppProvider | null} [persisted] @param {McpAppContract | null} [contractDocument] */
-export function usesLocalHttpsTopology(options, persisted = null, contractDocument = null) {
+/** @param {import("../types.mjs").McpAppBootstrapOptions | null | undefined} options @param {McpAppContract | null} [contractDocument] */
+export function usesLocalHttpsTopology(options, contractDocument = null) {
   const explicitlyLegacyClient = [
     ...(options?.allowedOrigins ?? []),
     options?.providerOrigin,
@@ -140,10 +139,7 @@ export function usesLocalHttpsTopology(options, persisted = null, contractDocume
   const explicitlyLegacyContract = contractOrigins.some((origin) =>
     /** @type {string} */ (origin).startsWith("http://"),
   );
-  if (persisted?.localHttps) return true;
-  if (options?.migrateLocalHttps) return true;
-  if (options?.localDomain && !persisted?.providerOrigin) return true;
-  if (persisted?.providerOrigin) return false;
+  if (options?.localDomain) return true;
   return !explicitlyLegacyClient && !explicitlyLegacyContract;
 }
 

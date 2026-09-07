@@ -131,7 +131,7 @@ export type ProviderIdentity = {
   name: string;
   environmentPrefix: string;
   environmentFile: string;
-  source: "manifest" | "contract" | "flags" | "framework" | "git" | "directory";
+  source: "contract" | "flags" | "framework" | "git" | "directory";
 };
 
 export type ProviderBindings = {
@@ -139,22 +139,18 @@ export type ProviderBindings = {
   source: "contract" | "conventional";
 };
 
-export type PersistedMcpAppProvider = {
+export type ResolvedMcpAppProvider = {
   identity: ProviderIdentity;
   contractSource: "contract" | "conventional";
   contractPath: string | null;
   bindings: Record<string, string>;
   environmentLoading: "verified" | "unverified";
-  environmentLoadingMechanism?: "direnv" | "compose-env-file" | null;
-  environmentLoadingEvidencePath?: string | null;
   providerOrigin?: string;
   tamaOrigin?: string;
   allowedOrigins?: string[];
   localHttps?: LocalHttpsTopology | null;
   tamaImage?: string;
-};
 
-export type ResolvedMcpAppProvider = PersistedMcpAppProvider & {
   localContract: McpAppLocalContract;
   bindingSource: "contract" | "conventional";
   environmentLoadingMechanism: "direnv" | "compose-env-file" | null;
@@ -175,16 +171,9 @@ export type McpAppBootstrapOptions = {
   providerPort?: number;
   providerRuntime?: "host" | "compose";
   providerService?: string;
-  migrateProviderTopology?: boolean;
   httpsPort?: number;
   installLocalCa?: boolean;
-  migrateLocalHttps?: boolean;
   localHttps?: LocalHttpsTopology | null;
-  activate: boolean;
-  targetMode?: McpAppMode;
-  providerMode?: McpAppMode;
-  preserveEnabledProvider?: boolean;
-  migrateProviderIdentity?: boolean;
   identitySource?: ProviderIdentity["source"];
 };
 
@@ -206,7 +195,6 @@ export type McpAppEnvironmentValidation = {
 
 export type McpAppPrepared = {
   identity: ProviderIdentity;
-  persisted: PersistedMcpAppProvider | null;
   contractPath: string | null;
   contractDocument: McpAppContract | null;
   allowedOrigins: string[];
@@ -219,7 +207,6 @@ export type FrameworkDetection = {
 };
 
 export type BootstrapPlanOptions = {
-  developerOwned?: boolean;
   generationId?: string;
   resumePending?: string[];
   resumeId?: string;
@@ -432,7 +419,6 @@ export type ExitCode = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 export type CLIErrorDetails = Record<string, unknown>;
 
 export type BootstrapCommandOptions = {
-  developerOwned?: boolean;
   generationId?: string;
   resumePending?: string[];
   resumeId?: string;

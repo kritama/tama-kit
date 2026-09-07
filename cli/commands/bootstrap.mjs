@@ -6,7 +6,6 @@ import { formatAgentSetupPrompt } from "../bootstrap/agent-prompt.mjs";
 import { discoverProject, inspectProject } from "../bootstrap/detect-project.mjs";
 import { readSetupUrl } from "../bootstrap/environment.mjs";
 import { readGenerationEvidence } from "../bootstrap/generation-receipt.mjs";
-import { readAgentSkillMode, readBootstrapSettings } from "../bootstrap/manifest.mjs";
 import { prepareMcpApp } from "../bootstrap/mcp-app.mjs";
 import { setupProgress } from "../bootstrap/setup-progress.mjs";
 import { CLIError, EXIT_CODES, usageError } from "../errors.mjs";
@@ -31,51 +30,6 @@ import { runSetup } from "./setup.mjs";
 /** @typedef {import("../types.mjs").ExitCode} ExitCode */
 /** @typedef {import("../types.mjs").McpAppPrepared} McpAppPrepared */
 
-/**
- * @param {BootstrapCommandOptions} options
- * @param {CommandIO} io
- * @param {string} tamaDirectory
- * @returns {Promise<import("../types.mjs").AgentSkillMode>}
- */
-async function selectSkillMode(options, io, tamaDirectory) {
-  const recorded = readAgentSkillMode(tamaDirectory);
-  if (recorded === "local") {
-    if (options.skillMode === "manual") {
-      throw usageError(
-        "repository-local Tama Kit skills are already managed; --skills manual does not uninstall them",
-      );
-    }
-    return "local";
-  }
-  if (options.skillMode) {
-    return options.skillMode;
-  }
-  if (recorded) {
-    return recorded;
-  }
-  if (options.json || !io.interactive || !io.prompt) {
-    return "manual";
-  }
-
-  while (true) {
-    const answer = (
-      await io.prompt(
-        "Install Tama Kit's agent skills in this repository? " +
-          "Choose no to install them yourself later. [Y/n] ",
-      )
-    )
-      .trim()
-      .toLowerCase();
-    if (answer === "" || answer === "y" || answer === "yes") {
-      return "local";
-    }
-    if (answer === "n" || answer === "no") {
-      return "manual";
-    }
-    io.stderr("Please answer yes or no.");
-  }
-}
-
 /** @param {string[]} argv @param {CommandIO} io @returns {Promise<ExitCode>} */
 async function executeBootstrap(argv, io) {
   let options = parseBootstrap(argv);
@@ -87,7 +41,6 @@ async function executeBootstrap(argv, io) {
   const initialRoot = discoverProject({ cwd: io.cwd, targetPath: options.targetPath }).root;
   const existing = await runExistingBootstrap(options, io, initialRoot);
   if (existing !== null) return existing;
-  options.developerOwned = true;
   options.generationId ??= randomUUID();
 
   const interactive = Boolean(
@@ -104,18 +57,12 @@ async function executeBootstrap(argv, io) {
     throw usageError("selected project state changed; rerun bootstrap to review it");
   }
   if (guided) options = guided.options;
-  const root = discoverProject({ cwd: io.cwd, targetPath: options.targetPath }).root;
-  options.composePath ??= readBootstrapSettings(join(root, "tama"))?.composeFile;
   const inspection = inspectProject({
     cwd: io.cwd,
     targetPath: options.targetPath,
     composePath: options.composePath,
   });
-  const skillMode = await selectSkillMode(
-    options,
-    { ...io, interactive: false },
-    inspection.tamaDirectory,
-  );
+  const skillMode = options.skillMode ?? "manual";
   /** @type {McpAppPrepared | null} */
   let mcpAppPrepared = null;
   if (options.mcpApp) {

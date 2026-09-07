@@ -182,6 +182,14 @@ export function parseBootstrap(argv) {
       "provider topology migration must complete in prepared mode before activation",
     );
   }
+  if (
+    parsed.values["migrate-local-https"] ||
+    parsed.values["migrate-provider-identity"] ||
+    parsed.values["migrate-provider-topology"]
+  )
+    throw usageError(
+      "bootstrap migration flags are retired; edit current configuration and use setup or doctor",
+    );
   return {
     resumeId: parsed.values.resume,
     targetPath: parsed.positionals[0],

@@ -9,7 +9,6 @@ import {
   readFileSync,
   statSync,
   symlinkSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -22,7 +21,6 @@ import { readSetupUrl } from "../../cli/bootstrap/environment.mjs";
 import { createBootstrapPlan } from "../../cli/bootstrap/plan.mjs";
 import { CLIError, EXIT_CODES } from "../../cli/errors.mjs";
 import { run } from "../../cli/index.mjs";
-import { contentDigest } from "../../cli/shared/files.mjs";
 import { applyOperations, applyOperationsTransactionally } from "../../cli/shared/write.mjs";
 import { temporaryDirectory } from "../helpers/temporary.mjs";
 
@@ -148,19 +146,9 @@ test("bootstrap installs complete repository-local agent skills when selected", 
   );
 
   const manifest = JSON.parse(readFileSync(join(root, "tama", ".tama-kit.json"), "utf8"));
-  assert.equal(manifest.agentSkills, "local");
-  assert.match(
-    manifest.managedFiles[".agents/skills/graph-builder/SKILL.md"],
-    /^sha256:[0-9a-f]{64}$/u,
-  );
-  assert.match(
-    manifest.managedFiles[".agents/skills/app-integration/SKILL.md"],
-    /^sha256:[0-9a-f]{64}$/u,
-  );
-  assert.match(
-    manifest.managedFiles[".agents/skills/tama-kit-cli/SKILL.md"],
-    /^sha256:[0-9a-f]{64}$/u,
-  );
+  assert.equal(manifest.schemaVersion, 2);
+  assert.equal(manifest.managedFiles, undefined);
+  assert.equal(manifest.agentSkills, undefined);
 
   const second = planFor(root, { skillMode: "local" });
   assert.ok(second.operations.every((operation) => operation.action === "unchanged"));
@@ -184,7 +172,7 @@ for (const skillAncestor of [
       (error) =>
         error instanceof CLIError &&
         error.exitCode === EXIT_CODES.OWNERSHIP &&
-        /symbolic-link directory/u.test(error.message),
+        /regular file with real directory ancestors/u.test(error.message),
     );
     assert.equal(readFileSync(join(external, "canary"), "utf8"), "do not modify\n");
     assert.equal(existsSync(join(external, "SKILL.md")), false);
@@ -326,131 +314,6 @@ test("agent setup prompt covers runtime, private setup, Terraform validation, an
   assert.match(prompt, /terraform -chdir=tama validate/u);
   assert.match(prompt, /terraform -chdir=tama plan/u);
   assert.match(prompt, /Do not run terraform apply until I explicitly approve/u);
-});
-
-test("bootstrap rejects user drift in a managed template", () => {
-  const root = project();
-  applyOperations(planFor(root).operations);
-  const readme = join(root, "tama", "README.md");
-  writeFileSync(readme, `${readFileSync(readme, "utf8")}\nUser-maintained note.\n`);
-
-  assert.throws(
-    () => planFor(root),
-    (error) =>
-      error instanceof CLIError &&
-      error.exitCode === EXIT_CODES.OWNERSHIP &&
-      /user-modified content/u.test(error.message),
-  );
-  assert.match(readFileSync(readme, "utf8"), /User-maintained note/u);
-});
-
-test("bootstrap rejects a missing file recorded in the managed manifest", () => {
-  const root = project();
-  applyOperations(planFor(root).operations);
-  const readme = join(root, "tama", "README.md");
-  unlinkSync(readme);
-
-  assert.throws(
-    () => planFor(root),
-    (error) =>
-      error instanceof CLIError &&
-      error.exitCode === EXIT_CODES.OWNERSHIP &&
-      /managed file recorded by Tama Kit is missing/u.test(error.message),
-  );
-  assert.equal(existsSync(readme), false);
-});
-
-test("bootstrap rejects drift in a recorded managed Terraform foundation", () => {
-  const root = project();
-  applyOperations(planFor(root).operations);
-  const foundation = join(root, "tama", "main.tf");
-  writeFileSync(
-    foundation,
-    readFileSync(foundation, "utf8").replace('version = "0.5.6"', 'version = "0.5.5"'),
-  );
-
-  assert.throws(
-    () => planFor(root),
-    (error) =>
-      error instanceof CLIError &&
-      error.exitCode === EXIT_CODES.OWNERSHIP &&
-      /user-modified content/u.test(error.message),
-  );
-});
-
-test("bootstrap adopts marked Terraform files when migrating to the digest manifest", () => {
-  const root = project();
-  applyOperations(planFor(root).operations);
-  const manifest = join(root, "tama", ".tama-kit.json");
-  unlinkSync(manifest);
-
-  applyOperations(planFor(root).operations);
-  const payload = JSON.parse(readFileSync(manifest, "utf8"));
-  assert.match(payload.managedFiles["tama/main.tf"], /^sha256:[0-9a-f]{64}$/u);
-  assert.match(payload.managedFiles["tama/versions.tf"], /^sha256:[0-9a-f]{64}$/u);
-});
-
-test("bootstrap refuses to adopt an edited marked Terraform file without a manifest", () => {
-  const root = project();
-  applyOperations(planFor(root).operations);
-  const manifest = join(root, "tama", ".tama-kit.json");
-  const foundation = join(root, "tama", "main.tf");
-  unlinkSync(manifest);
-  writeFileSync(
-    foundation,
-    `${readFileSync(foundation, "utf8")}\nresource "tama_space" "custom" {}\n`,
-  );
-
-  assert.throws(
-    () => planFor(root),
-    (error) =>
-      error instanceof CLIError &&
-      error.exitCode === EXIT_CODES.OWNERSHIP &&
-      /cannot establish ownership of marked legacy Terraform file/u.test(error.message),
-  );
-  assert.match(readFileSync(foundation, "utf8"), /tama_space" "custom/u);
-});
-
-test("bootstrap upgrades previously generated Terraform templates", () => {
-  const root = project();
-  applyOperations(planFor(root).operations);
-  const foundation = join(root, "tama", "main.tf");
-  const versions = join(root, "tama", "versions.tf");
-  const manifest = join(root, "tama", ".tama-kit.json");
-  const oldFoundation = readFileSync(foundation, "utf8").replace(
-    'version = "0.5.6"',
-    'version = "0.5.5"',
-  );
-  const oldVersions = readFileSync(versions, "utf8").replace(
-    'version = "~> 0.6.3"',
-    'version = "~> 0.6.2"',
-  );
-  writeFileSync(foundation, oldFoundation);
-  writeFileSync(versions, oldVersions);
-  const manifestPayload = JSON.parse(readFileSync(manifest, "utf8"));
-  manifestPayload.managedFiles["tama/main.tf"] = contentDigest(oldFoundation);
-  manifestPayload.managedFiles["tama/versions.tf"] = contentDigest(oldVersions);
-  writeFileSync(manifest, `${JSON.stringify(manifestPayload, null, 2)}\n`);
-
-  const upgrade = planFor(root);
-  const terraformChanges = upgrade.operations.filter(
-    (operation) => operation.path === foundation || operation.path === versions,
-  );
-
-  assert.equal(upgrade.terraform.foundation, "preserved");
-  assert.equal(upgrade.terraform.globalModuleVersion, "0.5.6");
-  assert.equal(upgrade.terraform.providerVersion, "~> 0.6.3");
-  assert.deepEqual(
-    terraformChanges.map((operation) => [operation.path, operation.action]),
-    [
-      [foundation, "update"],
-      [versions, "update"],
-    ],
-  );
-
-  applyOperations(upgrade.operations);
-  assert.match(readFileSync(foundation, "utf8"), /version = "0\.5\.6"/u);
-  assert.match(readFileSync(versions, "utf8"), /version = "~> 0\.6\.3"/u);
 });
 
 test("bootstrap reruns preserve permissions and doctor diagnoses unsafe private files", async () => {
@@ -929,21 +792,15 @@ test("bootstrap adds a separate managed foundation to a safe existing Terraform 
 
   applyOperations(plan.operations);
   const foundation = join(root, "tama", "tama-kit-global.tf");
-  const manifest = join(root, "tama", ".tama-kit.json");
-  const oldFoundation = readFileSync(foundation, "utf8").replace(
-    'version = "0.5.6"',
-    'version = "0.5.5"',
+  const edited = readFileSync(foundation, "utf8").replace('version = "0.5.6"', 'version = "0.5.5"');
+  writeFileSync(foundation, edited);
+  const next = planFor(root);
+  assert.equal(next.terraform.globalModuleVersion, "0.5.5");
+  assert.equal(
+    next.operations.some((operation) => operation.path === foundation),
+    false,
   );
-  writeFileSync(foundation, oldFoundation);
-  const manifestPayload = JSON.parse(readFileSync(manifest, "utf8"));
-  manifestPayload.managedFiles["tama/tama-kit-global.tf"] = contentDigest(oldFoundation);
-  writeFileSync(manifest, `${JSON.stringify(manifestPayload, null, 2)}\n`);
-
-  const upgrade = planFor(root);
-  const foundationUpgrade = upgrade.operations.find((item) => item.path === foundation);
-  assert.equal(foundationUpgrade.action, "update");
-  assert.match(foundationUpgrade.content, /version = "0\.5\.6"/u);
-  assert.doesNotMatch(foundationUpgrade.content, /provider "tama"/u);
+  assert.equal(readFileSync(foundation, "utf8"), edited);
 });
 
 test("bootstrap still fails closed when existing Tama resources have unknown ownership", () => {
@@ -996,42 +853,6 @@ test("JSON failures use the stable error envelope", async () => {
   assert.equal(payload.ok, false);
   assert.equal(payload.error.category, "ambiguity");
   assert.equal(payload.error.exitCode, EXIT_CODES.AMBIGUITY);
-});
-
-test("an explicit port updates public local URLs without rotating secrets", () => {
-  const root = project();
-  const first = planFor(root);
-  applyOperations(first.operations);
-  const before = readFileSync(join(root, "tama", ".tama.env"), "utf8");
-  const setupToken = before.match(/^TAMA_SETUP_TOKEN=(.+)$/mu)[1];
-
-  const second = planFor(root, { port: 4567 });
-  applyOperations(second.operations);
-  const after = readFileSync(join(root, "tama", ".tama.env"), "utf8");
-  assert.match(after, /^TAMA_PORT=4567$/mu);
-  assert.match(after, /^TAMA_BASE_URL=http:\/\/localhost:4567$/mu);
-  assert.match(after, new RegExp(`^TAMA_SETUP_TOKEN=${setupToken}$`, "mu"));
-  assert.match(readFileSync(join(root, "tama", "compose.yaml"), "utf8"), /"4567:4000"/u);
-});
-
-test("an explicit port preserves additional MCP allowed origins", () => {
-  const root = project();
-  applyOperations(planFor(root).operations);
-  const filename = join(root, "tama", ".tama.env");
-  writeFileSync(
-    filename,
-    readFileSync(filename, "utf8").replace(
-      /^TAMA_MCP_ALLOWED_ORIGINS=http:\/\/localhost:4000$/mu,
-      "TAMA_MCP_ALLOWED_ORIGINS=http://localhost:4000,https://app.example",
-    ),
-  );
-
-  applyOperations(planFor(root, { port: 4567 }).operations);
-
-  assert.match(
-    readFileSync(filename, "utf8"),
-    /^TAMA_MCP_ALLOWED_ORIGINS=http:\/\/localhost:4567,https:\/\/app\.example$/mu,
-  );
 });
 
 test("bootstrap rejects an invalid persisted port instead of silently changing it", () => {
@@ -1100,7 +921,7 @@ test("bootstrap generates an asymmetric System OAuth signing key", () => {
   }
 });
 
-test("bootstrap preserves the OAuth private JWK across reruns, ports, and skill modes", () => {
+test("bootstrap refuses a port upgrade while preserving existing OAuth keys", () => {
   const root = project();
   applyOperations(planFor(root).operations);
   const filename = join(root, "tama", ".tama.env");
@@ -1111,7 +932,10 @@ test("bootstrap preserves the OAuth private JWK across reruns, ports, and skill 
   applyOperations(planFor(root, { skillMode: "local" }).operations);
   assert.equal(readFileSync(filename, "utf8"), before);
 
-  applyOperations(planFor(root, { port: 4567, skillMode: "local" }).operations);
+  assert.throws(
+    () => planFor(root, { port: 4567, skillMode: "local" }),
+    /different project-owned content/,
+  );
   const after = readFileSync(filename, "utf8");
   assert.deepEqual(oauthJwkLines(after), beforePair);
   assert.ok(after.includes(jwtSecret));
@@ -1139,28 +963,27 @@ test("bootstrap dry-run output never contains the OAuth private JWK", async () =
   }
 });
 
-test("bootstrap fails closed for an unmanaged environment without the private JWK pair", () => {
-  const root = project();
-  applyOperations(planFor(root).operations);
-  const filename = join(root, "tama", ".tama.env");
-  writeFileSync(
-    filename,
-    readFileSync(filename, "utf8")
-      .replace(/^# Generated by Tama Kit.*$/mu, "# User-managed environment")
+for (const marker of ["# Generated by Tama Kit", "# User-managed environment"]) {
+  test(`bootstrap refuses retired OAuth keys regardless of ownership marker: ${marker}`, () => {
+    const root = project();
+    applyOperations(planFor(root).operations);
+    const filename = join(root, "tama", ".tama.env");
+    const original = readFileSync(filename, "utf8")
+      .replace(/^# Generated by Tama Kit.*$/mu, marker)
       .replace(/^TAMA_OAUTH_PRIVATE_JWK=.*$/mu, "TAMA_OAUTH_SIGNING_KEY=legacy-symmetric-secret")
-      .replace(/^TAMA_OAUTH_PRIVATE_JWK_ID=.*$/mu, "TAMA_OAUTH_SIGNING_KEY_ID=oauth-local-1"),
-  );
-
-  assert.throws(
-    () => planFor(root),
-    (error) =>
-      error instanceof CLIError &&
-      error.exitCode === EXIT_CODES.OWNERSHIP &&
-      error.message.includes("TAMA_OAUTH_PRIVATE_JWK") &&
-      error.message.includes("TAMA_OAUTH_PRIVATE_JWK_ID"),
-  );
-  assert.equal(readFileSync(filename, "utf8").includes("legacy-symmetric-secret"), true);
-});
+      .replace(/^TAMA_OAUTH_PRIVATE_JWK_ID=.*$/mu, "TAMA_OAUTH_SIGNING_KEY_ID=oauth-local-1");
+    writeFileSync(filename, original);
+    assert.throws(
+      () => planFor(root),
+      (error) =>
+        error instanceof CLIError &&
+        error.exitCode === EXIT_CODES.OWNERSHIP &&
+        error.message.includes("migrate explicitly") &&
+        error.message.includes("No keys were replaced"),
+    );
+    assert.equal(readFileSync(filename, "utf8"), original);
+  });
+}
 
 test("bootstrap fails closed when only one half of the private JWK pair is present", () => {
   const root = project();
@@ -1178,61 +1001,6 @@ test("bootstrap fails closed when only one half of the private JWK pair is prese
       error.exitCode === EXIT_CODES.OWNERSHIP &&
       error.message.includes("TAMA_OAUTH_PRIVATE_JWK"),
   );
-});
-
-test("bootstrap migrates a managed environment from the retired signing key pair", () => {
-  const root = project();
-  applyOperations(planFor(root).operations);
-  const filename = join(root, "tama", ".tama.env");
-  const before = readFileSync(filename, "utf8");
-  const migrated = before
-    .replace(/^TAMA_OAUTH_PRIVATE_JWK=.*$/mu, "TAMA_OAUTH_SIGNING_KEY=legacy-symmetric-secret")
-    .replace(/^TAMA_OAUTH_PRIVATE_JWK_ID=.*$/mu, "TAMA_OAUTH_SIGNING_KEY_ID=oauth-local-1");
-  writeFileSync(filename, migrated);
-  const retiredIndex = migrated
-    .split("\n")
-    .findIndex((line) => line.startsWith("TAMA_OAUTH_SIGNING_KEY="));
-
-  applyOperations(planFor(root).operations);
-  const after = readFileSync(filename, "utf8");
-  const afterLines = after.split("\n");
-  assert.ok(afterLines[retiredIndex].startsWith("TAMA_OAUTH_PRIVATE_JWK="));
-  assert.ok(afterLines[retiredIndex + 1].startsWith("TAMA_OAUTH_PRIVATE_JWK_ID="));
-  assert.doesNotMatch(after, /TAMA_OAUTH_SIGNING_KEY/u);
-  assert.deepEqual(
-    migrated.split("\n").filter((line) => !line.startsWith("TAMA_OAUTH_SIGNING_KEY")),
-    afterLines.filter((line) => !line.startsWith("TAMA_OAUTH_PRIVATE_JWK")),
-  );
-
-  const { jwk, id } = oauthJwkLines(after);
-  const parsed = /** @type {Record<string, string>} */ (JSON.parse(jwk));
-  assert.equal(parsed.kid, id);
-  assert.equal(createPrivateKey({ key: parsed, format: "jwk" }).asymmetricKeyType, "rsa");
-
-  const second = planFor(root);
-  assert.equal(
-    second.operations.find((operation) => operation.path.endsWith(".tama.env"))?.action,
-    "unchanged",
-  );
-});
-
-test("bootstrap migrates the retired pair and applies a port change in one pass", () => {
-  const root = project();
-  applyOperations(planFor(root).operations);
-  const filename = join(root, "tama", ".tama.env");
-  writeFileSync(
-    filename,
-    readFileSync(filename, "utf8")
-      .replace(/^TAMA_OAUTH_PRIVATE_JWK=.*$/mu, "TAMA_OAUTH_SIGNING_KEY=legacy-symmetric-secret")
-      .replace(/^TAMA_OAUTH_PRIVATE_JWK_ID=.*$/mu, "TAMA_OAUTH_SIGNING_KEY_ID=oauth-local-1"),
-  );
-
-  applyOperations(planFor(root, { port: 4567 }).operations);
-  const after = readFileSync(filename, "utf8");
-  assert.match(after, /^TAMA_PORT=4567$/mu);
-  assert.match(after, /^TAMA_BASE_URL=http:\/\/localhost:4567$/mu);
-  assert.doesNotMatch(after, /TAMA_OAUTH_SIGNING_KEY/u);
-  assert.ok(oauthJwkLines(after).jwk);
 });
 
 test("bootstrap fails closed for an incomplete retired signing key pair", () => {

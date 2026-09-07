@@ -46,7 +46,6 @@ test("bare guided setup resolves the project and produces the same read-only pla
   const io = ioFor(root, ["", "no", "1", "no", "no", "4567", "1"]);
   const result = await resolveBootstrapInput(parseBootstrap(["--dry-run"]), io);
   const equivalent = createBootstrapPlan({
-    developerOwned: true,
     generationId: "pending-bootstrap-operation",
     cwd: root,
     targetPath: root,

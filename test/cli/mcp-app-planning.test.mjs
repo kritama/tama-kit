@@ -5,7 +5,6 @@ import { basename, join } from "node:path";
 import test from "node:test";
 import { parseEnv } from "node:util";
 import { resolveEnvironmentPort } from "../../cli/bootstrap/environment.mjs";
-import { readMcpAppProvider } from "../../cli/bootstrap/manifest.mjs";
 import { validateMcpAppContract } from "../../cli/bootstrap/mcp-app-contract.mjs";
 import { validateMcpAppLocalContract } from "../../cli/bootstrap/mcp-app-local-contract.mjs";
 import { createBootstrapPlan } from "../../cli/bootstrap/plan.mjs";
@@ -17,7 +16,6 @@ import {
   PINNED_TAMA_IMAGE,
   planWithMcp,
   preparedFor,
-  prepareFor,
   project,
   validContract,
   writeContract,
@@ -97,13 +95,9 @@ test("bootstrap plans a complete MCP App provider integration from a discovered 
   assert.match(gitignore, /^\/\.tama\.env$/mu);
   assert.match(gitignore, /^\/\.memovee\.integration\.env$/mu);
   const manifest = JSON.parse(readFileSync(join(root, "tama", ".tama-kit.json"), "utf8"));
-  assert.equal(manifest.mcpAppProvider.name, "memovee");
-  assert.equal(manifest.mcpAppProvider.contractSource, "contract");
-  assert.equal(manifest.mcpAppProvider.environmentLoading, "unverified");
-  assert.equal(manifest.mcpAppProvider.bindings.mode, "MEMOVEE_TAMA_MCP_APP_MODE");
-  assert.equal(manifest.mcpAppProvider.providerOrigin, "http://host.docker.internal:4000");
-  assert.equal(manifest.mcpAppProvider.tamaOrigin, "http://127.0.0.1:4001");
-  assert.deepEqual(manifest.mcpAppProvider.allowedOrigins, ["http://127.0.0.1:3000"]);
+  assert.equal(manifest.schemaVersion, 2);
+  assert.equal(manifest.mcpAppProvider, undefined);
+  assert.equal(manifest.managedFiles, undefined);
   const localContractPath = join(root, "tama", "contracts", "mcp-app-provider-v1.json");
   const localContract = validateMcpAppLocalContract(
     JSON.parse(readFileSync(localContractPath, "utf8")),
@@ -137,27 +131,6 @@ test("bootstrap plans a complete MCP App provider integration from a discovered 
   const second = planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract }));
   assert.ok(second.operations.every((operation) => operation.action === "unchanged"));
   assert.equal(readFileSync(fragmentPath, "utf8"), fragment);
-});
-
-test("bootstrap activates the MCP App integration when requested", () => {
-  const root = project();
-  const contractPath = writeContract(root);
-  const contract = validContract();
-  applyOperations(
-    planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })).operations,
-  );
-
-  const activated = planWithMcp(
-    root,
-    preparedFor(root, { contractPath, contractDocument: contract }),
-    { activate: true },
-  );
-  assert.equal(activated.mcpApp?.lifecycle, "enabled");
-  applyOperations(activated.operations);
-  const fragment = parseEnv(readFileSync(join(root, "tama", ".memovee.integration.env"), "utf8"));
-  assert.equal(fragment.MEMOVEE_TAMA_MCP_APP_MODE, "enabled");
-  const tama = parseEnv(readFileSync(join(root, "tama", ".tama.env"), "utf8"));
-  assert.equal(tama.TAMA_MCP_APP_MODE, "enabled");
 });
 
 test("bootstrap keeps provider endpoints on one shared origin and rejects loopback", () => {
@@ -280,8 +253,8 @@ test("bootstrap derives conventional bindings for providers without a contract",
   assert.equal(fragment.ACME_TAMA_MCP_APP_MODE, "prepared");
   assert.equal(fragment.ACME_OAUTH_ISSUER, "http://host.docker.internal:5000");
   const manifest = JSON.parse(readFileSync(join(root, "tama", ".tama-kit.json"), "utf8"));
-  assert.equal(manifest.mcpAppProvider.contractSource, "conventional");
-  assert.equal(manifest.mcpAppProvider.contractPath, null);
+  assert.equal(manifest.schemaVersion, 2);
+  assert.equal(manifest.mcpAppProvider, undefined);
   const localContract = validateMcpAppLocalContract(
     JSON.parse(readFileSync(join(root, "tama", "contracts", "mcp-app-provider-v1.json"), "utf8")),
   );
@@ -333,159 +306,6 @@ test("fresh local HTTPS plans leave provider runtime behavior application-owned"
   );
 });
 
-test("local HTTPS migration removes legacy Tama-derived MCP App identities", () => {
-  const root = project();
-  const legacy = planWithMcp(root, preparedFor(root), {
-    providerOrigin: "http://host.docker.internal:4000",
-    tamaOrigin: "http://127.0.0.1:4001",
-    allowedOrigins: ["http://127.0.0.1:3000"],
-  });
-  applyOperations(legacy.operations);
-
-  const environmentPath = join(root, "tama", ".tama.env");
-  const legacyEnvironment = parseEnv(readFileSync(environmentPath, "utf8"));
-  assert.equal(legacyEnvironment.TAMA_MCP_APP_RESOURCE, "http://127.0.0.1:4001/mcp/app");
-  assert.equal(
-    legacyEnvironment.TAMA_MCP_APP_INTROSPECTION_CLIENT_ID,
-    "http://127.0.0.1:4001/mcp/app/introspection",
-  );
-
-  const migrated = createBootstrapPlan({
-    cwd: root,
-    targetPath: root,
-    image: PINNED_TAMA_IMAGE,
-    mcpApp: {
-      requested: true,
-      activate: false,
-      migrateLocalHttps: true,
-      providerOrigin: "http://host.docker.internal:4000",
-      tamaOrigin: "http://127.0.0.1:4001",
-      allowedOrigins: ["https://app.localhost"],
-    },
-    mcpAppPrepared: preparedFor(root),
-  });
-
-  for (const assertion of [
-    { providerOrigin: "http://host.docker.internal:5000" },
-    { tamaOrigin: "http://127.0.0.1:5001" },
-  ]) {
-    assert.throws(
-      () =>
-        createBootstrapPlan({
-          cwd: root,
-          targetPath: root,
-          image: PINNED_TAMA_IMAGE,
-          mcpApp: {
-            requested: true,
-            activate: false,
-            migrateLocalHttps: true,
-            providerOrigin: "http://host.docker.internal:4000",
-            tamaOrigin: "http://127.0.0.1:4001",
-            allowedOrigins: ["https://app.localhost"],
-            ...assertion,
-          },
-          mcpAppPrepared: preparedFor(root),
-        }),
-      /migration assertion/u,
-    );
-  }
-
-  const contract = validContract();
-  const contractPath = writeContract(root, contract);
-  assert.doesNotThrow(() =>
-    createBootstrapPlan({
-      cwd: root,
-      targetPath: root,
-      image: PINNED_TAMA_IMAGE,
-      mcpApp: {
-        requested: true,
-        activate: false,
-        migrateLocalHttps: true,
-        allowedOrigins: ["https://app.localhost"],
-      },
-      mcpAppPrepared: preparedFor(root, { contractPath, contractDocument: contract }),
-    }),
-  );
-  applyOperations(migrated.operations);
-
-  const environment = parseEnv(readFileSync(environmentPath, "utf8"));
-  assert.equal(Object.hasOwn(environment, "TAMA_MCP_APP_RESOURCE"), false);
-  assert.equal(Object.hasOwn(environment, "TAMA_MCP_APP_INTROSPECTION_CLIENT_ID"), false);
-  assert.equal(environment.PHX_HOST, "tama.app.localhost");
-  assert.equal(environment.TAMA_OAUTH_ISSUER, "https://tama.app.localhost");
-});
-
-test("ordinary local HTTPS reruns preserve public URLs and the selected Tama image", () => {
-  const root = project();
-  const selectedImage = "ghcr.io/upmaru/tama:0.13.5-server";
-  const prepared = preparedFor(root);
-  prepared.allowedOrigins = ["https://app.localhost"];
-  const first = createBootstrapPlan({
-    cwd: root,
-    targetPath: root,
-    image: selectedImage,
-    mcpApp: { requested: true, activate: false },
-    mcpAppPrepared: prepared,
-  });
-  applyOperations(first.operations);
-
-  const rerun = createBootstrapPlan({ cwd: root, targetPath: root });
-  assert.equal(rerun.tamaImage, selectedImage);
-  assert.ok(
-    rerun.operations.every((operation) => operation.action === "unchanged"),
-    JSON.stringify(rerun.operations.map(({ action, path, reason }) => ({ action, path, reason }))),
-  );
-  const environment = parseEnv(readFileSync(join(root, "tama", ".tama.env"), "utf8"));
-  assert.equal(environment.TAMA_OAUTH_ISSUER, "https://tama.app.localhost");
-  assert.equal(environment.TAMA_MCP_RESOURCE, "https://tama.app.localhost/mcp");
-  assert.equal(environment.TAMA_BASE_URL, "https://tama.app.localhost");
-  assert.match(
-    readFileSync(join(root, "tama", "tama-local-ca.Dockerfile"), "utf8"),
-    new RegExp(`^FROM ${selectedImage.replaceAll(".", "\\.")}$`, "mu"),
-  );
-
-  const manifestPath = join(root, "tama", ".tama-kit.json");
-  const legacyManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  delete legacyManifest.mcpAppProvider.tamaImage;
-  writeFileSync(manifestPath, `${JSON.stringify(legacyManifest, null, 2)}\n`);
-  const upgraded = createBootstrapPlan({ cwd: root, targetPath: root });
-  assert.equal(upgraded.tamaImage, selectedImage);
-  applyOperations(upgraded.operations);
-  const upgradedManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  assert.equal(upgradedManifest.mcpAppProvider.tamaImage, selectedImage);
-});
-
-test("a matching provider contract updates provenance without rotating provider keys", async () => {
-  const root = project();
-  const firstPrepared = await prepareFor(root, {
-    providerName: "acme",
-    providerOrigin: "http://host.docker.internal:4000",
-  });
-  const first = planWithMcp(root, firstPrepared, {
-    providerOrigin: "http://host.docker.internal:4000",
-  });
-  applyOperations(first.operations);
-  const fragmentPath = join(root, "tama", ".acme.integration.env");
-  const originalFragment = readFileSync(fragmentPath, "utf8");
-
-  const acmeContract = JSON.parse(
-    JSON.stringify(memoveeContract()).replaceAll("MEMOVEE", "ACME").replaceAll("memovee", "acme"),
-  );
-  writeContract(root, acmeContract);
-  const prepared = await prepareFor(root, {}, { nonInteractive: true });
-  const second = planWithMcp(root, prepared);
-  assert.equal(second.mcpApp?.localContract?.source.type, "provider-contract");
-  assert.equal(second.mcpApp?.localContractOperation?.action, "update");
-  const fragmentOperation = second.operations.find(({ path }) => path === fragmentPath);
-  assert.equal(fragmentOperation?.action, "unchanged");
-  applyOperations(second.operations);
-  assert.equal(readFileSync(fragmentPath, "utf8"), originalFragment);
-  assert.equal(
-    readMcpAppProvider(join(root, "tama"))?.contractPath,
-    "priv/contracts/tama-mcp-app-bootstrap-v1.json",
-  );
-});
-
 test("bootstrap refuses a user-modified managed local contract", () => {
   const root = project();
   const first = planWithMcp(root, preparedFor(root), {
@@ -505,7 +325,7 @@ test("bootstrap refuses a user-modified managed local contract", () => {
     (error) =>
       error instanceof CLIError &&
       error.exitCode === EXIT_CODES.OWNERSHIP &&
-      /user-modified content/u.test(error.message),
+      /different project-owned content/u.test(error.message),
   );
 });
 
@@ -610,7 +430,7 @@ test("bootstrap fails closed when the provider identity or contract bindings dri
     (error) =>
       error instanceof CLIError &&
       error.exitCode === EXIT_CODES.OWNERSHIP &&
-      /does not match the resolved identity/u.test(error.message),
+      /different project-owned content/u.test(error.message),
   );
 
   // Undeclared variables are rejected by the contract validator itself, so a
@@ -634,8 +454,8 @@ test("bootstrap fails closed when the provider identity or contract bindings dri
     () => planWithMcp(root, driftedBindings),
     (error) =>
       error instanceof CLIError &&
-      error.exitCode === EXIT_CODES.USAGE &&
-      /bindings changed/u.test(error.message),
+      error.exitCode === EXIT_CODES.OWNERSHIP &&
+      /different project-owned content/u.test(error.message),
   );
 });
 
@@ -677,7 +497,7 @@ test("bootstrap refuses a user-modified provider fragment", () => {
     (error) =>
       error instanceof CLIError &&
       error.exitCode === EXIT_CODES.OWNERSHIP &&
-      /user-modified content/u.test(error.message),
+      /different project-owned content/u.test(error.message),
   );
 });
 
@@ -700,75 +520,6 @@ test("bootstrap preserves unrelated provider fragment entries and comments", () 
     operation?.content ?? readFileSync(fragmentPath, "utf8"),
     /MEMOVEE_OTHER_VALUE=kept/u,
   );
-});
-
-test("bootstrap explicitly migrates provider identity without rotating trust material", async () => {
-  const root = project();
-  const originalPrepared = await prepareFor(root, {
-    providerName: "acme",
-    providerOrigin: "http://host.docker.internal:5000",
-  });
-  const original = planWithMcp(root, originalPrepared, {
-    providerOrigin: "http://host.docker.internal:5000",
-  });
-  applyOperations(original.operations);
-  const oldPath = join(root, "tama", ".acme.integration.env");
-  const originalValues = parseEnv(readFileSync(oldPath, "utf8"));
-
-  writeFileSync(oldPath, `${readFileSync(oldPath, "utf8")}# Provider-owned\nACME_OTHER=kept\n`);
-  const adopted = planWithMcp(root, await prepareFor(root), {
-    providerOrigin: "http://host.docker.internal:5000",
-  });
-  applyOperations(adopted.operations);
-  writeFileSync(join(root, ".envrc"), 'dotenv_load "tama/.beta.integration.env"\n');
-
-  const migratedPrepared = await prepareFor(root, {
-    providerName: "beta",
-    providerPrefix: "BETA",
-    providerOrigin: "http://host.docker.internal:5000",
-    migrateProviderIdentity: true,
-  });
-  const migrated = planWithMcp(root, migratedPrepared, {
-    providerOrigin: "http://host.docker.internal:5000",
-    migrateProviderIdentity: true,
-  });
-  assert.ok(
-    migrated.operations.some(({ action, path }) => action === "delete" && path === oldPath),
-  );
-  await assert.rejects(
-    () =>
-      applyOperationsTransactionally(migrated.operations, () => {
-        throw new Error("forced post-write failure");
-      }),
-    /forced post-write failure/u,
-  );
-  assert.equal(existsSync(oldPath), true);
-  assert.equal(existsSync(join(root, "tama", ".beta.integration.env")), false);
-  assert.equal(readMcpAppProvider(join(root, "tama"))?.identity.name, "acme");
-
-  const retry = planWithMcp(root, migratedPrepared, {
-    providerOrigin: "http://host.docker.internal:5000",
-    migrateProviderIdentity: true,
-  });
-  applyOperations(retry.operations);
-
-  const newPath = join(root, "tama", ".beta.integration.env");
-  assert.equal(existsSync(oldPath), false);
-  const migratedValues = parseEnv(readFileSync(newPath, "utf8"));
-  assert.equal(
-    migratedValues.BETA_OAUTH_PRIVATE_SIGNING_KEY,
-    originalValues.ACME_OAUTH_PRIVATE_SIGNING_KEY,
-  );
-  assert.equal(migratedValues.BETA_OAUTH_SIGNING_KEY_ID, originalValues.ACME_OAUTH_SIGNING_KEY_ID);
-  assert.equal(migratedValues.ACME_OTHER, "kept");
-  assert.equal(migratedValues.ACME_OAUTH_PRIVATE_SIGNING_KEY, undefined);
-  assert.equal(readMcpAppProvider(join(root, "tama"))?.identity.name, "beta");
-
-  const convergedPrepared = await prepareFor(root);
-  const converged = planWithMcp(root, convergedPrepared, {
-    providerOrigin: "http://host.docker.internal:5000",
-  });
-  assert.ok(converged.operations.every(({ action }) => action === "unchanged"));
 });
 
 test("bootstrap preserves a valid persisted public JWK overlap set byte-for-byte", () => {
@@ -954,50 +705,6 @@ test("bootstrap derives MCP App origins from the persisted Tama port", () => {
   assert.ok(second.operations.every((operation) => operation.action === "unchanged"));
 });
 
-test("MCP App reruns update the port and allowed origins without changing stable contract semantics", () => {
-  const root = project();
-  const contractPath = writeContract(root);
-  const contract = validContract();
-  const first = planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract }));
-  applyOperations(first.operations);
-  const fragmentPath = join(root, "tama", ".memovee.integration.env");
-  const firstFragment = parseEnv(readFileSync(fragmentPath, "utf8"));
-  const localPath = join(root, "tama", "contracts", "mcp-app-provider-v1.json");
-  const firstLocalContract = readFileSync(localPath, "utf8");
-
-  const second = createBootstrapPlan({
-    cwd: root,
-    targetPath: root,
-    image: PINNED_TAMA_IMAGE,
-    port: 4020,
-    mcpApp: {
-      requested: true,
-      activate: false,
-      allowedOrigins: ["http://127.0.0.1:3001"],
-    },
-    mcpAppPrepared: preparedFor(root, { contractPath, contractDocument: contract }),
-  });
-  assert.equal(second.mcpApp?.tamaOrigin, "http://127.0.0.1:4020");
-  assert.deepEqual(second.mcpApp?.allowedOrigins, ["http://127.0.0.1:3001"]);
-  assert.equal(second.mcpApp?.localContractOperation?.action, "unchanged");
-  applyOperations(second.operations);
-
-  const secondFragment = parseEnv(readFileSync(fragmentPath, "utf8"));
-  assert.equal(
-    secondFragment.MEMOVEE_OAUTH_PRIVATE_SIGNING_KEY,
-    firstFragment.MEMOVEE_OAUTH_PRIVATE_SIGNING_KEY,
-  );
-  assert.equal(
-    secondFragment.MEMOVEE_OAUTH_SIGNING_KEY_ID,
-    firstFragment.MEMOVEE_OAUTH_SIGNING_KEY_ID,
-  );
-  assert.equal(secondFragment.MEMOVEE_TAMA_MCP_APP_RESOURCE, "http://127.0.0.1:4020/mcp/app");
-  assert.equal(readFileSync(localPath, "utf8"), firstLocalContract);
-  const tama = parseEnv(readFileSync(join(root, "tama", ".tama.env"), "utf8"));
-  assert.equal(tama.TAMA_MCP_APP_RESOURCE, "http://127.0.0.1:4020/mcp/app");
-  assert.equal(tama.TAMA_MCP_APP_ALLOWED_ORIGINS, "http://127.0.0.1:3001");
-});
-
 test("bootstrap preserves exact public origins and never infers allowed origins", () => {
   for (const tamaOrigin of [
     "http://localhost:4001",
@@ -1021,16 +728,12 @@ test("bootstrap preserves exact public origins and never infers allowed origins"
     tamaOrigin: "http://127.0.0.1:4001",
   });
   applyOperations(first.operations);
-  const persisted = readMcpAppProvider(join(root, "tama"));
-  assert.equal(persisted?.providerOrigin, "http://host.docker.internal:4000");
-  assert.equal(persisted?.tamaOrigin, "http://127.0.0.1:4001");
-  assert.deepEqual(persisted?.allowedOrigins, ["http://127.0.0.1:3000"]);
   assert.throws(
     () =>
       planWithMcp(root, preparedFor(root, { contractDocument: contract }), {
         tamaOrigin: "http://localhost:4001",
       }),
-    /origin migration|topology migration/u,
+    /different project-owned content/u,
   );
 });
 
@@ -1046,33 +749,5 @@ test("resolveEnvironmentPort preserves a configured port and fails closed on inv
   assert.throws(
     () => resolveEnvironmentPort(root, undefined),
     (error) => error instanceof CLIError && error.exitCode === EXIT_CODES.OWNERSHIP,
-  );
-});
-
-test("readMcpAppProvider fails closed on a malformed persisted provider block", () => {
-  const root = project();
-  const tamaDirectory = join(root, "tama");
-  mkdirSync(tamaDirectory, { recursive: true });
-  assert.equal(readMcpAppProvider(tamaDirectory), null);
-  writeFileSync(
-    join(tamaDirectory, ".tama-kit.json"),
-    JSON.stringify({
-      mcpAppProvider: {
-        name: "memovee",
-        environmentPrefix: "MEMOVEE",
-        environmentFile: "tama/.memovee.integration.env",
-        contractSource: "bogus",
-        contractPath: null,
-        bindings: { mode: "MEMOVEE_TAMA_MCP_APP_MODE" },
-        environmentLoading: "verified",
-      },
-    }),
-  );
-  assert.throws(
-    () => readMcpAppProvider(tamaDirectory),
-    (error) =>
-      error instanceof CLIError &&
-      error.exitCode === EXIT_CODES.OWNERSHIP &&
-      /invalid mcpAppProvider/u.test(error.message),
   );
 });

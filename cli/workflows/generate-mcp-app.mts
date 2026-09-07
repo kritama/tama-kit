@@ -103,10 +103,10 @@ export function planMcpAppAddition(
   }
   const service = services[selected];
   const requested = mcpAppOptions(options);
-  const topology = usesLocalHttpsTopology(requested, null, prepared.contractDocument)
+  const topology = usesLocalHttpsTopology(requested, prepared.contractDocument)
     ? {
         ...resolveLocalHttpsTopology({
-          ...resolveProviderTopology(requested, null, current.composeFile),
+          ...resolveProviderTopology(requested, current.composeFile),
           localDomain: options.localDomain,
           providerPort: options.providerPort,
           allowedOrigins: prepared.allowedOrigins,
@@ -172,7 +172,6 @@ export function planMcpAppAddition(
     },
     identity: prepared.identity,
     state,
-    persisted: null,
     contractDocument: prepared.contractDocument,
     port: topology?.tamaPort ?? current.port,
     tamaImage: image,

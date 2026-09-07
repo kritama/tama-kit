@@ -97,6 +97,8 @@ test("legacy bootstrap recognition ignores noncanonical historical topology and 
   const root = standard();
   const path = join(root, "tama/.tama-kit.json");
   const value = JSON.parse(readFileSync(path, "utf8"));
+  value.schemaVersion = 1;
+  value.managedFiles = { "tama/versions.tf": `sha256:${"0".repeat(64)}` };
   value.mcpAppProvider = { localHttps: { providerUpstream: "renamed:9999" } };
   writeFileSync(path, JSON.stringify(value));
   unlinkSync(join(root, "tama/versions.tf"));
@@ -326,7 +328,6 @@ test("generation journaling refuses a receipt that arrived after the reviewed pl
   const plan = createBootstrapPlan({
     cwd: root,
     skillMode: "manual",
-    developerOwned: true,
     generationId: "reviewed-id",
   });
   mkdirSync(join(root, "tama"));

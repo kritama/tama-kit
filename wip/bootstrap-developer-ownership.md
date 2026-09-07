@@ -1,6 +1,7 @@
 # Bootstrap with developer-owned output
 
-Status: bootstrap/setup/doctor migration and additive `generate mcp-app` implemented.
+Status: bootstrap/setup/doctor migration, additive `generate mcp-app`, and legacy
+planner removal implemented.
 Validation and release status are recorded at the end of this plan. Recorded 2026-09-07 after the graph-guidance work on
 `feature/progressive-bootstrap-skills` (commit `180e4b0`, PR #32).
 
@@ -402,8 +403,8 @@ Implemented work package 4 as `tama-kit generate mcp-app [path]`:
 Command cleanup removed the retired existing-project migration questionnaire,
 manifest-based lifecycle replanning, and the workflow's managed-write fallback.
 Fresh bootstrap always uses the developer-owned writer and reads current configuration
-before runtime actions. Historical low-level v1 planner fixtures remain for regression
-coverage; no command uses them to upgrade an existing project. CLI routing, package
+before runtime actions. At this slice, low-level v1 planner fixtures still remained for regression
+coverage; they were removed in the cleanup below. CLI routing, package
 checks, README and the packaged CLI skill/reference now document the additive command.
 
 Validation for this addition:
@@ -427,3 +428,43 @@ Validation for this addition:
 
 No existing Memovee checkout, credentials, Terraform state, volumes or services
 were changed. Publishing/tagging a release remains a separate release action.
+
+## Legacy planner removal (2026-09-07)
+
+Removed `cli/bootstrap/manifest.mjs` and its managed-file planner, marker adoption,
+permanent digest inventory, saved image/Compose settings, saved skill selection,
+and canonical provider-topology reconstruction. Initial generation now has one
+file planner: exclusive creation/preservation with a v2 receipt. The `developerOwned`
+switch and manifest write fallback no longer exist.
+
+Provider preparation reads the selected contract and explicit inputs. It does not
+read saved manifest identities, bindings, domains, runtime services or origins.
+Removed the provider identity/topology/HTTPS migration implementations and their
+obsolete internal lifecycle inputs. Deprecated command flags remain recognizable
+only to return an actionable refusal. Generation always prepares MCP App; setup
+owns staged activation. Removed the duplicate, unreachable skill-choice prompt.
+
+Terraform planning preserves existing foundation/version files and no longer has
+an adoption or version-rewrite callback. Retired System OAuth signing variables
+produce a manual-migration diagnostic; even a generated marker cannot authorize
+replacement keys. Cryptographic validation, secret-ignore checks, canonical path
+checks, write preconditions, rollback and explicit interrupted resume remain.
+
+The only v1 manifest support retained is the read-only history adapter in
+`generation-receipt.mjs`. Existing v1 projects are still recognized by bootstrap;
+setup/doctor continue to use current configuration without receipts.
+
+Tests for retired upgrades, saved settings and manifest-only state were removed
+or replaced with current-contract, preservation and conflict-refusal assertions.
+Fresh generation, key/overlap validation, safe paths, Terraform ownership, current
+configuration, v1 history, additive generation and activation/recovery coverage
+remain. The installed-package check explicitly excludes the deleted planner.
+
+Validation for this cleanup is reported separately from the fully green additive
+commit `a7a0c6c` ([run 34087836664](https://github.com/kritama/tama-kit/actions/runs/34087836664)).
+The current cleanup commit's CI checks are attached to PR #33. No real Memovee
+runtime, credentials, Terraform state or volumes were changed.
+
+Local cleanup validation: 312 tests passed, one expected POSIX secondary-group
+skip, no failures. TypeScript build, Biome, submission validation, installed-package
+validation and whitespace checks passed. CI for the cleanup is pending.

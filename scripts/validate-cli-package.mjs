@@ -62,6 +62,11 @@ try {
   ])
     assert.ok(paths.has(required), `missing runtime asset: ${required}`);
   assert.equal(
+    paths.has("cli/bootstrap/manifest.mjs"),
+    false,
+    "retired manifest planner must not ship",
+  );
+  assert.equal(
     [...paths].some((path) => path.endsWith(".mts")),
     false,
     "package should contain emitted ESM, not TypeScript source",

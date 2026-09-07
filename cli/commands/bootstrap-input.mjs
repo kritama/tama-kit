@@ -96,7 +96,7 @@ export function printReview(plan, io) {
 export async function resolveBootstrapInput(supplied, io) {
   const q = questions(io);
   /** @type {Options} */
-  let options = { ...supplied, developerOwned: true };
+  let options = { ...supplied };
   let advanced = false;
   let discovered = discoverProject({ cwd: io.cwd, targetPath: options.targetPath });
   /** @type {ReturnType<typeof discoverProviderContract>} */
@@ -196,7 +196,6 @@ export async function resolveBootstrapInput(supplied, io) {
       const identityInput = {
         root: discovered.root,
         framework: discovered.framework,
-        manifestProvider: null,
         contractDocument: contract.document,
         name: supplied.providerName,
         prefix: supplied.providerPrefix,
@@ -210,7 +209,6 @@ export async function resolveBootstrapInput(supplied, io) {
         if (
           !(error instanceof CLIError) ||
           error.category !== "usage" ||
-          identityInput.manifestProvider ||
           contract.document?.provider ||
           supplied.providerName ||
           supplied.providerPrefix ||
@@ -233,7 +231,6 @@ export async function resolveBootstrapInput(supplied, io) {
       identity = resolveProviderIdentity({
         root: discovered.root,
         framework: discovered.framework,
-        manifestProvider: null,
         contractDocument: contract.document,
         name: options.providerName,
         prefix: supplied.providerPrefix,
@@ -257,7 +254,7 @@ export async function resolveBootstrapInput(supplied, io) {
     },
     async () => {
       if (!options.mcpApp) return;
-      const https = usesLocalHttpsTopology(mcpAppOptions(options), null, contract.document);
+      const https = usesLocalHttpsTopology(mcpAppOptions(options), contract.document);
       if (https) {
         options.localDomain = normalizeLocalDomain(supplied.localDomain ?? "app.localhost");
         if (!supplied.localDomain)

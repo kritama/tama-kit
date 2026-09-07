@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { parse } from "yaml";
-import { readMcpAppProvider } from "../../cli/bootstrap/manifest.mjs";
-import { createBootstrapPlan } from "../../cli/bootstrap/plan.mjs";
 import { providerServiceDependency } from "../../cli/bootstrap/provider-topology.mjs";
 import { parseBootstrap } from "../../cli/commands/bootstrap-options.mjs";
-import { applyOperations, applyOperationsTransactionally } from "../../cli/shared/write.mjs";
+import { applyOperations } from "../../cli/shared/write.mjs";
 import { planWithMcp, preparedFor, project } from "../helpers/mcp-app.mjs";
 
 function fixture({ healthy = true, loader = true } = {}) {
@@ -32,7 +30,7 @@ function plan(root, options = {}) {
   );
 }
 
-test("Compose provider configuration is managed, public identities stay HTTPS, and reruns need no flags", () => {
+test("fresh Compose provider generation keeps public identities HTTPS without saving desired topology", () => {
   const root = fixture();
   const first = plan(root, { providerService: "memovee" });
   assert.equal(first.localHttps.providerUpstream, "http://memovee:4000");
@@ -51,13 +49,13 @@ test("Compose provider configuration is managed, public identities stay HTTPS, a
     /reverse_proxy http:\/\/memovee:4000/,
   );
   applyOperations(first.operations);
-  assert.equal(readMcpAppProvider(join(root, "tama")).localHttps.providerService, "memovee");
-  for (const rerun of [plan(root), createBootstrapPlan({ cwd: root })]) {
-    assert.equal(rerun.localHttps.providerService, "memovee");
-    assert.ok(rerun.operations.every((operation) => operation.action === "unchanged"));
-  }
-  writeFileSync(join(root, "tama/Caddyfile"), "# application edit\n");
-  assert.throws(() => plan(root), /user-modified/);
+  const contract = JSON.parse(
+    readFileSync(join(root, "tama/contracts/mcp-app-provider-v1.json"), "utf8"),
+  );
+  assert.equal(contract.topology.provider_origin, "https://app.localhost");
+  const receipt = JSON.parse(readFileSync(join(root, "tama/.tama-kit.json"), "utf8"));
+  assert.equal(receipt.schemaVersion, 2);
+  assert.equal(receipt.mcpAppProvider, undefined);
 });
 
 test("provider loader evidence must belong to the selected service", () => {
@@ -75,7 +73,7 @@ test("provider loader evidence must belong to the selected service", () => {
   assert.equal(result.localHttps.providerDependency, "service_started");
 });
 
-test("generated and persisted setup guidance describes the selected provider runtime", () => {
+test("generated setup guidance describes the selected provider runtime", () => {
   for (const providerService of [undefined, "memovee"]) {
     const root = fixture();
     const first = plan(root, { providerService });
@@ -94,29 +92,8 @@ test("generated and persisted setup guidance describes the selected provider run
     assert.match(readme, /MIX_ENV=prod/);
     assert.match(readme, /both live services pass verification/);
     applyOperations(first.operations);
-    for (const rerun of [plan(root), createBootstrapPlan({ cwd: root })]) {
-      const operation = rerun.operations.find((op) => op.path === readmePath);
-      assert.equal(operation.action, "unchanged");
-    }
     assert.equal(readFileSync(readmePath, "utf8"), readme);
   }
-});
-
-test("provider runtime migration is explicit and preserves signing material", () => {
-  const root = fixture();
-  applyOperations(plan(root).operations);
-  const secret = readFileSync(join(root, "tama/.memovee.integration.env"), "utf8");
-  assert.throws(() => plan(root, { providerService: "memovee" }), /migrate-provider-topology/);
-  applyOperations(
-    plan(root, { providerService: "memovee", migrateProviderTopology: true }).operations,
-  );
-  assert.equal(readFileSync(join(root, "tama/.memovee.integration.env"), "utf8"), secret);
-  assert.throws(() => plan(root, { providerRuntime: "host" }), /migrate-provider-topology/);
-  applyOperations(
-    plan(root, { providerRuntime: "host", migrateProviderTopology: true }).operations,
-  );
-  assert.equal(readMcpAppProvider(join(root, "tama")).localHttps.providerService, undefined);
-  assert.equal(readFileSync(join(root, "tama/.memovee.integration.env"), "utf8"), secret);
 });
 
 test("invalid, missing, unreachable, or cyclic provider service selections fail before writing", () => {
@@ -196,74 +173,4 @@ test("unresolved YAML merges cannot hide provider topology or dependency constra
     `x-provider: &provider\n  image: example/provider\n  healthcheck: {test: [CMD, check]}\nservices:\n  memovee: *provider\n`,
   );
   assert.equal(providerServiceDependency(path, "memovee"), "service_healthy");
-});
-
-test("service removal and symlink replacement are refused on ordinary reruns", () => {
-  const root = fixture();
-  applyOperations(plan(root, { providerService: "memovee" }).operations);
-  const composePath = join(root, "compose.yaml");
-  writeFileSync(composePath, "services: {}\n");
-  assert.throws(() => createBootstrapPlan({ cwd: root }), /must be declared/);
-  unlinkSync(composePath);
-  const other = fixture();
-  symlinkSync(join(other, "compose.yaml"), composePath);
-  assert.throws(() => createBootstrapPlan({ cwd: root }), /regular file|resolve inside/);
-});
-
-test("failed topology write restores the previous managed routing and manifest", async () => {
-  const root = fixture();
-  applyOperations(plan(root).operations);
-  const filenames = [
-    "tama/.tama-kit.json",
-    "tama/compose.yaml",
-    "tama/Caddyfile",
-    "tama/.memovee.integration.env",
-  ];
-  const previous = filenames.map((name) => readFileSync(join(root, name), "utf8"));
-  const migration = plan(root, { providerService: "memovee", migrateProviderTopology: true });
-  await assert.rejects(
-    applyOperationsTransactionally(migration.operations, async () => {
-      throw new Error("invalid composed project");
-    }),
-    /invalid composed project/,
-  );
-  assert.deepEqual(
-    filenames.map((name) => readFileSync(join(root, name), "utf8")),
-    previous,
-  );
-});
-
-test("enabled provider or Tama configurations cannot migrate provider topology", () => {
-  for (const name of ["tama/.tama.env", "tama/.memovee.integration.env"]) {
-    const root = fixture();
-    applyOperations(plan(root).operations);
-    const path = join(root, name);
-    writeFileSync(
-      path,
-      readFileSync(path, "utf8").replace(/(_MCP_APP_MODE=)prepared/g, "$1enabled"),
-    );
-    assert.throws(
-      () => plan(root, { providerService: "memovee", migrateProviderTopology: true }),
-      /prepared mode/,
-    );
-  }
-});
-
-test("application health-check changes are recorded and then remain idempotent", () => {
-  const root = fixture({ healthy: false });
-  applyOperations(plan(root, { providerService: "memovee" }).operations);
-  const path = join(root, "compose.yaml");
-  writeFileSync(
-    path,
-    readFileSync(path, "utf8").replace(
-      "image: example/provider:dev",
-      'image: example/provider:dev\n    healthcheck: {test: "curl -f http://localhost:4000/"}',
-    ),
-  );
-  applyOperations(createBootstrapPlan({ cwd: root }).operations);
-  assert.equal(
-    readMcpAppProvider(join(root, "tama")).localHttps.providerDependency,
-    "service_healthy",
-  );
-  assert.ok(createBootstrapPlan({ cwd: root }).operations.every((op) => op.action === "unchanged"));
 });

@@ -15,11 +15,7 @@ export function mcpAppOptions(options: BootstrapCommandOptions): McpAppBootstrap
     providerPort: options.providerPort,
     providerRuntime: options.providerRuntime,
     providerService: options.providerService,
-    migrateProviderTopology: options.migrateProviderTopology,
     installLocalCa: options.installLocalCa,
-    migrateLocalHttps: options.migrateLocalHttps,
     allowedOrigins: options.allowedOrigins,
-    activate: options.activate,
-    migrateProviderIdentity: options.migrateProviderIdentity,
   };
 }

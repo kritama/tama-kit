@@ -90,41 +90,22 @@ export function providerServiceDependency(composeFile, name) {
 }
 
 /**
- * Persisted explicit inputs are the extension interface: every managed byte
- * remains reproducible without an application editing a managed template.
+ * Validate the explicitly selected application-owned provider before generation.
  * @param {import("../types.mjs").McpAppBootstrapOptions | undefined} options
- * @param {import("../types.mjs").LocalHttpsTopology | null | undefined} persisted
  * @param {string} composeFile
  */
-export function resolveProviderTopology(options, persisted, composeFile) {
-  const runtime =
-    options?.providerRuntime ??
-    (options?.providerService || persisted?.providerService ? "compose" : "host");
+export function resolveProviderTopology(options, composeFile) {
+  const runtime = options?.providerRuntime ?? (options?.providerService ? "compose" : "host");
   if (runtime !== "host" && runtime !== "compose")
     throw usageError("--provider-runtime must be host or compose");
   if (runtime === "host" && options?.providerService !== undefined) {
     throw usageError("--provider-service cannot be combined with --provider-runtime host");
   }
-  const providerService =
-    runtime === "compose" ? (options?.providerService ?? persisted?.providerService) : undefined;
+  const providerService = runtime === "compose" ? options?.providerService : undefined;
   if (runtime === "compose" && !providerService)
     throw usageError("Compose provider runtime requires --provider-service");
   // Validate the name before using it in any lookup or generated text.
   resolveLocalHttpsTopology({ providerService });
-  if (
-    persisted &&
-    providerService !== persisted.providerService &&
-    !options?.migrateProviderTopology
-  ) {
-    throw ownershipError(
-      "changing the provider runtime/service requires --migrate-provider-topology in prepared mode",
-    );
-  }
-  if (options?.migrateProviderTopology && (!persisted || options.activate)) {
-    throw usageError(
-      "provider topology migration requires an existing HTTPS integration and cannot activate it",
-    );
-  }
   const providerDependency = providerService
     ? providerServiceDependency(composeFile, providerService)
     : undefined;

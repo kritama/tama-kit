@@ -120,14 +120,12 @@ test("fresh MCP App runs use HTTPS while explicit origins retain the legacy path
     usesLocalHttpsTopology({ requested: true, providerOrigin: "http://host.docker.internal:4000" }),
     false,
   );
-  assert.equal(usesLocalHttpsTopology({ requested: true, migrateLocalHttps: true }), true);
-  const legacy = { providerOrigin: "http://host.docker.internal:4000" };
-  assert.equal(usesLocalHttpsTopology({ requested: true, providerPort: 4100 }, legacy), false);
+  const contract = { local_development: { provider_origin: "http://host.docker.internal:4000" } };
+  assert.equal(usesLocalHttpsTopology({ requested: true }, contract), false);
   assert.equal(
-    usesLocalHttpsTopology({ requested: true, localDomain: "app.localhost" }, legacy),
-    false,
+    usesLocalHttpsTopology({ requested: true, localDomain: "app.localhost" }, contract),
+    true,
   );
-  assert.equal(usesLocalHttpsTopology({ requested: true, migrateLocalHttps: true }, legacy), true);
 });
 
 test("local HTTPS names must resolve only to loopback addresses", async () => {
