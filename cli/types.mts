@@ -79,6 +79,8 @@ export type LocalHttpsTopology = {
   providerDependency?: "service_started" | "service_healthy";
   tamaPort: number;
   httpsPort: number;
+  /** Container port reached through the proxy; may differ from its published host port. */
+  proxyTargetPort: number;
   certificateNames: string[];
   caddyImage: string;
   trustMechanism: string;

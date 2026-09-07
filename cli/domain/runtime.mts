@@ -6,6 +6,8 @@ export type RuntimeSelection = {
   service: string;
   startServices?: string[];
   proxyService?: string;
+  /** Container port reached through the proxy; may differ from its published host port. */
+  proxyTargetPort?: number;
   environmentFile?: string;
   caFile?: string;
   healthUrl: string;

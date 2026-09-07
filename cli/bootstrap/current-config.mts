@@ -391,6 +391,11 @@ export function inspectCurrentConfiguration(
       options.proxyService,
       "--proxy-service",
     );
+    const proxyTargetPort = Number(
+      services[proxy].ports?.find((port) => Number(port.published) === topology.https_port)?.target,
+    );
+    if (!Number.isInteger(proxyTargetPort) || proxyTargetPort < 1 || proxyTargetPort > 65_535)
+      throw ownershipError("the selected HTTPS proxy has no valid container target port");
     const tlsMount = services[proxy].volumes?.find(
       (volume) => volume.type === "bind" && volume.target === "/etc/tama-kit/tls",
     );
@@ -421,6 +426,7 @@ export function inspectCurrentConfiguration(
       providerPort: topology.provider_port,
       tamaPort: Number(values.get("PORT") ?? 4000),
       httpsPort: topology.https_port,
+      proxyTargetPort,
       providerUpstream: `${providerService ?? "host.docker.internal"}:${topology.provider_port}`,
       tamaUpstream: `${serviceName}:${values.get("PORT") ?? 4000}`,
       certificateNames: topology.certificate_names,

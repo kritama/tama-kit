@@ -26,6 +26,24 @@ import { ADDITION_TLS, additionCertificates } from "./mcp-app-certificates.mjs";
 import { mcpAppOptions } from "./options.mjs";
 import { writeScaffold } from "./scaffold-write.mjs";
 
+export function validateComposeBuildOverrideVersion(execute = execFileSync) {
+  const version = execute("docker", ["compose", "version", "--short"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  })
+    .match(/v?(\d+)\.(\d+)\.(\d+)/u)
+    ?.slice(1)
+    .map(Number);
+  if (
+    !version ||
+    version[0] < 2 ||
+    (version[0] === 2 && (version[1] < 24 || (version[1] === 24 && version[2] < 4)))
+  )
+    throw prerequisiteError(
+      "additive MCP App generation requires Docker Compose 2.24.4 or newer for build and port overrides",
+    );
+}
+
 export const MCP_ADDITION = {
   receipt: "tama/.tama-kit-mcp-app.json",
   compose: "tama/compose.mcp-app.yaml",
@@ -133,23 +151,7 @@ export function planMcpAppAddition(
     throw usageError(
       "the selected Tama service has a custom build; select its compatible release base explicitly with --image",
     );
-  if (topology) {
-    const version = execFileSync("docker", ["compose", "version", "--short"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    })
-      .match(/v?(\d+)\.(\d+)\.(\d+)/u)
-      ?.slice(1)
-      .map(Number);
-    if (
-      !version ||
-      version[0] < 2 ||
-      (version[0] === 2 && (version[1] < 24 || (version[1] === 24 && version[2] < 4)))
-    )
-      throw prerequisiteError(
-        "additive local HTTPS requires Docker Compose 2.24.4 or newer for build and port overrides",
-      );
-  }
+  if (topology || (service.build && options.image)) validateComposeBuildOverrideVersion();
   const image = options.image ?? current.tamaImage;
   const owned = createOwnedFilePlanner(root, progress.id, Boolean(progress.pending));
   const state = resolveMcpAppState({

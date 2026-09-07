@@ -113,6 +113,7 @@ export function resolveLocalHttpsTopology(input = {}) {
     providerPort,
     tamaPort: DEFAULTS.containerPort,
     httpsPort,
+    proxyTargetPort: httpsPort,
     certificateNames: [providerHost, tamaHost],
     caddyImage: DEFAULTS.caddyImage,
     trustMechanism: LOCAL_HTTPS_TRUST_MECHANISM,

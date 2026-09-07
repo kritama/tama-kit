@@ -35,6 +35,10 @@ export async function runExistingBootstrap(options, io, root) {
     options.generationId = evidence.receipt.operation.id;
     return null;
   }
+  if (options.mcpApp)
+    throw usageError(
+      "bootstrap --mcp-app does not add capabilities to an existing project; use tama-kit generate mcp-app",
+    );
   const changes = [
     options.image !== undefined && "--image",
     options.port !== undefined && "--port",

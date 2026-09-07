@@ -197,7 +197,7 @@ export function resolveComposeHostGatewayAddress(plan) {
  * not follow redirects unless explicitly requested, so success belongs to the
  * configured provider endpoint itself.
  *
- * @param {{root: string, composeFile: string, runtime?: import("../domain/runtime.mjs").RuntimeSelection, localHttps?: {providerHost: string, httpsPort: number} | null}} plan
+ * @param {{root: string, composeFile: string, runtime?: import("../domain/runtime.mjs").RuntimeSelection, localHttps?: {providerHost: string, httpsPort: number, proxyTargetPort?: number} | null}} plan
  * @param {string} endpoint
  * @param {typeof execFileSync} [execute]
  * @returns {boolean}
@@ -218,7 +218,7 @@ export function probeComposeProviderEndpoint(plan, endpoint, execute = execFileS
     localHttps && url.hostname === localHttps.providerHost
       ? [
           "--connect-to",
-          `${url.hostname}:${endpointPort}:${plan.runtime?.proxyService ?? "caddy"}:${localHttps.httpsPort}`,
+          `${url.hostname}:${endpointPort}:${plan.runtime?.proxyService ?? "caddy"}:${localHttps.proxyTargetPort ?? localHttps.httpsPort}`,
         ]
       : [];
   try {

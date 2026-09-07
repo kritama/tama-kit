@@ -108,6 +108,15 @@ test("legacy bootstrap recognition ignores noncanonical historical topology and 
   assert.deepEqual(snapshot(root), before);
 });
 
+test("legacy bootstrap rejects MCP App capability flags on existing projects", async () => {
+  const root = standard();
+  const before = snapshot(root);
+  const response = await command(root, "bootstrap", "--mcp-app", "--start", "--json");
+  assert.equal(response.code, 2, JSON.stringify(response.result));
+  assert.match(response.result.error.message, /generate mcp-app/u);
+  assert.deepEqual(snapshot(root), before);
+});
+
 test("doctor and setup dry-run ignore absent or malformed receipts and preserve bytes", async () => {
   const root = standard();
   const receipt = join(root, "tama/.tama-kit.json");

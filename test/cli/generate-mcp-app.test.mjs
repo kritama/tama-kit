@@ -16,6 +16,7 @@ import { run } from "../../cli/index.mjs";
 import { contentDigest } from "../../cli/shared/files.mjs";
 import { applyOperationsTransactionally } from "../../cli/shared/write.mjs";
 import { planTamaModeChange } from "../../cli/workflows/activation.mjs";
+import { validateComposeBuildOverrideVersion } from "../../cli/workflows/generate-mcp-app.mjs";
 import { memoveeContract, writeContract } from "../helpers/mcp-app.mjs";
 import { temporaryDirectory } from "../helpers/temporary.mjs";
 
@@ -53,6 +54,16 @@ function snapshot(root) {
   });
 }
 const generate = (root, ...args) => command(root, "generate", "mcp-app", ...args, "--json");
+
+test("Compose build override validation requires version 2.24.4", () => {
+  assert.doesNotThrow(() =>
+    validateComposeBuildOverrideVersion(() => "Docker Compose version v2.24.4\n"),
+  );
+  assert.throws(
+    () => validateComposeBuildOverrideVersion(() => "Docker Compose version v2.24.3\n"),
+    /2\.24\.4/u,
+  );
+});
 
 for (const source of ["flag", "contract"]) {
   test(`external provider fragments from a ${source} are rejected before writes`, async () => {
