@@ -63,10 +63,27 @@ terraform fmt -check -recursive
 terraform validate
 ```
 
-`terraform validate` does not necessarily call Tama's remote class-schema
-validator. Add or run a repository check that decodes every `tama_class`
-schema source and rejects missing or blank top-level `title` and `description`
-fields before an apply.
+`terraform validate` checks Terraform and provider configuration; it does not
+necessarily call Tama's remote class-schema validator. Express additional graph
+contracts in native Terraform: use resource preconditions for required schema
+metadata and `tests/*.tftest.hcl` plan assertions for topology or public interfaces.
+Check decoded schemas for nonblank top-level `title` and `description`; nested
+property descriptions do not satisfy that requirement. Do not create a parallel
+Python/JavaScript HCL parser or configuration-validation suite.
+
+Where native tests exist, run `terraform test`. Mock providers require Terraform
+1.7 or newer and still need the real provider schema and declared modules
+installed. Use mocked `command = plan` runs for offline graph assertions; a test
+using real providers or its default apply mode can create resources, so inspect
+it before running. A mock pass does not prove API, schema-validator, model or
+runtime acceptance. Do not assert only an advertised readiness flag or a resource
+count when the contract concerns actual trigger wiring.
+
+Keep authorization, schema/fixture semantics and idempotency in application tests.
+Runtime checks separately establish service credentials, loaded queues, provider
+messages and completed graph results. Missing tools, provider startup failures or
+unavailable services are validation limits, not a reason to build a replacement
+validator or report a pass.
 
 Run `terraform init` only when required to install the declared provider and
 modules. Run `terraform plan` only with approved configuration. Never use
