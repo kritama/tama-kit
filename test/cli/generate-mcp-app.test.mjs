@@ -118,6 +118,25 @@ test("additive HTTP generation preserves original scaffold and supports current 
       after.find(([path]) => path === entry[0]),
       entry,
     );
+  for (const name of ["setup", "activate", "doctor"])
+    assert.ok(response.result.commands[name].includes("--env-file 'tama/.tama.env'"));
+  const guidance = await command(
+    root,
+    "doctor",
+    "--compose",
+    "compose.yaml",
+    "--compose",
+    "tama/compose.mcp-app.yaml",
+    "--env-file",
+    "tama/.tama.env",
+    "--json",
+  );
+  assert.equal(guidance.code, 0, JSON.stringify(guidance.result));
+  const rootSetup = guidance.result.setup.nextActions.find(
+    ({ id }) => id === "complete-root-setup",
+  );
+  assert.ok(rootSetup.description.includes(join(root, "tama/.tama.env")));
+  assert.ok(!rootSetup.description.includes(".mcp-app.env"));
   assert.equal(response.result.setup.runtimeVerified, false);
   assert.doesNotMatch(JSON.stringify(response.result), /PRIVATE_KEY|"d":|pending-secret/);
   const selected = { cwd: root, composeFiles: ["compose.yaml", "tama/compose.mcp-app.yaml"] };
@@ -261,6 +280,30 @@ test("selection supports renamed services, relocated secrets, absent bootstrap r
   );
   assert.equal(response.code, 0, JSON.stringify(response.result));
   assert.match(response.result.commands.setup, /override.yaml.*compose.mcp-app.yaml/);
+  for (const name of ["setup", "activate", "doctor"])
+    assert.ok(response.result.commands[name].includes("--env-file 'private/engine.env'"));
+  const guidance = await command(
+    root,
+    "doctor",
+    "--compose",
+    "compose.yaml",
+    "--compose",
+    "override.yaml",
+    "--compose",
+    "tama/compose.mcp-app.yaml",
+    "--service",
+    "engine",
+    "--env-file",
+    "private/engine.env",
+    "--json",
+  );
+  assert.equal(guidance.code, 0, JSON.stringify(guidance.result));
+  assert.ok(
+    guidance.result.setup.nextActions
+      .find(({ id }) => id === "complete-root-setup")
+      .description.includes(join(root, "private/engine.env")),
+  );
+
   assert.equal(
     inspectCurrentConfiguration({
       cwd: root,

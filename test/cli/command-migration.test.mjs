@@ -250,6 +250,17 @@ test("current inspection follows renamed services, relocated env files and order
   assert.deepEqual(snapshot(root), before);
 });
 
+test("setup rejects activation of a standard runtime before starting or writing", async () => {
+  const root = standard();
+  const before = snapshot(root);
+  for (const flags of [[], ["--dry-run"]]) {
+    const response = await command(root, "setup", "--activate", ...flags, "--json");
+    assert.equal(response.code, 2, JSON.stringify(response.result));
+    assert.match(response.result.error.message, /--activate requires an MCP App configuration/);
+    assert.deepEqual(snapshot(root), before);
+  }
+});
+
 test("MCP inspection reads current bindings; activation and recovery preserve keys and unrelated edits", async () => {
   const { root } = mcp();
   unlinkSync(join(root, "tama/.tama-kit.json"));

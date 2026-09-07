@@ -100,6 +100,10 @@ export async function runSetup(argv, io, command = "setup") {
       caFile: values["ca-file"],
     });
     let activate = Boolean(values.activate);
+    if (activate && !plan.mcpApp)
+      throw usageError(
+        "--activate requires an MCP App configuration; add it with tama-kit generate mcp-app first",
+      );
     if (!doctor && !dryRun && !json && !values["non-interactive"] && io.interactive && io.prompt) {
       const next = await questions(io).choice("Current project configuration found.", [
         "Start and verify services",

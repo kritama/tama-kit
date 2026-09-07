@@ -257,7 +257,10 @@ export function planMcpAppAddition(
   }
   const composeFiles = [...current.runtime.composeFiles, join(root, MCP_ADDITION.compose)];
   const flags = composeFiles.map((path) => `--compose ${quote(relative(root, path))}`).join(" ");
-  const selectFlags = `--service ${quote(selected)}${options.providerService ? ` --provider-service ${quote(options.providerService)}` : ""}`;
+  const environmentFlag = current.runtime.environmentFile
+    ? ` --env-file ${quote(relative(root, current.runtime.environmentFile))}`
+    : "";
+  const selectFlags = `--service ${quote(selected)}${environmentFlag}${options.providerService ? ` --provider-service ${quote(options.providerService)}` : ""}`;
   const native = `docker compose ${composeFiles.map((path) => `-f ${quote(relative(root, path))}`).join(" ")}`;
   const startServices = new Set<string>();
   function selectDependencies(name: string) {

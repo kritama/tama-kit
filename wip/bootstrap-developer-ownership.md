@@ -544,3 +544,18 @@ The latest commit's complete CI results remain tracked on PR #33.
 No extra Compose 2.24.4 gate was added for HTTP `!reset`: Compose 2.20.0 uses
 compose-go 1.16.0, whose reset processor already handles that tag. The documented
 2.24.4 requirement applies to `!override`, used by the existing HTTPS path.
+
+
+## Activation guard and provisioner handoff (2026-09-07)
+
+Setup rejects explicit activation when current inspection finds no MCP App,
+before prompts, runtime startup or writes; the guard also applies to previews.
+Additive setup, activation and doctor commands retain the baseline private
+environment selection with `--env-file`. This preserves provisioner-credential
+guidance for both the default runtime environment and relocated files while
+activation continues to discover its separate mode source.
+
+Regression coverage verifies rejection for a standard runtime and provisioner
+handoffs for default and relocated environments. Local validation: 325 tests
+passed, one expected platform skip, no failures. Build, Biome, installed-package,
+submission and whitespace checks passed. CI is tracked on PR #33.
