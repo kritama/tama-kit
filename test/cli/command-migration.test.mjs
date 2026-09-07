@@ -200,6 +200,24 @@ test("MCP inspection reads current bindings; activation and recovery preserve ke
   assert.equal(existsSync(join(root, "tama/.tama-kit.json")), false);
 });
 
+test("setup dry-run activation reports only preview progress and preserves both mode files", async () => {
+  const { root } = mcp();
+  const before = snapshot(root);
+  for (const args of [["--dry-run"], ["--dry-run", "--activate"]]) {
+    const response = await command(root, "setup", ...args, "--json");
+    assert.equal(response.code, 0, JSON.stringify(response.result));
+    assert.equal(response.result.setup.phase, "planned");
+    assert.equal(response.result.started, false);
+    assert.equal(response.result.setup.runtimeVerified, false);
+    assert.equal(response.result.setup.runtimeHealth, "not-checked");
+    assert.deepEqual(
+      response.result.setup.nextActions.map(({ id }) => id),
+      ["review-and-prepare"],
+    );
+    assert.deepEqual(snapshot(root), before);
+  }
+});
+
 test("disabled MCP integrations still validate current provider configuration", async () => {
   const { root, plan } = mcp();
   const environmentPath = join(root, "tama/.tama.env");

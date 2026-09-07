@@ -14,18 +14,17 @@ export function setupProgress(plan, { dryRun, started }) {
   const providerMode = mcp?.providerLifecycle ?? null;
   const verified = !dryRun && plan.mcpAppVerification?.verified === true;
   const restartRequired = tamaMode === "enabled" && providerMode === "prepared";
-  const phase =
-    verified && tamaMode === "enabled" && providerMode === "enabled"
+  const phase = dryRun
+    ? "planned"
+    : verified && tamaMode === "enabled" && providerMode === "enabled"
       ? "enabled"
       : restartRequired
         ? "provider-restart-required"
         : tamaMode === "enabled" && providerMode === "enabled"
           ? "verification-required"
-          : dryRun
-            ? "planned"
-            : started
-              ? "running"
-              : "configured";
+          : started
+            ? "running"
+            : "configured";
   /** @type {Array<{id: string, workingDirectory: string, description: string}>} */
   const nextActions = [];
   const add = (
@@ -35,50 +34,52 @@ export function setupProgress(plan, { dryRun, started }) {
   ) => nextActions.push({ id, workingDirectory, description });
   if (dryRun)
     add("review-and-prepare", "Review the proposed changes, then prepare the configuration.");
-  if (!started)
+  if (!dryRun) {
+    if (!started)
+      add(
+        "start-runtime",
+        "Run tama-kit setup to start the selected services; verify Docker and Compose first.",
+      );
+    if (!environment.get("TAMA_CLIENT_ID") || !environment.get("TAMA_CLIENT_SECRET")) {
+      add(
+        "complete-root-setup",
+        `Follow the project README to create the root user and provisioner credentials through the private browser setup. Store credentials directly in ${plan.runtime?.environmentFile ?? "tama/.tama.env"}.`,
+      );
+    }
     add(
-      "start-runtime",
-      "Run tama-kit setup to start the selected services; verify Docker and Compose first.",
+      "review-foundation",
+      "Load the current private provisioner environment; run terraform init, fmt -check, validate, and plan. Review and explicitly authorize apply, then provision an active root recipient. Provisioner credentials are not MCP-client credentials.",
+      join(plan.root, "tama"),
     );
-  if (!environment.get("TAMA_CLIENT_ID") || !environment.get("TAMA_CLIENT_SECRET")) {
-    add(
-      "complete-root-setup",
-      `Follow the project README to create the root user and provisioner credentials through the private browser setup. Store credentials directly in ${plan.runtime?.environmentFile ?? "tama/.tama.env"}.`,
-    );
+    if (provider && phase !== "enabled") {
+      if (mcp?.environmentLoading !== "verified")
+        add(
+          "configure-provider-loader",
+          `Have the application load ${provider.environmentFile} and run the OAuth provider in its configured mode.`,
+        );
+      if (restartRequired)
+        add(
+          "restart-provider-enabled",
+          `Set the provider's ${mcp?.bindings.roles.mode} to enabled and restart it using the application-owned workflow; rerun tama-kit setup to continue verification.`,
+        );
+      else
+        add(
+          "activate-mcp-app",
+          "When the provider and foundation are ready, rerun tama-kit setup and select staged activation. Prepared /mcp/app returns 404 intentionally. Follow the provider mode-change/restart handoff, then rerun to verify both services.",
+        );
+    }
+    if (provider)
+      add(
+        "connect-mcp-client",
+        "After live enabled verification, connect an OAuth MCP client using authorization code with PKCE. Never give it the Terraform provisioner secret.",
+      );
   }
-  add(
-    "review-foundation",
-    "Load the current private provisioner environment; run terraform init, fmt -check, validate, and plan. Review and explicitly authorize apply, then provision an active root recipient. Provisioner credentials are not MCP-client credentials.",
-    join(plan.root, "tama"),
-  );
-  if (provider && phase !== "enabled") {
-    if (mcp?.environmentLoading !== "verified")
-      add(
-        "configure-provider-loader",
-        `Have the application load ${provider.environmentFile} and run the OAuth provider in its configured mode.`,
-      );
-    if (restartRequired)
-      add(
-        "restart-provider-enabled",
-        `Set the provider's ${mcp?.bindings.roles.mode} to enabled and restart it using the application-owned workflow; rerun tama-kit setup to continue verification.`,
-      );
-    else
-      add(
-        "activate-mcp-app",
-        "When the provider and foundation are ready, rerun tama-kit setup and select staged activation. Prepared /mcp/app returns 404 intentionally. Follow the provider mode-change/restart handoff, then rerun to verify both services.",
-      );
-  }
-  if (provider)
-    add(
-      "connect-mcp-client",
-      "After live enabled verification, connect an OAuth MCP client using authorization code with PKCE. Never give it the Terraform provisioner secret.",
-    );
   return {
     phase,
     tamaMode: tamaMode ?? null,
     providerMode: providerMode ?? null,
     runtimeVerified: verified,
-    runtimeHealth: started ? "checked-this-run" : "not-checked",
+    runtimeHealth: !dryRun && started ? "checked-this-run" : "not-checked",
     foundation: "not-verified",
     nextActions,
   };

@@ -14,6 +14,7 @@ import test from "node:test";
 import { inspectCurrentConfiguration } from "../../cli/bootstrap/current-config.mjs";
 import { run } from "../../cli/index.mjs";
 import { contentDigest } from "../../cli/shared/files.mjs";
+import { memoveeContract, writeContract } from "../helpers/mcp-app.mjs";
 import { temporaryDirectory } from "../helpers/temporary.mjs";
 
 const image = "ghcr.io/upmaru/tama:0.13.2-server";
@@ -50,6 +51,28 @@ function snapshot(root) {
   });
 }
 const generate = (root, ...args) => command(root, "generate", "mcp-app", ...args, "--json");
+
+for (const source of ["flag", "contract"]) {
+  test(`external provider fragments from a ${source} are rejected before writes`, async () => {
+    const root = await standard();
+    let args;
+    if (source === "flag") {
+      args = [...http, "--provider-env-file", "config/acme.env"];
+    } else {
+      const contract = memoveeContract();
+      contract.provider.environment_file = "config/acme.env";
+      contract.environment_loading.loads = "config/acme.env";
+      args = ["--mcp-app-contract", writeContract(root, contract)];
+    }
+    const before = snapshot(root);
+    for (const mode of [[], ["--dry-run"]]) {
+      const result = await generate(root, ...args, ...mode);
+      assert.equal(result.code, 2, JSON.stringify(result.result));
+      assert.match(result.result.error.message, /must be inside the Tama directory/);
+      assert.deepEqual(snapshot(root), before);
+    }
+  });
+}
 
 test("additive HTTP generation preserves original scaffold and supports current setup and native Compose", async () => {
   const root = await standard();

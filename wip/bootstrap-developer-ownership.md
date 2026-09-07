@@ -491,3 +491,21 @@ TypeScript build, Biome, submission, installed-package and whitespace checks pas
 Regression tests cover disabled and missing-mode contracts, changed port/image
 resumes, unchanged failed-resume snapshots, and successful original-option recovery.
 The review-fix commit's runtime checks are tracked on PR #33.
+
+
+## Dry-run progress and provider-path review (2026-09-07)
+
+Setup passes its actual dry-run state into progress reporting. Preview takes
+precedence over enabled/restart phases, reports no runtime verification, and
+returns only a review action. Activation previews preserve both mode files.
+
+The reported out-of-scope provider-fragment ignore failure is blocked by the
+existing generation contract: flags and contracts must select fragments inside
+`tama/`. Command-level regressions now verify that `config/acme.env` is rejected
+before any writes in both normal and dry-run invocation. No path restriction or
+ignore scope was changed. Current-configuration inspection still supports
+application-owned relocated fragments after generation.
+
+Local validation: 319 tests passed, one expected platform skip, no failures.
+Build, Biome, installed-package, submission and whitespace checks passed.
+The current commit's CI is tracked on PR #33.
