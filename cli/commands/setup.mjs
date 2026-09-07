@@ -6,6 +6,7 @@ import { createLocalHttpsFetch } from "../bootstrap/mcp-app-verify.mjs";
 import { publicPlan } from "../bootstrap/plan.mjs";
 import { setupProgress } from "../bootstrap/setup-progress.mjs";
 import { fetchWithTimeout } from "../bootstrap/start.mjs";
+import { lifecycleCheckpoint } from "../domain/lifecycle.mjs";
 import { CLIError, EXIT_CODES, startupError, usageError } from "../errors.mjs";
 import { createProgressBar } from "../terminal.mjs";
 import { planTamaModeChange } from "../workflows/activation.mjs";
@@ -104,13 +105,22 @@ export async function runSetup(argv, io, command = "setup") {
       throw usageError(
         "--activate requires an MCP App configuration; add it with tama-kit generate mcp-app first",
       );
+    const activationAvailable = Boolean(
+      plan.mcpApp &&
+        lifecycleCheckpoint(plan.mcpApp.lifecycle, plan.mcpApp.providerLifecycle).kind !==
+          "configured",
+    );
+    if (activate && !activationAvailable)
+      throw usageError(
+        "--activate requires both services prepared, or Tama enabled with its provider prepared/enabled. Set disabled services to prepared through their current configuration before activating.",
+      );
     if (!doctor && !dryRun && !json && !values["non-interactive"] && io.interactive && io.prompt) {
       const next = await questions(io).choice("Current project configuration found.", [
         "Start and verify services",
-        ...(plan.mcpApp ? ["Start and activate MCP App"] : []),
+        ...(activationAvailable ? ["Start and activate MCP App"] : []),
         "Finish",
       ]);
-      if (next === (plan.mcpApp ? 2 : 1)) throw new CancelledInput();
+      if (next === (activationAvailable ? 2 : 1)) throw new CancelledInput();
       activate ||= next === 1;
     }
     let healthUrl;

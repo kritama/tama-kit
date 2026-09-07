@@ -430,6 +430,9 @@ export function inspectCurrentConfiguration(
       providerService,
     };
     plan.localHttps = localHttps;
+    // Match generation output: local HTTPS exposes the service port here,
+    // while the public endpoint and proxy port remain in their own fields.
+    plan.port = localHttps.tamaPort;
   }
   if (providerService) {
     const selected = new Set<string>();

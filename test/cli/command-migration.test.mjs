@@ -281,6 +281,71 @@ test("MCP inspection reads current bindings; activation and recovery preserve ke
   assert.equal(existsSync(join(root, "tama/.tama-kit.json")), false);
 });
 
+test("activation accepts only supported lifecycle combinations without changing previews", async () => {
+  const { root, plan } = mcp();
+  const tamaPath = join(root, "tama/.tama.env");
+  const providerPath = join(root, plan.mcpApp.provider.environmentFile);
+  const tamaContent = readFileSync(tamaPath, "utf8");
+  const providerContent = readFileSync(providerPath, "utf8");
+  const providerVariable = plan.mcpApp.bindings.roles.mode;
+  for (const tama of ["disabled", "prepared", "enabled"]) {
+    for (const provider of ["disabled", "prepared", "enabled"]) {
+      writeFileSync(
+        tamaPath,
+        tamaContent.replace("TAMA_MCP_APP_MODE=prepared", `TAMA_MCP_APP_MODE=${tama}`),
+      );
+      writeFileSync(
+        providerPath,
+        providerContent.replace(`${providerVariable}=prepared`, `${providerVariable}=${provider}`),
+      );
+      const supported =
+        (tama === "prepared" && provider === "prepared") ||
+        (tama === "enabled" && provider !== "disabled");
+      const before = snapshot(root);
+      const preview = await command(root, "setup", "--activate", "--dry-run", "--json");
+      assert.equal(
+        preview.code,
+        supported ? 0 : 2,
+        `${tama}/${provider}: ${JSON.stringify(preview.result)}`,
+      );
+      if (!supported) {
+        const live = await command(root, "setup", "--activate", "--json");
+        assert.equal(live.code, 2, `${tama}/${provider}: ${JSON.stringify(live.result)}`);
+        assert.match(live.result.error.message, /--activate requires both services prepared/);
+      }
+      assert.deepEqual(snapshot(root), before);
+    }
+  }
+});
+
+test("HTTPS inspection reports the service port while retaining public URLs and HTTP port semantics", async () => {
+  const root = temporaryDirectory("tama-https-inspection-port-");
+  const generated = planWithMcp(root, {
+    ...preparedFor(root),
+    allowedOrigins: ["https://app.localhost"],
+  });
+  applyOperations(generated.operations);
+  mkdirSync(join(root, "tama/tls"), { recursive: true });
+  // Configuration-only inspection needs the declared file, not a live TLS handshake.
+  writeFileSync(join(root, "tama/tls/rootCA.pem"), "inspection-only CA placeholder\n");
+  const before = snapshot(root);
+  for (const args of [["doctor"], ["setup", "--dry-run"]]) {
+    const response = await command(root, ...args, "--json");
+    assert.equal(response.code, 0, JSON.stringify(response.result));
+    assert.equal(response.result.port, generated.port);
+    assert.equal(response.result.port, 4000);
+    assert.equal(response.result.localHttps.tamaPort, 4000);
+    assert.equal(response.result.localHttps.httpsPort, 443);
+    assert.equal(response.result.localHttps.healthUrl, "https://tama.app.localhost/");
+  }
+  assert.deepEqual(snapshot(root), before);
+  const httpRoot = temporaryDirectory("tama-http-inspection-port-");
+  applyOperations(
+    createBootstrapPlan({ cwd: httpRoot, port: 4567, skillMode: "manual" }).operations,
+  );
+  assert.equal(inspectCurrentConfiguration({ cwd: httpRoot }).port, 4567);
+});
+
 test("setup dry-run activation reports only preview progress and preserves both mode files", async () => {
   const { root } = mcp();
   const before = snapshot(root);

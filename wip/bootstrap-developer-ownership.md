@@ -559,3 +559,21 @@ Regression coverage verifies rejection for a standard runtime and provisioner
 handoffs for default and relocated environments. Local validation: 325 tests
 passed, one expected platform skip, no failures. Build, Biome, installed-package,
 submission and whitespace checks passed. CI is tracked on PR #33.
+
+
+## Lifecycle eligibility and HTTPS port reporting (2026-09-07)
+
+Explicit activation rejects disabled or out-of-order lifecycle combinations
+before startup or preview. The interactive menu offers activation only at the
+supported prepared, provider-restart and enabled-verification checkpoints.
+Ordinary setup and doctor can still inspect disabled configurations.
+
+Current local-HTTPS inspection reports the effective Tama listener in top-level
+`port`, matching generation and `localHttps.tamaPort`. Public origin/health URL and
+`httpsPort` retain their distinct values. HTTP published-port reporting is unchanged.
+
+Regression coverage exercises all nine lifecycle pairs, no-write rejection,
+HTTPS generation/inspection parity and non-default HTTP published ports. Local
+validation: 327 tests passed, one expected platform skip, no failures. Build,
+Biome, installed-package, submission and whitespace checks passed. CI is tracked
+on PR #33.
