@@ -38,6 +38,10 @@ test("MCP App guidance makes bootstrap validation the first provider-work gate",
 
 test("Tama Kit CLI guidance repeats the bootstrap gate", () => {
   const tamaKitCli = readFileSync(resolve(ROOT, "skills/tama-kit-cli/SKILL.md"), "utf8");
+  const cliReference = readFileSync(
+    resolve(ROOT, "skills/tama-kit-cli/references/cli-reference.md"),
+    "utf8",
+  );
   const providerWorkflow = tamaKitCli.indexOf("## MCP App provider bootstrap");
   const bootstrapState = tamaKitCli.indexOf("the Tama Kit bootstrap state before");
   const oauthReadiness = tamaKitCli.indexOf("After the bootstrap gate passes");
@@ -56,7 +60,7 @@ test("Tama Kit CLI guidance repeats the bootstrap gate", () => {
   assert.match(tamaKitCli, /Do not require a Tama source checkout/u);
   assert.match(tamaKitCli, /in-app browser/u);
   assert.match(tamaKitCli, /## Standard application command contract/u);
-  assert.match(tamaKitCli, /## Complete interactive Tama setup when requested/u);
+  assert.match(tamaKitCli, /## Complete browser root setup when requested/u);
   assert.match(tamaKitCli, /### Tama source-development command contract/u);
   assert.match(tamaKitCli, /### Standalone System OAuth key command contract/u);
   assert.match(tamaKitCli, /existing `local` mode must remain `--skills local`/u);
@@ -65,10 +69,10 @@ test("Tama Kit CLI guidance repeats the bootstrap gate", () => {
   assert.match(tamaKitCli, /every non-loopback allowed\s+origin must use HTTPS/u);
   assert.match(tamaKitCli, /at most 32 unique allowed origins/u);
   assert.match(tamaKitCli, /official server image\s+tag `<version>-server`/u);
-  assert.match(tamaKitCli, /Supported MCP App flags are `--provider-name/u);
+  assert.match(tamaKitCli, /\[CLI reference\]\(references\/cli-reference\.md\)/u);
+  assert.match(cliReference, /`--provider-name <name>`/u);
   assert.match(tamaKitCli, /`--provider-origin/u);
   assert.match(tamaKitCli, /`--tama-origin/u);
-  assert.doesNotMatch(tamaKitCli, /CLI reference/u);
 });
 
 test("generated local instructions gate Docker runtime use", () => {
