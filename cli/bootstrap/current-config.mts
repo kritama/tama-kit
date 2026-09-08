@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { parseEnv } from "node:util";
 import type { InspectOptions, RuntimePlan } from "../domain/runtime.mjs";
@@ -527,6 +527,11 @@ export function inspectCurrentConfiguration(
 export function inspectTerraform(root: string, execute = execFileSync, selectedRoot = "tama") {
   const directory = resolve(root, selectedRoot);
   if (!existsSync(directory)) return { status: "missing" };
+  if (!statSync(directory).isDirectory())
+    return {
+      status: "invalid",
+      nextAction: "Select a Terraform directory as the selected root.",
+    };
   try {
     execute("terraform", ["version", "-json"], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
   } catch {

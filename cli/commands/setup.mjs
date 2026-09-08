@@ -26,7 +26,9 @@ export function setupUsage(command = "setup") {
     "  --contract <path>         Select the project-owned local MCP App contract",
     "  --provider-service <name> Select the provider service",
     "  --ca-file <path>          Select the HTTPS CA certificate",
-    "  --terraform-root <path>   Terraform directory for read-only doctor validation",
+    ...(command === "doctor"
+      ? ["  --terraform-root <path>   Terraform directory for read-only doctor validation"]
+      : []),
     ...(command === "doctor"
       ? ["  --runtime                Also run non-mutating runtime probes"]
       : [
@@ -73,6 +75,8 @@ export function parseSetup(argv, command) {
     throw usageError("doctor accepts --runtime, not setup mutation options");
   if (command === "setup" && parsed.values.runtime)
     throw usageError("--runtime is a doctor option");
+  if (command === "setup" && parsed.values["terraform-root"] !== undefined)
+    throw usageError("--terraform-root is a doctor option");
   if (parsed.positionals.length > 1) throw usageError("expected at most one project path");
   return parsed;
 }

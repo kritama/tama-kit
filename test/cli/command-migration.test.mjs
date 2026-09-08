@@ -13,10 +13,14 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { inspectCurrentConfiguration } from "../../cli/bootstrap/current-config.mjs";
+import {
+  inspectCurrentConfiguration,
+  inspectTerraform,
+} from "../../cli/bootstrap/current-config.mjs";
 import { validateMcpAppContract } from "../../cli/bootstrap/mcp-app-contract.mjs";
 import { createBootstrapPlan } from "../../cli/bootstrap/plan.mjs";
 import { composeUpArguments, probeComposeProviderEndpoint } from "../../cli/bootstrap/start.mjs";
+import { parseSetup, setupUsage } from "../../cli/commands/setup.mjs";
 import { run } from "../../cli/index.mjs";
 import { contentDigest } from "../../cli/shared/files.mjs";
 import { applyOperations, applyOperationsTransactionally } from "../../cli/shared/write.mjs";
@@ -285,6 +289,24 @@ test("setup rejects activation of a standard runtime before starting or writing"
     assert.match(response.result.error.message, /--activate requires an MCP App configuration/);
     assert.deepEqual(snapshot(root), before);
   }
+});
+
+test("setup rejects the doctor-only Terraform root option", () => {
+  assert.throws(
+    () => parseSetup(["--terraform-root", "infra"], "setup"),
+    /--terraform-root is a doctor option/u,
+  );
+  assert.doesNotMatch(setupUsage("setup"), /--terraform-root/u);
+  assert.match(setupUsage("doctor"), /--terraform-root/u);
+});
+
+test("Terraform inspection rejects a file selected as the root", () => {
+  const root = temporaryDirectory("tama-terraform-file-root-");
+  writeFileSync(join(root, "package.json"), "{}\n");
+  assert.deepEqual(inspectTerraform(root, undefined, "package.json"), {
+    status: "invalid",
+    nextAction: "Select a Terraform directory as the selected root.",
+  });
 });
 
 test("MCP inspection reads current bindings; activation and recovery preserve keys and unrelated edits", async () => {
