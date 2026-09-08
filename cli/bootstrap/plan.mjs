@@ -22,7 +22,6 @@ import {
   MCP_APP_COMPATIBILITY_IDENTIFIER,
 } from "./mcp-app-contract.mjs";
 import {
-  MCP_APP_LOCAL_CONTRACT_PATH,
   mcpAppLocalContractFilename,
   serializeMcpAppLocalContract,
 } from "./mcp-app-local-contract.mjs";
@@ -453,7 +452,7 @@ export function publicPlan(plan) {
     providerContract:
       plan.mcpApp?.localContract && plan.mcpApp.localContractOperation
         ? {
-            path: MCP_APP_LOCAL_CONTRACT_PATH,
+            path: relative(plan.root, plan.mcpApp.localContractOperation.path),
             source: plan.mcpApp.localContract.source.type,
             sourcePath: plan.mcpApp.localContract.source.provider_contract_path,
             bindingSource: plan.mcpApp.bindings.source,

@@ -43,7 +43,9 @@ export function setupProgress(plan, { dryRun, started }) {
     if (!environment.get("TAMA_CLIENT_ID") || !environment.get("TAMA_CLIENT_SECRET")) {
       add(
         "complete-root-setup",
-        `Follow the project README to create the root user and provisioner credentials through the private browser setup. Store credentials directly in ${plan.runtime?.environmentFile ?? "tama/.tama.env"}.`,
+        plan.runtime?.environmentFile
+          ? `Follow the project README to create the root user and provisioner credentials through the private browser setup. Store credentials directly in ${plan.runtime.environmentFile}.`
+          : "Follow the project README to create the root user and provisioner credentials through the private browser setup. Rerun tama-kit setup with --env-file selecting the loaded private environment before storing credentials.",
       );
     }
     add(

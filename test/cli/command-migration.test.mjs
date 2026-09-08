@@ -535,6 +535,43 @@ test("current contract supports relocated provider fragments and customized endp
   assert.deepEqual(snapshot(root), before);
 });
 
+test("setup and doctor report a selected relocated local contract path", async () => {
+  const { root } = mcp();
+  const defaultPath = join(root, "tama/contracts/mcp-app-provider-v1.json");
+  const selectedPath = join(root, "tama/contracts/acme-local-contract.json");
+  renameSync(defaultPath, selectedPath);
+  const response = await command(
+    root,
+    "doctor",
+    "--contract",
+    "tama/contracts/acme-local-contract.json",
+    "--json",
+  );
+  assert.equal(response.code, 0, JSON.stringify(response.result));
+  assert.equal(response.result.providerContract.path, "tama/contracts/acme-local-contract.json");
+});
+
+test("setup guidance follows the unique provisioner environment declaration", () => {
+  const root = standard();
+  const environment = join(root, "tama/.tama.env");
+  const extraEnvironment = join(root, "extra.env");
+  writeFileSync(extraEnvironment, "EXTRA_SETTING=present\n", { mode: 0o600 });
+  const rootIgnore = join(root, ".gitignore");
+  writeFileSync(
+    rootIgnore,
+    `${existsSync(rootIgnore) ? readFileSync(rootIgnore, "utf8") : ""}\n/extra.env\n`,
+  );
+  writeFileSync(
+    join(root, "extra.yaml"),
+    "services:\n  tama:\n    env_file:\n      - path: ./extra.env\n        required: true\n",
+  );
+  const plan = inspectCurrentConfiguration({
+    cwd: root,
+    composeFiles: ["compose.yaml", "extra.yaml"],
+  });
+  assert.equal(plan.runtime.environmentFile, environment);
+});
+
 test("setup excludes the provider from automatic Compose startup and recreation", () => {
   const { root } = mcp();
   const contract = JSON.parse(

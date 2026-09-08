@@ -207,6 +207,15 @@ export function inspectCurrentConfiguration(
     : undefined;
   if (selectedEnvironment && !files.includes(selectedEnvironment))
     throw ownershipError("--env-file is not loaded by the selected Tama service");
+  const provisionerFiles = [...envFiles].filter(
+    ([, env]) => env.has("TAMA_CLIENT_ID") || env.has("TAMA_CLIENT_SECRET"),
+  );
+  const provisionerEnvironment =
+    provisionerFiles.length === 1 &&
+    provisionerFiles[0][1].has("TAMA_CLIENT_ID") &&
+    provisionerFiles[0][1].has("TAMA_CLIENT_SECRET")
+      ? provisionerFiles[0][0]
+      : undefined;
   const modeFiles = [...envFiles].filter(([, env]) => env.has("TAMA_MCP_APP_MODE"));
   const inline = declarations.services[serviceName]?.environment ?? {};
   // Private-environment selection does not select the activation assignment.
@@ -246,7 +255,9 @@ export function inspectCurrentConfiguration(
       composeFiles,
       service: serviceName,
       environmentFile:
-        selectedEnvironment ?? modeFile ?? (files.length === 1 ? files[0] : undefined),
+        selectedEnvironment ??
+        provisionerEnvironment ??
+        (files.length === 1 ? (modeFile ?? files[0]) : undefined),
       environment: values,
       healthUrl: `${systemOrigin}/`,
       modeSource,
