@@ -295,6 +295,10 @@ export function inspectCurrentConfiguration(
     throw ambiguityError("multiple services load the provider fragment; use --provider-service");
   if (providerService && !candidates.includes(providerService))
     throw ownershipError("selected provider service does not load the contract's environment file");
+  if (providerService === serviceName)
+    throw ownershipError(
+      "the Tama service cannot also load the provider fragment; select a separate provider service",
+    );
   const effectiveProvider = providerService
     ? environment(services[providerService])
     : providerValues;

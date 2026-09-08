@@ -19,6 +19,7 @@ export async function runExistingBootstrap(options, io, root) {
     ["tama/.tama.env", "tama/compose.yaml", "tama/contracts/mcp-app-provider-v1.json"].some(
       (path) => existsSync(join(root, path)),
     );
+  const mcpConfigured = existsSync(join(root, "tama/contracts/mcp-app-provider-v1.json"));
   if (!configured) {
     if (options.resumeId) throw ownershipError("resume requires an unfinished generation receipt");
     return null;
@@ -35,7 +36,7 @@ export async function runExistingBootstrap(options, io, root) {
     options.generationId = evidence.receipt.operation.id;
     return null;
   }
-  if (options.mcpApp)
+  if (options.mcpApp && !mcpConfigured)
     throw usageError(
       "bootstrap --mcp-app does not add capabilities to an existing project; use tama-kit generate mcp-app",
     );

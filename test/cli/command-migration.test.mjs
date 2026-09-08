@@ -117,6 +117,23 @@ test("legacy bootstrap rejects MCP App capability flags on existing projects", a
   assert.deepEqual(snapshot(root), before);
 });
 
+test("legacy bootstrap routes configured MCP App starts to setup", async () => {
+  const { root } = mcp();
+  const response = await command(
+    root,
+    "bootstrap",
+    "--mcp-app",
+    "--start",
+    "--activate",
+    "--compose",
+    "missing.yaml",
+    "--json",
+  );
+  assert.equal(response.code, 2, JSON.stringify(response.result));
+  assert.match(response.result.error.message, /Compose file does not exist/u);
+  assert.doesNotMatch(response.result.error.message, /does not add capabilities/u);
+});
+
 test("doctor and setup dry-run ignore absent or malformed receipts and preserve bytes", async () => {
   const root = standard();
   const receipt = join(root, "tama/.tama-kit.json");
@@ -288,6 +305,22 @@ test("MCP inspection reads current bindings; activation and recovery preserve ke
   );
   assert.equal(contentDigest(readFileSync(providerPath, "utf8")), providerBefore);
   assert.equal(existsSync(join(root, "tama/.tama-kit.json")), false);
+});
+
+test("inspection rejects the Tama service as the provider service", () => {
+  const { root } = mcp();
+  const composePath = join(root, "tama/compose.yaml");
+  writeFileSync(
+    composePath,
+    readFileSync(composePath, "utf8").replace(
+      "      - ./.tama.env",
+      "      - ./.tama.env\n      - ./.memovee.integration.env",
+    ),
+  );
+  assert.throws(
+    () => inspectCurrentConfiguration({ cwd: root }),
+    /Tama service cannot also load the provider fragment/u,
+  );
 });
 
 test("activation accepts only supported lifecycle combinations without changing previews", async () => {
