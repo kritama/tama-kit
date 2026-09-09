@@ -13,6 +13,32 @@ export const ADDITION_TLS = {
   bundle: "tama/mcp-app-tls/local.pem",
 };
 
+/** Validate an already-published certificate/key bundle before a resume adopts it. */
+export function validateAdditionCertificateBundle(
+  topology: LocalHttpsTopology,
+  bundle: string,
+  installLocalCa = false,
+) {
+  const ca = ensureMkcertLocalCa(installLocalCa);
+  const rootContent = readFileSync(ca.rootCertificate, "utf8");
+  try {
+    const cert = new X509Certificate(bundle);
+    const issuer = new X509Certificate(rootContent);
+    if (
+      !cert.checkPrivateKey(createPrivateKey(bundle)) ||
+      !cert.verify(issuer.publicKey) ||
+      topology.certificateNames.some((name) => !cert.checkHost(name)) ||
+      Date.parse(cert.validTo) <= Date.now() ||
+      Date.parse(cert.validFrom) > Date.now()
+    )
+      throw new Error();
+  } catch {
+    throw ownershipError(
+      "existing MCP App TLS bundle does not match its key, CA, names or validity period",
+    );
+  }
+}
+
 /** One atomic PEM bundle keeps certificate and key together across process interruption. */
 export function additionCertificates(
   root: string,
@@ -34,22 +60,7 @@ export function additionCertificates(
     if (existingBundle.mode & 0o077)
       throw ownershipError("MCP App TLS bundle must have owner-only permissions");
     bundle = readFileSync(bundlePath, "utf8");
-    try {
-      const cert = new X509Certificate(bundle);
-      const issuer = new X509Certificate(rootContent);
-      if (
-        !cert.checkPrivateKey(createPrivateKey(bundle)) ||
-        !cert.verify(issuer.publicKey) ||
-        topology.certificateNames.some((name) => !cert.checkHost(name)) ||
-        Date.parse(cert.validTo) <= Date.now() ||
-        Date.parse(cert.validFrom) > Date.now()
-      )
-        throw new Error();
-    } catch {
-      throw ownershipError(
-        "existing MCP App TLS bundle does not match its key, CA, names or validity period",
-      );
-    }
+    validateAdditionCertificateBundle(topology, bundle, installLocalCa);
   } else {
     const temporary = mkdtempSync(join(resolve(tmpdir()), "tama-addition-tls-"));
     try {

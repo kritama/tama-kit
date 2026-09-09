@@ -23,7 +23,11 @@ import { contentDigest, inspectRegularFile, operationForContent } from "../share
 import { validateSecretFilesIgnored, validateSecretFilesUntracked } from "../shared/git.mjs";
 import { validateOAuthPrivateJwk } from "../shared/oauth-key.mjs";
 import type { BootstrapCommandOptions, FileOperation, McpAppPrepared } from "../types.mjs";
-import { ADDITION_TLS, additionCertificates } from "./mcp-app-certificates.mjs";
+import {
+  ADDITION_TLS,
+  additionCertificates,
+  validateAdditionCertificateBundle,
+} from "./mcp-app-certificates.mjs";
 import { mcpAppOptions } from "./options.mjs";
 import { writeScaffold } from "./scaffold-write.mjs";
 
@@ -210,7 +214,7 @@ export function planMcpAppAddition(
   const ignorePath = join(root, "tama/.gitignore");
   inspectRegularFile(ignorePath);
   const originalIgnore = inspectRegularFile(ignorePath) ? readFileSync(ignorePath, "utf8") : "";
-  const ignoreLines = secrets.map((path) => `/${relative("tama", path)}`);
+  const ignoreLines = secrets.map((path) => `/${relative("tama", path).split("\\").join("/")}`);
   const missing = ignoreLines.filter((line) => !originalIgnore.split(/\r?\n/u).includes(line));
   const ignore = operationForContent(
     ignorePath,
@@ -367,6 +371,12 @@ export function planMcpAppAddition(
           {
             sensitive: path === ADDITION_TLS.bundle,
             mode: path === ADDITION_TLS.bundle ? 0o600 : 0o644,
+            ...(path === ADDITION_TLS.bundle
+              ? {
+                  validateExisting: (content: string) =>
+                    validateAdditionCertificateBundle(topology, content, options.installLocalCa),
+                }
+              : {}),
           },
         ),
       );
