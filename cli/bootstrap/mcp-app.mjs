@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { ownershipError, usageError } from "../errors.mjs";
+import { parseEnvironment } from "../shared/environment.mjs";
 import {
   generateOAuthKeyPair,
   validateOAuthPrivateJwk,
@@ -779,6 +780,36 @@ export function planMcpApp(input) {
   const fragmentOperation = manageFile(fragmentPath, fragmentContent, {
     sensitive: true,
     mode: 0o600,
+    validateExisting(existingContent) {
+      const existing = parseEnvironment(existingContent, fragmentPath);
+      const expected = parseEnvironment(fragmentContent, fragmentPath);
+      for (const [name, value] of expected) {
+        if (
+          name !== sourceFragmentKeyVariable &&
+          name !== sourceFragmentKidVariable &&
+          existing.get(name) !== value
+        ) {
+          throw ownershipError(
+            "resume configuration disagrees with existing provider environment; use the original generation options",
+            { path: fragmentPath },
+          );
+        }
+      }
+      const persistedKey = existing.get(sourceFragmentKeyVariable);
+      const persistedKid = existing.get(sourceFragmentKidVariable);
+      if (!persistedKey || !persistedKid) {
+        throw ownershipError(
+          `${fragmentPath} must define ${sourceFragmentKeyVariable} and ${sourceFragmentKidVariable} together`,
+          { path: fragmentPath },
+        );
+      }
+      validateOAuthPrivateJwk(
+        persistedKey,
+        persistedKid,
+        sourceFragmentKeyVariable,
+        sourceFragmentKidVariable,
+      );
+    },
   });
   // The Tama overlap set is rotation state owned by the persisted file: a
   // fresh file starts empty, a persisted set is validated, and a valid set is

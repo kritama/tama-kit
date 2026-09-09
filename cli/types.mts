@@ -51,6 +51,7 @@ export type FileOperationOptions = {
   sensitive?: boolean;
   mode?: number;
   allowUnmanagedUpdate?: boolean;
+  validateExisting?: (content: string) => void;
 };
 
 export type Framework = "rails" | "phoenix" | "node" | "generic";

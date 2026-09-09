@@ -15,6 +15,26 @@ import {
 export function createOwnedFilePlanner(root, operationId, resuming = false) {
   /** @param {string} filename @param {string} content @param {import("../types.mjs").FileOperationOptions} [options] @returns {import("../types.mjs").FileOperation} */
   function plan(filename, content, options = {}) {
+    if (resuming && options.sensitive && inspectRegularFile(filename)) {
+      if (!options.validateExisting)
+        throw ownershipError(
+          "resume cannot adopt sensitive output without validating its persisted material",
+          { path: filename },
+        );
+      const existing = readFileSync(filename, "utf8");
+      options.validateExisting(existing);
+      const digest = contentDigest(existing);
+      return {
+        action: "unchanged",
+        path: filename,
+        owner: "user",
+        sensitive: true,
+        mode: options.mode,
+        beforeDigest: digest,
+        afterDigest: digest,
+        reason: "resume reuses validated persisted sensitive material",
+      };
+    }
     const operation = generationOperationForContent(filename, content, options);
     if (operation.action === "conflict")
       throw ownershipError(

@@ -11,6 +11,7 @@ import {
 import { join } from "node:path";
 import test from "node:test";
 import { readGenerationEvidence } from "../../cli/bootstrap/generation-receipt.mjs";
+import { createOwnedFilePlanner } from "../../cli/bootstrap/owned-files.mjs";
 import { parseGenerationReceipt } from "../../cli/domain/generation.mjs";
 import { contentDigest, generationOperationForContent } from "../../cli/shared/files.mjs";
 import { applyGenerationPlan, planGeneration } from "../../cli/workflows/generation.mjs";
@@ -217,4 +218,24 @@ test("preserved private fragments keep bytes and permissions without permission 
   assert.equal(JSON.stringify(result).includes("secret-placeholder"), false);
   await applyGenerationPlan(result, () => {});
   assert.equal(statSync(filename).mode & 0o777, 0o400);
+});
+
+test("resumes reuse validated sensitive output published before receipt progress", () => {
+  const root = temporaryDirectory("tama-kit-generation-resume-");
+  const filename = join(root, "tama/.tama.env");
+  mkdirSync(join(root, "tama"));
+  const persisted = "SECRET_KEY_BASE=persisted-secret\n";
+  writeFileSync(filename, persisted, { mode: 0o600 });
+  const planner = createOwnedFilePlanner(root, "resume-secrets", true);
+  const result = planner.plan(filename, "SECRET_KEY_BASE=fresh-secret\n", {
+    sensitive: true,
+    mode: 0o600,
+    validateExisting(content) {
+      assert.equal(content, persisted);
+    },
+  });
+  assert.equal(result.action, "unchanged");
+  assert.equal(result.beforeDigest, contentDigest(persisted));
+  assert.equal(result.afterDigest, contentDigest(persisted));
+  assert.equal(readFileSync(filename, "utf8"), persisted);
 });

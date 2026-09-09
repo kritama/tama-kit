@@ -21,6 +21,7 @@ import { composeArguments } from "../shared/compose.mjs";
 import { parseEnvironment } from "../shared/environment.mjs";
 import { contentDigest, inspectRegularFile, operationForContent } from "../shared/files.mjs";
 import { validateSecretFilesIgnored, validateSecretFilesUntracked } from "../shared/git.mjs";
+import { validateOAuthPrivateJwk } from "../shared/oauth-key.mjs";
 import type { BootstrapCommandOptions, FileOperation, McpAppPrepared } from "../types.mjs";
 import { ADDITION_TLS, additionCertificates } from "./mcp-app-certificates.mjs";
 import { mcpAppOptions } from "./options.mjs";
@@ -286,23 +287,45 @@ export function planMcpAppAddition(
   )
     .map(([key, value]) => `${key}=${value}`)
     .join("\n")}\n`;
-  if (progress.pending && inspectRegularFile(environmentPath)) {
-    const existing = readFileSync(environmentPath, "utf8");
-    const values = parseEnvironment(existing, environmentPath);
+  const validateResumedEnvironment = (existingContent: string) => {
+    const values = parseEnvironment(existingContent, environmentPath);
     const expected = parseEnvironment(environmentContent, environmentPath);
-    // Preserve formatting and validated overlap keys omitted from updates, but
-    // never combine different resumed configuration with existing private output.
+    const persistedKeyVariables = new Set([
+      "TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY",
+      "TAMA_MCP_APP_INTROSPECTION_SIGNING_KEY_ID",
+    ]);
     for (const [name, value] of expected)
-      if (values.get(name) !== value)
+      if (!persistedKeyVariables.has(name) && values.get(name) !== value)
         throw ownershipError(
           "resume configuration disagrees with existing MCP App environment; use the original generation options",
           { path: environmentPath },
         );
+    const key = values.get("TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY");
+    const kid = values.get("TAMA_MCP_APP_INTROSPECTION_SIGNING_KEY_ID");
+    if (!key || !kid)
+      throw ownershipError(
+        "existing MCP App environment is missing its persisted introspection signing key pair",
+        { path: environmentPath },
+      );
+    validateOAuthPrivateJwk(
+      key,
+      kid,
+      "TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY",
+      "TAMA_MCP_APP_INTROSPECTION_SIGNING_KEY_ID",
+    );
+  };
+  if (progress.pending && inspectRegularFile(environmentPath)) {
+    const existing = readFileSync(environmentPath, "utf8");
+    validateResumedEnvironment(existing);
     environmentContent = existing;
   }
   const operations: FileOperation[] = [
     ignore,
-    owned.plan(environmentPath, environmentContent, { sensitive: true, mode: 0o600 }),
+    owned.plan(environmentPath, environmentContent, {
+      sensitive: true,
+      mode: 0o600,
+      validateExisting: validateResumedEnvironment,
+    }),
     ...result.plan.operations.filter((operation) => operation.path !== contractPath),
     owned.plan(contractPath, serializeMcpAppLocalContract(state.localContract)),
     ...(topology
