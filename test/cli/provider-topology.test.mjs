@@ -3,7 +3,10 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { parse } from "yaml";
-import { providerServiceDependency } from "../../cli/bootstrap/provider-topology.mjs";
+import {
+  providerServiceDependency,
+  resolveProviderTopology,
+} from "../../cli/bootstrap/provider-topology.mjs";
 import { parseBootstrap } from "../../cli/commands/bootstrap-options.mjs";
 import { applyOperations } from "../../cli/shared/write.mjs";
 import { planWithMcp, preparedFor, project } from "../helpers/mcp-app.mjs";
@@ -71,6 +74,25 @@ test("provider loader evidence must belong to the selected service", () => {
   const result = plan(root, { providerService: "memovee" });
   assert.equal(result.mcpApp.environmentLoading, "unverified");
   assert.equal(result.localHttps.providerDependency, "service_started");
+});
+
+test("provider topology validates the complete ordered Compose selection", () => {
+  const root = project();
+  const compose = join(root, "compose.yaml");
+  const override = join(root, "override.yaml");
+  writeFileSync(compose, "services:\n  tama:\n    image: example/tama\n");
+  writeFileSync(
+    override,
+    "services:\n  memovee:\n    image: example/provider:dev\n    healthcheck: {test: [CMD, check]}\n",
+  );
+  assert.equal(providerServiceDependency([compose, override], "memovee"), "service_healthy");
+  assert.deepEqual(
+    resolveProviderTopology({ providerRuntime: "compose", providerService: "memovee" }, [
+      compose,
+      override,
+    ]),
+    { providerService: "memovee", providerDependency: "service_healthy" },
+  );
 });
 
 test("generated setup guidance describes the selected provider runtime", () => {

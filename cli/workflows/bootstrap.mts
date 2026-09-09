@@ -138,6 +138,7 @@ export function createBootstrapWorkflow(overrides: Partial<typeof bootstrapEffec
           await validateReview();
           const certificatePlan = planLocalHttpsCertificates(plan.root, plan.localHttps, {
             installLocalCa: options.installLocalCa,
+            resumePending: options.resumePending,
           });
           plan.operations.push(...certificatePlan.operations);
         }

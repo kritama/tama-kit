@@ -7,7 +7,7 @@ import { lookup } from "node:dns/promises";
 import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { isIP } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 import { ownershipError, prerequisiteError, usageError } from "../errors.mjs";
 import { operationForContent } from "../shared/files.mjs";
@@ -298,7 +298,7 @@ function assertReusableTlsMaterial(paths, names) {
  * replacing an operator-owned key.
  * @param {string} root
  * @param {import("../types.mjs").LocalHttpsTopology} topology
- * @param {{allowGeneration?: boolean, installLocalCa?: boolean, discoverLocalCa?: typeof discoverMkcert, ensureLocalCa?: typeof ensureMkcertLocalCa}} [options]
+ * @param {{allowGeneration?: boolean, installLocalCa?: boolean, resumePending?: string[], discoverLocalCa?: typeof discoverMkcert, ensureLocalCa?: typeof ensureMkcertLocalCa}} [options]
  */
 export function planLocalHttpsCertificates(
   root,
@@ -306,6 +306,7 @@ export function planLocalHttpsCertificates(
   {
     allowGeneration = true,
     installLocalCa = false,
+    resumePending = [],
     discoverLocalCa = discoverMkcert,
     ensureLocalCa = ensureMkcertLocalCa,
   } = {},
@@ -314,7 +315,17 @@ export function planLocalHttpsCertificates(
   if (!allowGeneration) {
     return { paths, operations: [] };
   }
-  const existing = [paths.certificate, paths.privateKey, paths.rootCertificate].every(existsSync);
+  const tlsPaths = [paths.certificate, paths.privateKey, paths.rootCertificate];
+  const relativeTlsPaths = tlsPaths.map((path) => relative(root, path).split("\\").join("/"));
+  const hasPendingTls = relativeTlsPaths.some((path) => resumePending.includes(path));
+  const resumeTls = relativeTlsPaths.every((path) => resumePending.includes(path));
+  if (hasPendingTls && !resumeTls) {
+    throw ownershipError(
+      "local HTTPS resume must include the complete TLS material set in the unfinished receipt",
+      { paths: relativeTlsPaths },
+    );
+  }
+  const existing = tlsPaths.every(existsSync);
   if (existing) {
     const mkcert = ensureLocalCa(installLocalCa, { discover: discoverLocalCa });
     assertReusableTlsMaterial(paths, topology.certificateNames);
@@ -326,12 +337,22 @@ export function planLocalHttpsCertificates(
         { path: paths.rootCertificate },
       );
     }
-    return { paths, operations: [] };
+    return {
+      paths,
+      operations: resumeTls
+        ? tlsPaths.map((path, index) =>
+            operationForContent(path, readFileSync(path, "utf8"), {
+              sensitive: index === 1,
+              mode: index === 1 ? 0o600 : 0o644,
+            }),
+          )
+        : [],
+    };
   }
-  if ([paths.certificate, paths.privateKey, paths.rootCertificate].some(existsSync)) {
+  if (tlsPaths.some(existsSync) && !resumeTls) {
     throw ownershipError(
       `local HTTPS certificate paths already exist but do not match ${topology.certificateNames.join(", ")}; move them aside before bootstrap`,
-      { paths: [paths.certificate, paths.privateKey, paths.rootCertificate] },
+      { paths: tlsPaths },
     );
   }
   const mkcert = ensureLocalCa(installLocalCa, { discover: discoverLocalCa });
@@ -350,17 +371,17 @@ export function planLocalHttpsCertificates(
         operationForContent(paths.certificate, readFileSync(cert, "utf8"), {
           sensitive: false,
           mode: 0o644,
-          allowUnmanagedUpdate: true,
+          allowUnmanagedUpdate: resumeTls,
         }),
         operationForContent(paths.privateKey, readFileSync(key, "utf8"), {
           sensitive: true,
           mode: 0o600,
-          allowUnmanagedUpdate: true,
+          allowUnmanagedUpdate: resumeTls,
         }),
         operationForContent(paths.rootCertificate, rootCertificate, {
           sensitive: false,
           mode: 0o644,
-          allowUnmanagedUpdate: true,
+          allowUnmanagedUpdate: resumeTls,
         }),
       ],
     };

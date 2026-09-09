@@ -18,8 +18,13 @@ export function validateAdditionCertificateBundle(
   topology: LocalHttpsTopology,
   bundle: string,
   installLocalCa = false,
+  ensureLocalCa = ensureMkcertLocalCa,
 ) {
-  const ca = ensureMkcertLocalCa(installLocalCa);
+  // Planning and dry runs may validate the existing CA, but must never install
+  // it into the host trust store. Installation happens in additionCertificates
+  // after the reviewed write has been approved.
+  void installLocalCa;
+  const ca = ensureLocalCa(false);
   const rootContent = readFileSync(ca.rootCertificate, "utf8");
   try {
     const cert = new X509Certificate(bundle);

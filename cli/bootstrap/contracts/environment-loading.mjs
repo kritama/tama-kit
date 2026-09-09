@@ -18,7 +18,7 @@ import { isPlainObject, safeRead } from "./files.mjs";
  * @param {string} root
  * @param {string} environmentFile
  * @param {McpAppContract | null} contractDocument
- * @param {string} [selectedCompose]
+ * @param {string | string[]} [selectedCompose]
  * @returns {"verified" | "unverified"}
  */
 export function verifyEnvironmentLoading(root, environmentFile, contractDocument, selectedCompose) {
@@ -35,7 +35,7 @@ export function verifyEnvironmentLoading(root, environmentFile, contractDocument
  * @param {string} root
  * @param {string} environmentFile
  * @param {McpAppContract | null} contractDocument
- * @param {string} [selectedCompose]
+ * @param {string | string[]} [selectedCompose]
  * @param {string} [providerService]
  * @returns {import("../../types.mjs").EnvironmentLoadingEvidence}
  */
@@ -54,8 +54,13 @@ export function verifyEnvironmentLoadingEvidence(
   if (!providerService && envrc !== null && envrcLoadsFragment(envrc, environmentFile)) {
     return { status: "verified", mechanism: "direnv", evidencePath: ".envrc" };
   }
+  const selectedComposePaths = Array.isArray(selectedCompose)
+    ? selectedCompose.map((path) => resolve(root, path))
+    : selectedCompose
+      ? [resolve(root, selectedCompose)]
+      : [];
   const composePaths = [
-    ...(selectedCompose ? [resolve(root, selectedCompose)] : []),
+    ...selectedComposePaths,
     ...(!providerService
       ? ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"].map((name) =>
           join(root, name),

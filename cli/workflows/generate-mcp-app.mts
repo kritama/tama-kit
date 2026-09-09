@@ -105,8 +105,8 @@ export function planMcpAppAddition(
       networks?: Record<string, unknown>;
       network_mode?: string;
       profiles?: string[];
-      depends_on?: Record<string, unknown>;
-      ports?: { published?: string }[];
+      depends_on?: Record<string, unknown> | string[];
+      ports?: { published?: string | number }[];
     }
   >;
   try {
@@ -142,7 +142,7 @@ export function planMcpAppAddition(
   const topology = usesLocalHttpsTopology(requested, prepared.contractDocument)
     ? {
         ...resolveLocalHttpsTopology({
-          ...resolveProviderTopology(requested, current.composeFile),
+          ...resolveProviderTopology(requested, current.runtime.composeFiles),
           localDomain: options.localDomain,
           providerPort: options.providerPort,
           allowedOrigins: prepared.allowedOrigins,
@@ -164,6 +164,37 @@ export function planMcpAppAddition(
     throw ownershipError(
       "local HTTPS addition needs an unprofiled Tama service on the default network and an unused caddy service name",
     );
+  const startServices = new Set<string>();
+  function selectDependencies(name: string) {
+    if (name === options.providerService || startServices.has(name)) return;
+    startServices.add(name);
+    const dependencies = services[name]?.depends_on;
+    const names = Array.isArray(dependencies)
+      ? dependencies.filter((dependency): dependency is string => typeof dependency === "string")
+      : dependencies && typeof dependencies === "object"
+        ? Object.keys(dependencies)
+        : [];
+    for (const dependency of names) selectDependencies(dependency);
+  }
+  selectDependencies(selected);
+  if (topology) {
+    const conflictingServices = [...startServices].filter(
+      (name) =>
+        name !== selected &&
+        services[name]?.ports?.some((port) => {
+          const published = port.published;
+          if (typeof published === "number") return published === 443;
+          if (typeof published !== "string") return false;
+          if (/^443$/u.test(published)) return true;
+          return /^(?:\[[^\]]+\]|[^:]+):443(?::\d+)?$/u.test(published);
+        }),
+    );
+    if (conflictingServices.length > 0)
+      throw ownershipError(
+        `local HTTPS addition cannot bind host port 443; a selected startup dependency already publishes it: ${conflictingServices.join(", ")}`,
+        { port: 443, services: conflictingServices },
+      );
+  }
   if (service.build && !options.image)
     throw usageError(
       "the selected Tama service has a custom build; select its compatible release base explicitly with --image",
@@ -281,14 +312,6 @@ export function planMcpAppAddition(
     : "";
   const selectFlags = `--service ${quote(selected)}${environmentFlag}${options.providerService ? ` --provider-service ${quote(options.providerService)}` : ""}`;
   const native = `docker compose ${composeFiles.map((path) => `-f ${quote(relative(root, path))}`).join(" ")}`;
-  const startServices = new Set<string>();
-  function selectDependencies(name: string) {
-    if (name === options.providerService || startServices.has(name)) return;
-    startServices.add(name);
-    for (const dependency of Object.keys(services[name]?.depends_on ?? {}))
-      selectDependencies(dependency);
-  }
-  selectDependencies(selected);
   if (topology) startServices.add("caddy");
   const commands = {
     setup: `tama-kit setup ${flags} ${selectFlags}`,

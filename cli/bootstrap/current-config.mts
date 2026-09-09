@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parseEnv } from "node:util";
 import type { InspectOptions, RuntimePlan } from "../domain/runtime.mjs";
 import { ambiguityError, ownershipError, prerequisiteError, usageError } from "../errors.mjs";
@@ -82,6 +82,21 @@ function requireEqual(actual: string | undefined, expected: string, name: string
     throw ownershipError(
       `effective ${name} disagrees with the current public integration identity`,
     );
+}
+
+function effectivePort(value: string | undefined, variable: string) {
+  if (typeof value !== "string" || !/^\d+$/u.test(value))
+    throw ownershipError(`effective ${variable} must be an integer between 1 and 65535`, {
+      variable,
+      actual: value ?? null,
+    });
+  const port = Number.parseInt(value, 10);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535)
+    throw ownershipError(`effective ${variable} must be between 1 and 65535`, {
+      variable,
+      actual: value,
+    });
+  return port;
 }
 function selectService(
   services: Record<string, Service>,
@@ -168,6 +183,7 @@ export function inspectCurrentConfiguration(
   );
   const service = services[serviceName];
   const values = environment(service);
+  const tamaContainerPort = effectivePort(values.get("PORT"), "PORT");
   if (
     Buffer.byteLength(values.get("SECRET_KEY_BASE") ?? "") < 64 ||
     !isValidVaultKey(values.get("TAMA_VAULT_KEY") ?? "")
@@ -439,11 +455,11 @@ export function inspectCurrentConfiguration(
       tamaJwksUri: `${tamaOrigin}/.well-known/jwks.json`,
       healthUrl: `${tamaOrigin}/`,
       providerPort: topology.provider_port,
-      tamaPort: Number(values.get("PORT") ?? 4000),
+      tamaPort: tamaContainerPort,
       httpsPort: topology.https_port,
       proxyTargetPort,
-      providerUpstream: `${providerService ?? "host.docker.internal"}:${topology.provider_port}`,
-      tamaUpstream: `${serviceName}:${values.get("PORT") ?? 4000}`,
+      providerUpstream: `http://${providerService ?? "host.docker.internal"}:${topology.provider_port}`,
+      tamaUpstream: `http://${serviceName}:${tamaContainerPort}`,
       certificateNames: topology.certificate_names,
       caddyImage: services[proxy].image ?? "",
       trustMechanism: topology.trust_mechanism,
@@ -467,18 +483,13 @@ export function inspectCurrentConfiguration(
     if (plan.runtime.proxyService) selectDependencies(plan.runtime.proxyService);
     plan.runtime.startServices = [...selected];
   }
-  const loading = providerService
-    ? {
-        status: "verified" as const,
-        mechanism: "compose-env-file" as const,
-        evidencePath: relative(root, composeFiles[0]),
-      }
-    : verifyEnvironmentLoadingEvidence(
-        root,
-        contract.provider.environment_file,
-        null,
-        composeFiles[0],
-      );
+  const loading = verifyEnvironmentLoadingEvidence(
+    root,
+    contract.provider.environment_file,
+    null,
+    composeFiles,
+    providerService,
+  );
   const contractContent = readFileSync(contractPath, "utf8");
   plan.mcpApp = {
     provider: {

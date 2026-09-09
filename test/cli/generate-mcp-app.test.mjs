@@ -352,6 +352,28 @@ test("HTTPS preview preserves original ports and keys on disk and describes over
   assert.deepEqual(snapshot(root), before);
 });
 
+test("HTTPS generation rejects host port conflicts in selected dependencies", async () => {
+  const root = await standard();
+  writeFileSync(
+    join(root, "override.yaml"),
+    'services:\n  tama-postgres:\n    ports:\n      - "127.0.0.1:443:5432"\n',
+  );
+  const before = snapshot(root);
+  const response = await generate(
+    root,
+    "--provider-name",
+    "example",
+    "--compose",
+    "compose.yaml",
+    "--compose",
+    "override.yaml",
+    "--dry-run",
+  );
+  assert.equal(response.code, 4, JSON.stringify(response.result));
+  assert.match(response.result.error.message, /already publishes it: tama-postgres/u);
+  assert.deepEqual(snapshot(root), before);
+});
+
 test("HTTPS generation rejects an invalid effective Tama container port", async () => {
   const root = await standard();
   const environmentPath = join(root, "tama/.tama.env");
@@ -362,7 +384,7 @@ test("HTTPS generation rejects an invalid effective Tama container port", async 
   const before = snapshot(root);
   const response = await generate(root, "--provider-name", "example", "--dry-run");
   assert.equal(response.code, 4, JSON.stringify(response.result));
-  assert.match(response.result.error.message, /effective Tama PORT.*1 and 65535/u);
+  assert.match(response.result.error.message, /effective PORT.*1 and 65535/u);
   assert.deepEqual(snapshot(root), before);
 });
 

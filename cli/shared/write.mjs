@@ -194,7 +194,10 @@ function writeOperations(prepared, applied, created, afterWrite) {
   for (const { operation, before } of prepared.entries) {
     checkDirectories(operation.path, prepared.directories);
     if (!sameState(readState(operation.path), before)) throw changed(operation.path);
-    if (operation.action === "unchanged") continue;
+    if (operation.action === "unchanged") {
+      afterWrite?.(operation, () => {});
+      continue;
+    }
     if (operation.action === "delete") {
       unlinkSync(operation.path);
       recordApplied(applied, { operation, before, after: null });

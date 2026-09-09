@@ -399,6 +399,37 @@ test("local MCP App contract render, validation, and serialization are stable", 
   assert.throws(() => validateMcpAppLocalContract(invalid), /cannot claim evidence/u);
 });
 
+test("local HTTPS contract topology must remain coherent", () => {
+  const root = project();
+  const prepared = preparedFor(root, { allowedOrigins: ["https://app.localhost"] });
+  const plan = planWithMcp(root, prepared, { localDomain: "app.localhost" });
+  assert.ok(plan.mcpApp?.localContract);
+  for (const mutate of [
+    (topology) => {
+      topology.provider_port = 70_000;
+    },
+    (topology) => {
+      topology.provider_host = "wrong.localhost";
+    },
+    (topology) => {
+      topology.health_url = "https://evil.example/";
+    },
+    (topology) => {
+      topology.certificate_names = ["evil.example"];
+    },
+    (topology) => {
+      topology.trust_mechanism = "none";
+    },
+  ]) {
+    const invalid = structuredClone(plan.mcpApp.localContract);
+    mutate(invalid.topology);
+    assert.throws(
+      () => validateMcpAppLocalContract(invalid, { currentConfiguration: true }),
+      /topology contains invalid values/u,
+    );
+  }
+});
+
 test("verifyEnvironmentLoading confirms application-owned loaders", () => {
   const root = project();
   assert.equal(verifyEnvironmentLoading(root, "tama/.acme.integration.env", null), "unverified");
@@ -424,6 +455,27 @@ test("verifyEnvironmentLoading confirms application-owned loaders", () => {
       environment_loading: { mechanism: "direnv" },
     }),
     "verified",
+  );
+
+  const orderedRoot = project();
+  writeFileSync(join(orderedRoot, "compose.yaml"), "services:\n  app:\n    image: example/app\n");
+  writeFileSync(
+    join(orderedRoot, "override.yaml"),
+    "services:\n  app:\n    env_file: [./tama/.acme.integration.env]\n",
+  );
+  assert.deepEqual(
+    verifyEnvironmentLoadingEvidence(
+      orderedRoot,
+      "tama/.acme.integration.env",
+      null,
+      ["compose.yaml", "override.yaml"],
+      "app",
+    ),
+    {
+      status: "verified",
+      mechanism: "compose-env-file",
+      evidencePath: "override.yaml",
+    },
   );
 
   const unquotedRoot = project();

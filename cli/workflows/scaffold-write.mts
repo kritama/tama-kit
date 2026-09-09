@@ -18,12 +18,14 @@ export async function writeScaffold(
   if (!completeOperation || !("content" in completeOperation))
     throw new Error("generation receipt is missing from the write plan");
   const complete = parseGenerationReceipt(JSON.parse(completeOperation.content));
-  const pending = new Set(
-    plan.operations
-      .filter((operation) => operation.action === "create" && operation.path !== path)
-      .map((operation) => relative(plan.root, operation.path).split("\\").join("/")),
-  );
   const previous = readGenerationEvidence(path);
+  const pending = new Set(
+    previous.kind === "receipt" && previous.receipt.progress.status === "incomplete"
+      ? previous.receipt.progress.pendingDestinations
+      : plan.operations
+          .filter((operation) => operation.action === "create" && operation.path !== path)
+          .map((operation) => relative(plan.root, operation.path).split("\\").join("/")),
+  );
   if (previous.kind === "receipt" && previous.receipt.progress.status === "incomplete") {
     const selected = new Set(previous.receipt.progress.pendingDestinations);
     if (
@@ -58,8 +60,9 @@ export async function writeScaffold(
     [begin, ...plan.operations.filter((operation) => operation.path !== path)],
     validate,
     (operation, write) => {
-      if (operation.path === path || operation.action !== "create") return;
-      pending.delete(relative(plan.root, operation.path).split("\\").join("/"));
+      const destination = relative(plan.root, operation.path).split("\\").join("/");
+      if (operation.path === path || !pending.has(destination)) return;
+      pending.delete(destination);
       const current = readFileSync(path, "utf8");
       if (current !== lastReceipt)
         throw ownershipError(

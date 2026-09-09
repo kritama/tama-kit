@@ -17,6 +17,7 @@ import {
   usesLocalHttpsTopology,
 } from "../../cli/bootstrap/local-https.mjs";
 import { createLocalHttpsFetch } from "../../cli/bootstrap/mcp-app-verify.mjs";
+import { validateAdditionCertificateBundle } from "../../cli/workflows/mcp-app-certificates.mjs";
 import { temporaryDirectory } from "../helpers/temporary.mjs";
 
 function certificateFixture() {
@@ -233,6 +234,52 @@ test("certificate reuse validates file type, key permissions, key pairing, and i
     assert.throws(
       () => planLocalHttpsCertificates(fixture.root, topology, options),
       /must be a regular file/u,
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("MCP App certificate validation never installs the local CA during planning", () => {
+  const fixture = certificateFixture();
+  const topology = resolveLocalHttpsTopology();
+  const bundle = `${readFileSync(fixture.paths.certificate, "utf8").trim()}\n${readFileSync(fixture.paths.privateKey, "utf8").trim()}\n`;
+  let authorized;
+  try {
+    assert.doesNotThrow(() =>
+      validateAdditionCertificateBundle(topology, bundle, true, (value) => {
+        authorized = value;
+        return {
+          path: "mkcert",
+          caRoot: fixture.root,
+          rootCertificate: fixture.paths.rootCertificate,
+        };
+      }),
+    );
+    assert.equal(authorized, false);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("resumed local HTTPS validation adopts a complete persisted TLS set", () => {
+  const fixture = certificateFixture();
+  const topology = resolveLocalHttpsTopology();
+  const options = {
+    discoverLocalCa: () => ({
+      path: "mkcert",
+      caRoot: fixture.root,
+      rootCertificate: fixture.paths.rootCertificate,
+    }),
+  };
+  try {
+    const result = planLocalHttpsCertificates(fixture.root, topology, {
+      ...options,
+      resumePending: ["tama/tls/local.pem", "tama/tls/local-key.pem", "tama/tls/rootCA.pem"],
+    });
+    assert.deepEqual(
+      result.operations.map(({ action }) => action),
+      ["unchanged", "unchanged", "unchanged"],
     );
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });

@@ -21,22 +21,60 @@ function rejectUnresolvedMerges(value, name) {
   }
 }
 
+/** @param {Record<string, unknown>} base @param {Record<string, unknown>} update */
+function mergeComposeMapping(base, update) {
+  const merged = { ...base };
+  for (const [key, value] of Object.entries(update)) {
+    const current = merged[key];
+    if (
+      isPlainObject(current) &&
+      isPlainObject(value) &&
+      !Object.hasOwn(value, "<<") &&
+      !Object.hasOwn(current, "<<")
+    ) {
+      merged[key] = mergeComposeMapping(current, value);
+    } else {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+/** @param {string | string[]} composeFiles @param {string} name */
+function selectedServices(composeFiles, name) {
+  const files = Array.isArray(composeFiles) ? composeFiles : [composeFiles];
+  /** @type {Record<string, Record<string, unknown>>} */
+  const services = {};
+  for (const composeFile of files) {
+    const content = safeRead(composeFile, 1024 * 1024);
+    if (content === null)
+      throw ownershipError(
+        "provider Compose file must be a readable regular file of at most 1 MiB",
+        { path: composeFile },
+      );
+    const document = validateComposeDocument(content, composeFile);
+    const declared = isPlainObject(document.services) ? document.services : {};
+    if (Object.hasOwn(declared, "<<")) rejectUnresolvedMerges(declared, name);
+    for (const [serviceName, service] of Object.entries(declared)) {
+      if (!isPlainObject(service)) continue;
+      rejectUnresolvedMerges(service, serviceName);
+      services[serviceName] = services[serviceName]
+        ? mergeComposeMapping(services[serviceName], service)
+        : service;
+    }
+  }
+  return services;
+}
+
 /**
  * Resolve an application-owned service from the selected root Compose file.
  * Do not run Compose or interpolate application environments during planning.
- * @param {string} composeFile
+ * @param {string | string[]} composeFiles
  * @param {string} name
  * @returns {"service_started" | "service_healthy"}
  */
-export function providerServiceDependency(composeFile, name) {
-  const content = safeRead(composeFile, 1024 * 1024);
-  if (content === null)
-    throw ownershipError("provider Compose file must be a readable regular file of at most 1 MiB", {
-      path: composeFile,
-    });
-  const document = validateComposeDocument(content, composeFile);
-  const services = isPlainObject(document.services) ? document.services : {};
-  if (Object.hasOwn(services, "<<")) rejectUnresolvedMerges(services, name);
+export function providerServiceDependency(composeFiles, name) {
+  const services = selectedServices(composeFiles, name);
   const service = services[name];
   if (!isPlainObject(service)) {
     throw usageError(`provider service ${name} must be declared in the selected root Compose file`);
@@ -92,9 +130,9 @@ export function providerServiceDependency(composeFile, name) {
 /**
  * Validate the explicitly selected application-owned provider before generation.
  * @param {import("../types.mjs").McpAppBootstrapOptions | undefined} options
- * @param {string} composeFile
+ * @param {string | string[]} composeFiles
  */
-export function resolveProviderTopology(options, composeFile) {
+export function resolveProviderTopology(options, composeFiles) {
   const runtime = options?.providerRuntime ?? (options?.providerService ? "compose" : "host");
   if (runtime !== "host" && runtime !== "compose")
     throw usageError("--provider-runtime must be host or compose");
@@ -107,7 +145,7 @@ export function resolveProviderTopology(options, composeFile) {
   // Validate the name before using it in any lookup or generated text.
   resolveLocalHttpsTopology({ providerService });
   const providerDependency = providerService
-    ? providerServiceDependency(composeFile, providerService)
+    ? providerServiceDependency(composeFiles, providerService)
     : undefined;
   return { providerService, providerDependency };
 }

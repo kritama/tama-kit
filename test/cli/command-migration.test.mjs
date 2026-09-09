@@ -309,6 +309,18 @@ test("Terraform inspection rejects a file selected as the root", () => {
   });
 });
 
+test("doctor rejects an invalid effective Tama container port", async () => {
+  const root = standard();
+  const environment = join(root, "tama/.tama.env");
+  writeFileSync(
+    environment,
+    readFileSync(environment, "utf8").replace(/^PORT=4000$/mu, "PORT=70000"),
+  );
+  const response = await command(root, "doctor", "--json");
+  assert.equal(response.code, 4, JSON.stringify(response.result));
+  assert.match(response.result.error.message, /effective PORT.*1 and 65535/u);
+});
+
 test("doctor guidance follows the selected Terraform root", async () => {
   const root = standard();
   mkdirSync(join(root, "infra"));
@@ -412,6 +424,7 @@ test("HTTPS inspection reports the service port while retaining public URLs and 
     assert.equal(response.result.localHttps.tamaPort, 4000);
     assert.equal(response.result.localHttps.httpsPort, 443);
     assert.equal(response.result.localHttps.healthUrl, "https://tama.app.localhost/");
+    assert.equal(response.result.localHttps.tamaUpstream, "http://tama:4000");
   }
   assert.deepEqual(snapshot(root), before);
   const httpRoot = temporaryDirectory("tama-http-inspection-port-");
