@@ -148,6 +148,13 @@ test("starting prepared services without activation leaves both services prepare
   assert.deepEqual(f.events, ["start:prepared/prepared", "verify:prepared/prepared"]);
 });
 
+test("disabled providers skip live MCP endpoint verification", async () => {
+  const f = fixture({ verifyException: 1 });
+  const result = await f.run(plan("prepared", "disabled"), { activate: false });
+  assert.deepEqual(f.events, ["start:prepared/disabled"]);
+  assert.equal(result.plan.mcpAppVerification, null);
+});
+
 test("failed prepared verification cannot enable or rewrite the integration", async () => {
   const f = fixture({ verifyFailure: 1 });
   await assert.rejects(
