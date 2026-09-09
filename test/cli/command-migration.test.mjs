@@ -309,6 +309,17 @@ test("Terraform inspection rejects a file selected as the root", () => {
   });
 });
 
+test("doctor guidance follows the selected Terraform root", async () => {
+  const root = standard();
+  mkdirSync(join(root, "infra"));
+  const response = await command(root, "doctor", "--terraform-root", "infra", "--json");
+  assert.equal(response.code, 0, JSON.stringify(response.result));
+  assert.equal(
+    response.result.setup.nextActions.find(({ id }) => id === "review-foundation").workingDirectory,
+    join(root, "infra"),
+  );
+});
+
 test("MCP inspection reads current bindings; activation and recovery preserve keys and unrelated edits", async () => {
   const { root } = mcp();
   unlinkSync(join(root, "tama/.tama-kit.json"));

@@ -127,6 +127,18 @@ export function planMcpAppAddition(
   }
   const service = services[selected];
   const requested = mcpAppOptions(options);
+  const rawTamaPort = current.runtime.environment.get("PORT") ?? "4000";
+  if (!/^\d+$/u.test(rawTamaPort))
+    throw ownershipError("the effective Tama PORT must be an integer between 1 and 65535", {
+      variable: "PORT",
+      actual: rawTamaPort,
+    });
+  const tamaPort = Number.parseInt(rawTamaPort, 10);
+  if (!Number.isInteger(tamaPort) || tamaPort < 1 || tamaPort > 65_535)
+    throw ownershipError("the effective Tama PORT must be between 1 and 65535", {
+      variable: "PORT",
+      actual: rawTamaPort,
+    });
   const topology = usesLocalHttpsTopology(requested, prepared.contractDocument)
     ? {
         ...resolveLocalHttpsTopology({
@@ -135,7 +147,7 @@ export function planMcpAppAddition(
           providerPort: options.providerPort,
           allowedOrigins: prepared.allowedOrigins,
         }),
-        tamaUpstream: `http://${selected}:${current.runtime.environment.get("PORT") ?? 4000}`,
+        tamaUpstream: `http://${selected}:${tamaPort}`,
       }
     : null;
   if (!topology && (options.providerService || options.providerRuntime))

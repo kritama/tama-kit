@@ -352,6 +352,20 @@ test("HTTPS preview preserves original ports and keys on disk and describes over
   assert.deepEqual(snapshot(root), before);
 });
 
+test("HTTPS generation rejects an invalid effective Tama container port", async () => {
+  const root = await standard();
+  const environmentPath = join(root, "tama/.tama.env");
+  writeFileSync(
+    environmentPath,
+    readFileSync(environmentPath, "utf8").replace(/^PORT=4000$/mu, "PORT=70000"),
+  );
+  const before = snapshot(root);
+  const response = await generate(root, "--provider-name", "example", "--dry-run");
+  assert.equal(response.code, 4, JSON.stringify(response.result));
+  assert.match(response.result.error.message, /effective Tama PORT.*1 and 65535/u);
+  assert.deepEqual(snapshot(root), before);
+});
+
 test("a negated secret ignore rolls back the entire addition including its receipt", async () => {
   const root = await standard();
   mkdirSync(join(root, "tama/contracts"));

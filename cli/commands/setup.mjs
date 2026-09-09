@@ -180,7 +180,11 @@ export async function runSetup(argv, io, command = "setup") {
         service: plan.runtime.service,
         proxyService: plan.runtime.proxyService ?? null,
       },
-      setup: setupProgress(plan, { dryRun, started: Boolean(healthUrl) }),
+      setup: setupProgress(plan, {
+        dryRun,
+        started: Boolean(healthUrl),
+        terraformRoot: doctor ? values["terraform-root"] : undefined,
+      }),
       ...(doctor
         ? {
             terraform: inspectTerraform(plan.root, undefined, values["terraform-root"]),

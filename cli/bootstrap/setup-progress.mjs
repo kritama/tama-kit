@@ -1,11 +1,11 @@
 // @ts-check
 
-import { join } from "node:path";
+import { resolve } from "node:path";
 import { BOOTSTRAP_PATHS } from "./constants.mjs";
 import { readEnvironmentValues } from "./environment.mjs";
 
-/** @param {import("../types.mjs").BootstrapPlan} plan @param {{dryRun: boolean, started: boolean}} status */
-export function setupProgress(plan, { dryRun, started }) {
+/** @param {import("../types.mjs").BootstrapPlan} plan @param {{dryRun: boolean, started: boolean, terraformRoot?: string}} status */
+export function setupProgress(plan, { dryRun, started, terraformRoot = "tama" }) {
   const environment =
     plan.runtime?.environment ?? readEnvironmentValues(plan.root, BOOTSTRAP_PATHS.environment);
   const mcp = plan.mcpApp;
@@ -51,7 +51,7 @@ export function setupProgress(plan, { dryRun, started }) {
     add(
       "review-foundation",
       "Load the current private provisioner environment; run terraform init, fmt -check, validate, and plan. Review and explicitly authorize apply, then provision an active root recipient. Provisioner credentials are not MCP-client credentials.",
-      join(plan.root, "tama"),
+      resolve(plan.root, terraformRoot),
     );
     if (provider && phase !== "enabled") {
       if (mcp?.environmentLoading !== "verified")
