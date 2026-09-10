@@ -12,6 +12,7 @@ import { validateOAuthPrivateJwk, validatePublicJwkSet } from "../shared/oauth-k
 import type { LocalHttpsTopology, McpAppMode } from "../types.mjs";
 import { verifyEnvironmentLoadingEvidence } from "./contracts/environment-loading.mjs";
 import { inspectProject } from "./detect-project.mjs";
+import { isLoopbackAddress } from "./local-https.mjs";
 import { allowedOrigin } from "./mcp-app.mjs";
 import { validateMcpAppLocalContract } from "./mcp-app-local-contract.mjs";
 import { validateComposePrerequisite } from "./start.mjs";
@@ -22,7 +23,7 @@ type Service = {
   build?: { context?: string };
   environment?: Record<string, string | null>;
   env_file?: { path: string; required?: boolean }[];
-  ports?: { target: number; published?: string; host_ip?: string }[];
+  ports?: { target: number; published?: string; host_ip?: string; protocol?: string }[];
   volumes?: { type: string; source: string; target: string }[];
 };
 type Model = { services: Record<string, Service> };
@@ -414,17 +415,25 @@ export function inspectCurrentConfiguration(
       JSON.stringify([...allowedOrigins].sort())
     )
       throw ownershipError("contract and Tama allowed origins disagree");
+    const isHttpsTcpPublication = (port: NonNullable<Service["ports"]>[number]) =>
+      Number(port.published) === topology.https_port && (port.protocol ?? "tcp") === "tcp";
     const proxy = selectService(
       services,
-      Object.keys(services).filter((name) =>
-        services[name].ports?.some((port) => Number(port.published) === topology.https_port),
-      ),
+      Object.keys(services).filter((name) => services[name].ports?.some(isHttpsTcpPublication)),
       options.proxyService,
       "--proxy-service",
     );
-    const proxyTargetPort = Number(
-      services[proxy].ports?.find((port) => Number(port.published) === topology.https_port)?.target,
-    );
+    const proxyPublications = services[proxy].ports?.filter(isHttpsTcpPublication) ?? [];
+    if (
+      proxyPublications.length === 0 ||
+      proxyPublications.some(
+        (port) => !port.host_ip || !isLoopbackAddress(port.host_ip.replace(/^\[|\]$/gu, "")),
+      )
+    )
+      throw ownershipError(
+        "the selected HTTPS proxy must bind every TCP publication to a loopback host address",
+      );
+    const proxyTargetPort = Number(proxyPublications[0].target);
     if (!Number.isInteger(proxyTargetPort) || proxyTargetPort < 1 || proxyTargetPort > 65_535)
       throw ownershipError("the selected HTTPS proxy has no valid container target port");
     const tlsMount = services[proxy].volumes?.find(

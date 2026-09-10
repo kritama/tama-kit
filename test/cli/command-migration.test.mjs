@@ -434,6 +434,29 @@ test("HTTPS inspection reports the service port while retaining public URLs and 
   assert.equal(inspectCurrentConfiguration({ cwd: httpRoot }).port, 4567);
 });
 
+test("HTTPS inspection rejects proxy publications outside loopback", () => {
+  for (const publication of ["443:443", "0.0.0.0:443:443", "[::]:443:443"]) {
+    const root = temporaryDirectory("tama-https-inspection-binding-");
+    const generated = planWithMcp(root, {
+      ...preparedFor(root),
+      allowedOrigins: ["https://app.localhost"],
+    });
+    applyOperations(generated.operations);
+    mkdirSync(join(root, "tama/tls"), { recursive: true });
+    writeFileSync(join(root, "tama/tls/rootCA.pem"), "inspection-only CA placeholder\n");
+    const composePath = join(root, "tama/compose.yaml");
+    writeFileSync(
+      composePath,
+      readFileSync(composePath, "utf8").replace('"127.0.0.1:443:443"', `"${publication}"`),
+    );
+    assert.throws(
+      () => inspectCurrentConfiguration({ cwd: root }),
+      /must bind every TCP publication to a loopback host address/u,
+      publication,
+    );
+  }
+});
+
 test("setup dry-run activation reports only preview progress and preserves both mode files", async () => {
   const { root } = mcp();
   const before = snapshot(root);

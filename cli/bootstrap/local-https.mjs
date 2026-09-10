@@ -41,7 +41,7 @@ export function normalizeLocalDomain(value = LOCAL_HTTPS_DEFAULT_DOMAIN) {
 }
 
 /** @param {string} value @returns {boolean} */
-function isLoopbackAddress(value) {
+export function isLoopbackAddress(value) {
   if (value === "::1" || value.toLowerCase() === "0:0:0:0:0:0:0:1") {
     return true;
   }
