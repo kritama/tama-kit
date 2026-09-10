@@ -701,6 +701,33 @@ test("setup excludes the provider from automatic Compose startup and recreation"
   assert.equal(args.includes("application"), false);
 });
 
+test("host-provider HTTPS startup selects Tama without relying on proxy dependencies", () => {
+  const root = temporaryDirectory("tama-host-provider-startup-");
+  const generated = planWithMcp(root, {
+    ...preparedFor(root),
+    allowedOrigins: ["https://app.localhost"],
+  });
+  applyOperations(generated.operations);
+  mkdirSync(join(root, "tama/tls"), { recursive: true });
+  writeFileSync(join(root, "tama/tls/rootCA.pem"), "inspection-only CA placeholder\n");
+  const composePath = join(root, "tama/compose.yaml");
+  const withDependency = readFileSync(composePath, "utf8");
+  const withoutDependency = withDependency.replace(
+    "    depends_on:\n      tama:\n        condition: service_healthy\n",
+    "",
+  );
+  assert.notEqual(withoutDependency, withDependency);
+  writeFileSync(composePath, withoutDependency);
+
+  const plan = inspectCurrentConfiguration({ cwd: root });
+  assert.equal(plan.localHttps.providerService, undefined);
+  const args = composeUpArguments(plan);
+  assert.ok(args.includes("--no-deps"));
+  assert.ok(args.includes("tama"));
+  assert.ok(args.includes("tama-postgres"));
+  assert.ok(args.includes("caddy"));
+});
+
 test("generation journaling refuses a receipt that arrived after the reviewed plan", async () => {
   const { writeScaffold } = await import("../../cli/workflows/scaffold-write.mjs");
   const root = temporaryDirectory("tama-receipt-race-");

@@ -486,7 +486,7 @@ export function inspectCurrentConfiguration(
     // while the public endpoint and proxy port remain in their own fields.
     plan.port = localHttps.tamaPort;
   }
-  if (providerService) {
+  if (providerService || plan.runtime.proxyService) {
     const selected = new Set<string>();
     function selectDependencies(name: string) {
       if (name === providerService || selected.has(name)) return;
