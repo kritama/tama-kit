@@ -7,6 +7,7 @@ import { isAbsolute, join, relative, sep } from "node:path";
 import { isGenerationPath } from "../domain/generation.mjs";
 import { usageError } from "../errors.mjs";
 import { contentDigest } from "../shared/files.mjs";
+import { isLoopbackHostname } from "../shared/network.mjs";
 import { BOOTSTRAP_PATHS } from "./constants.mjs";
 import { LOCAL_HTTPS_TRUST_MECHANISM, normalizeLocalDomain } from "./local-https.mjs";
 import {
@@ -88,12 +89,7 @@ function validTopologyAllowedOrigin(value) {
     )
       return false;
     if (url.protocol === "https:") return true;
-    const hostname = url.hostname.toLowerCase();
-    return (
-      hostname === "localhost" ||
-      hostname === "::1" ||
-      /^127\.(?:\d{1,3}\.){2}\d{1,3}$/u.test(hostname)
-    );
+    return isLoopbackHostname(url.hostname);
   } catch {
     return false;
   }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import { allowedOrigin } from "../../cli/bootstrap/mcp-app.mjs";
 import {
   contractLocalOrigin,
   discoverProviderContract,
@@ -427,6 +428,17 @@ test("local HTTPS contract topology must remain coherent", () => {
       () => validateMcpAppLocalContract(invalid, { currentConfiguration: true }),
       /topology contains invalid values/u,
     );
+  }
+});
+
+test("local HTTPS contracts accept the CLI's IPv6 loopback origins", () => {
+  for (const input of ["http://[::1]:3000", "http://[::ffff:127.0.0.1]:3000"]) {
+    const root = project();
+    const prepared = preparedFor(root);
+    const normalized = allowedOrigin(input);
+    prepared.allowedOrigins = [normalized];
+    const plan = planWithMcp(root, prepared, { localDomain: "app.localhost" });
+    assert.deepEqual(plan.mcpApp?.localContract?.topology?.allowed_origins, [normalized]);
   }
 });
 

@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { ownershipError, usageError } from "../errors.mjs";
 import { parseEnvironment } from "../shared/environment.mjs";
+import { isLoopbackHostname } from "../shared/network.mjs";
 import {
   generateOAuthKeyPair,
   validateOAuthPrivateJwk,
@@ -87,47 +88,6 @@ export function normalizeMcpAppOrigin(value, flag) {
     );
   }
   return `${url.protocol}//${url.host}`;
-}
-
-/**
- * Reports whether a URL hostname names a loopback address: localhost, the
- * full IPv4 127.0.0.0/8 range, the IPv6 loopback, and IPv4-mapped loopback
- * forms. Loopback is valid for client and Tama origins (both are reached from
- * the host) but never for the provider origin, which the Tama container must
- * also reach: from inside the container 127/8 is the container itself.
- *
- * @param {string} hostname
- * @returns {boolean}
- */
-function isLoopbackHostname(hostname) {
-  const bare =
-    hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
-  if (bare === "localhost") {
-    return true;
-  }
-  const ipv4 = bare.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/u);
-  if (ipv4) {
-    const octets = ipv4.slice(1, 5).map((part) => Number(part));
-    return octets.every((octet) => octet <= 255) && octets[0] === 127;
-  }
-  const ipv6 = bare.toLowerCase();
-  if (ipv6 === "::1") {
-    return true;
-  }
-  const dottedMapped = ipv6.match(/^::ffff:(\d{1,3})\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u);
-  if (dottedMapped !== null) {
-    return Number(dottedMapped[1]) === 127;
-  }
-  // WHATWG URLs render IPv4-mapped loopback addresses with hex groups
-  // (127.0.0.1 becomes ::ffff:7f00:1), so the 32-bit suffix is decoded
-  // instead of pattern-matched against a dotted form.
-  const hexMapped = ipv6.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u);
-  if (hexMapped !== null) {
-    const mappedAddress =
-      (Number.parseInt(hexMapped[1], 16) << 16) | Number.parseInt(hexMapped[2], 16);
-    return mappedAddress >>> 24 === 127;
-  }
-  return false;
 }
 
 /**
