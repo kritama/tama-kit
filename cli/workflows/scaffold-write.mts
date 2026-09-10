@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { readGenerationEvidence } from "../bootstrap/generation-receipt.mjs";
 import { localHttpsPaths } from "../bootstrap/local-https.mjs";
-import { parseGenerationReceipt } from "../domain/generation.mjs";
+import { normalizeGenerationPath, parseGenerationReceipt } from "../domain/generation.mjs";
 import { ownershipError } from "../errors.mjs";
 import { contentDigest } from "../shared/files.mjs";
 import { applyOperationsTransactionally } from "../shared/write.mjs";
@@ -25,7 +25,7 @@ export async function writeScaffold(
       ? previous.receipt.progress.pendingDestinations
       : plan.operations
           .filter((operation) => operation.action === "create" && operation.path !== path)
-          .map((operation) => relative(plan.root, operation.path).split("\\").join("/")),
+          .map((operation) => normalizeGenerationPath(relative(plan.root, operation.path))),
   );
   if (previous.kind === "receipt" && previous.receipt.progress.status === "incomplete") {
     const selected = new Set(previous.receipt.progress.pendingDestinations);
@@ -39,7 +39,8 @@ export async function writeScaffold(
     for (const destination of selected)
       if (
         !plan.operations.some(
-          (operation) => relative(plan.root, operation.path).split("\\").join("/") === destination,
+          (operation) =>
+            normalizeGenerationPath(relative(plan.root, operation.path)) === destination,
         )
       )
         throw ownershipError("resume requires the original options for every pending destination", {
@@ -53,7 +54,7 @@ export async function writeScaffold(
     // unit: retain every member in the receipt until all three are published.
     const paths = localHttpsPaths(plan.root);
     const tls = [paths.certificate, paths.privateKey, paths.rootCertificate].map((destination) =>
-      relative(plan.root, destination).split("\\").join("/"),
+      normalizeGenerationPath(relative(plan.root, destination)),
     );
     for (const destination of tls) grouped.set(destination, tls);
   }
@@ -72,7 +73,7 @@ export async function writeScaffold(
     [begin, ...plan.operations.filter((operation) => operation.path !== path)],
     validate,
     (operation, write) => {
-      const destination = relative(plan.root, operation.path).split("\\").join("/");
+      const destination = normalizeGenerationPath(relative(plan.root, operation.path));
       if (operation.path === path || !pending.has(destination)) return;
       completed.add(destination);
       const group = grouped.get(destination)?.filter((member) => pending.has(member)) ?? [

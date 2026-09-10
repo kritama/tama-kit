@@ -12,7 +12,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { readGenerationEvidence } from "../../cli/bootstrap/generation-receipt.mjs";
 import { createOwnedFilePlanner } from "../../cli/bootstrap/owned-files.mjs";
-import { parseGenerationReceipt } from "../../cli/domain/generation.mjs";
+import { normalizeGenerationPath, parseGenerationReceipt } from "../../cli/domain/generation.mjs";
 import { contentDigest, generationOperationForContent } from "../../cli/shared/files.mjs";
 import { applyGenerationPlan, planGeneration } from "../../cli/workflows/generation.mjs";
 import { temporaryDirectory } from "../helpers/temporary.mjs";
@@ -30,6 +30,10 @@ function incomplete(paths) {
 function plan(root, destinations, extra = {}) {
   return planGeneration({ root, evidence: { kind: "absent" }, destinations, ...extra });
 }
+
+test("generation paths normalize Windows separators for portable receipts", () => {
+  assert.equal(normalizeGenerationPath("tama\\compose.mcp-app.yaml"), "tama/compose.mcp-app.yaml");
+});
 
 test("fresh generation creates project-owned output and preserves identical content and permissions", async () => {
   const root = temporaryDirectory("tama-kit-generation-");

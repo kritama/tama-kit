@@ -46,6 +46,11 @@ export function isGenerationPath(value: unknown): value is string {
   );
 }
 
+/** Normalize platform-native relative paths before comparing them with receipt paths. */
+export function normalizeGenerationPath(value: string) {
+  return value.split("\\").join("/");
+}
+
 /** Reject unknown fields instead of carrying accidental secrets into a converted receipt. */
 export function parseGenerationReceipt(value: unknown): GenerationReceipt {
   const record = mapping(value);

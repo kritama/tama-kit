@@ -49,7 +49,8 @@ export function createBootstrapRuntime(overrides: Partial<typeof runtimeEffects>
   const effects = { ...runtimeEffects, ...overrides };
   async function verify(plan: Plan) {
     if (!plan.mcpApp) return;
-    if (plan.mcpApp.providerLifecycle === "disabled") return;
+    if (plan.mcpApp.lifecycle === "disabled" || plan.mcpApp.providerLifecycle === "disabled")
+      return;
     const providerTransportHost =
       effects.platform === "linux" &&
       new URL(plan.mcpApp.providerOrigin).hostname === "host.docker.internal"

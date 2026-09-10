@@ -15,6 +15,7 @@ import { planMcpApp, resolveMcpAppState } from "../bootstrap/mcp-app.mjs";
 import { serializeMcpAppLocalContract } from "../bootstrap/mcp-app-local-contract.mjs";
 import { createOwnedFilePlanner } from "../bootstrap/owned-files.mjs";
 import { resolveProviderTopology } from "../bootstrap/provider-topology.mjs";
+import { normalizeGenerationPath } from "../domain/generation.mjs";
 import type { InspectOptions, RuntimePlan } from "../domain/runtime.mjs";
 import { ownershipError, prerequisiteError, usageError } from "../errors.mjs";
 import { composeArguments } from "../shared/compose.mjs";
@@ -418,14 +419,16 @@ export function planMcpAppAddition(
     }
   }
   if (progress.pending) {
-    const paths = new Set(operations.map((operation) => relative(root, operation.path)));
+    const paths = new Set(
+      operations.map((operation) => normalizeGenerationPath(relative(root, operation.path))),
+    );
     for (const path of progress.pending)
       if (!paths.has(path) && !(topology && secrets.includes(path)))
         throw ownershipError("resume options do not include every pending destination");
     for (const operation of operations)
       if (
         operation.action === "create" &&
-        !progress.pending.includes(relative(root, operation.path))
+        !progress.pending.includes(normalizeGenerationPath(relative(root, operation.path)))
       )
         throw ownershipError("resume cannot recreate output not listed as pending");
   }
