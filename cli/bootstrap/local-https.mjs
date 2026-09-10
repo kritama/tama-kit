@@ -317,14 +317,9 @@ export function planLocalHttpsCertificates(
   }
   const tlsPaths = [paths.certificate, paths.privateKey, paths.rootCertificate];
   const relativeTlsPaths = tlsPaths.map((path) => relative(root, path).split("\\").join("/"));
-  const hasPendingTls = relativeTlsPaths.some((path) => resumePending.includes(path));
-  const resumeTls = relativeTlsPaths.every((path) => resumePending.includes(path));
-  if (hasPendingTls && !resumeTls) {
-    throw ownershipError(
-      "local HTTPS resume must include the complete TLS material set in the unfinished receipt",
-      { paths: relativeTlsPaths },
-    );
-  }
+  // Progress is journaled after each file, so a legitimate resume may list only
+  // the TLS destinations that had not yet been published when the process stopped.
+  const resumeTls = relativeTlsPaths.some((path) => resumePending.includes(path));
   const existing = tlsPaths.every(existsSync);
   if (existing) {
     const mkcert = ensureLocalCa(installLocalCa, { discover: discoverLocalCa });

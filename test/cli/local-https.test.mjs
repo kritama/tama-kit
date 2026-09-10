@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:https";
 import { join } from "node:path";
 import test from "node:test";
@@ -262,7 +271,7 @@ test("MCP App certificate validation never installs the local CA during planning
   }
 });
 
-test("resumed local HTTPS validation adopts a complete persisted TLS set", () => {
+test("resumed local HTTPS validation adopts persisted TLS with a shrinking pending set", () => {
   const fixture = certificateFixture();
   const topology = resolveLocalHttpsTopology();
   const options = {
@@ -273,16 +282,58 @@ test("resumed local HTTPS validation adopts a complete persisted TLS set", () =>
     }),
   };
   try {
-    const result = planLocalHttpsCertificates(fixture.root, topology, {
-      ...options,
-      resumePending: ["tama/tls/local.pem", "tama/tls/local-key.pem", "tama/tls/rootCA.pem"],
+    for (const resumePending of [
+      ["tama/tls/local.pem", "tama/tls/local-key.pem", "tama/tls/rootCA.pem"],
+      ["tama/tls/local-key.pem", "tama/tls/rootCA.pem"],
+      ["tama/tls/rootCA.pem"],
+    ]) {
+      const result = planLocalHttpsCertificates(fixture.root, topology, {
+        ...options,
+        resumePending,
+      });
+      assert.deepEqual(
+        result.operations.map(({ action }) => action),
+        ["unchanged", "unchanged", "unchanged"],
+      );
+    }
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("resumed local HTTPS generation repairs a partially published TLS set", () => {
+  const source = certificateFixture();
+  const target = temporaryDirectory("tama-kit-partial-local-https-test-");
+  const paths = localHttpsPaths(target);
+  const mkcert = join(source.root, "test-mkcert");
+  mkdirSync(paths.directory, { recursive: true });
+  copyFileSync(source.paths.certificate, paths.certificate);
+  writeFileSync(
+    mkcert,
+    `#!/usr/bin/env node
+const { copyFileSync } = require("node:fs");
+const arguments_ = process.argv.slice(2);
+copyFileSync(${JSON.stringify(source.paths.certificate)}, arguments_[arguments_.indexOf("-cert-file") + 1]);
+copyFileSync(${JSON.stringify(source.paths.privateKey)}, arguments_[arguments_.indexOf("-key-file") + 1]);
+`,
+  );
+  chmodSync(mkcert, 0o755);
+  try {
+    const result = planLocalHttpsCertificates(target, resolveLocalHttpsTopology(), {
+      resumePending: ["tama/tls/local-key.pem", "tama/tls/rootCA.pem"],
+      ensureLocalCa: () => ({
+        path: mkcert,
+        caRoot: source.root,
+        rootCertificate: source.paths.rootCertificate,
+      }),
     });
     assert.deepEqual(
       result.operations.map(({ action }) => action),
-      ["unchanged", "unchanged", "unchanged"],
+      ["unchanged", "create", "create"],
     );
   } finally {
-    rmSync(fixture.root, { recursive: true, force: true });
+    rmSync(source.root, { recursive: true, force: true });
+    rmSync(target, { recursive: true, force: true });
   }
 });
 
