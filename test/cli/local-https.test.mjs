@@ -293,7 +293,7 @@ test("resumed local HTTPS validation adopts persisted TLS with a shrinking pendi
       });
       assert.deepEqual(
         result.operations.map(({ action }) => action),
-        ["unchanged", "unchanged", "unchanged"],
+        resumePending.map(() => "unchanged"),
       );
     }
   } finally {
@@ -301,7 +301,7 @@ test("resumed local HTTPS validation adopts persisted TLS with a shrinking pendi
   }
 });
 
-test("resumed local HTTPS generation repairs a partially published TLS set", () => {
+test("resumed local HTTPS generation never replaces a completed TLS file", () => {
   const source = certificateFixture();
   const target = temporaryDirectory("tama-kit-partial-local-https-test-");
   const paths = localHttpsPaths(target);
@@ -319,13 +319,28 @@ copyFileSync(${JSON.stringify(source.paths.privateKey)}, arguments_[arguments_.i
   );
   chmodSync(mkcert, 0o755);
   try {
-    const result = planLocalHttpsCertificates(target, resolveLocalHttpsTopology(), {
-      resumePending: ["tama/tls/local-key.pem", "tama/tls/rootCA.pem"],
+    const options = {
       ensureLocalCa: () => ({
         path: mkcert,
         caRoot: source.root,
         rootCertificate: source.paths.rootCertificate,
       }),
+    };
+    assert.throws(
+      () =>
+        planLocalHttpsCertificates(target, resolveLocalHttpsTopology(), {
+          ...options,
+          resumePending: ["tama/tls/local-key.pem", "tama/tls/rootCA.pem"],
+        }),
+      /cannot safely replace a TLS file already marked complete/u,
+    );
+    assert.equal(
+      readFileSync(paths.certificate, "utf8"),
+      readFileSync(source.paths.certificate, "utf8"),
+    );
+    const result = planLocalHttpsCertificates(target, resolveLocalHttpsTopology(), {
+      ...options,
+      resumePending: ["tama/tls/local.pem", "tama/tls/local-key.pem", "tama/tls/rootCA.pem"],
     });
     assert.deepEqual(
       result.operations.map(({ action }) => action),

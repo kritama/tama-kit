@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { readGenerationEvidence } from "../bootstrap/generation-receipt.mjs";
+import { localHttpsPaths } from "../bootstrap/local-https.mjs";
 import { parseGenerationReceipt } from "../domain/generation.mjs";
 import { ownershipError } from "../errors.mjs";
 import { contentDigest } from "../shared/files.mjs";
@@ -46,6 +47,17 @@ export async function writeScaffold(
         });
   }
   if (!pending.size) return applyOperationsTransactionally(plan.operations, validate);
+  const grouped = new Map<string, string[]>();
+  if (plan.localHttps) {
+    // The generated certificate, private key, and root CA are one recovery
+    // unit: retain every member in the receipt until all three are published.
+    const paths = localHttpsPaths(plan.root);
+    const tls = [paths.certificate, paths.privateKey, paths.rootCertificate].map((destination) =>
+      relative(plan.root, destination).split("\\").join("/"),
+    );
+    for (const destination of tls) grouped.set(destination, tls);
+  }
+  const completed = new Set<string>();
   const receipt = () =>
     `${JSON.stringify({ ...complete, progress: pending.size ? { status: "incomplete", pendingDestinations: [...pending] } : { status: "complete" } }, null, 2)}\n`;
   let lastReceipt = receipt();
@@ -62,7 +74,12 @@ export async function writeScaffold(
     (operation, write) => {
       const destination = relative(plan.root, operation.path).split("\\").join("/");
       if (operation.path === path || !pending.has(destination)) return;
-      pending.delete(destination);
+      completed.add(destination);
+      const group = grouped.get(destination)?.filter((member) => pending.has(member)) ?? [
+        destination,
+      ];
+      if (!group.every((member) => completed.has(member))) return;
+      for (const member of group) pending.delete(member);
       const current = readFileSync(path, "utf8");
       if (current !== lastReceipt)
         throw ownershipError(

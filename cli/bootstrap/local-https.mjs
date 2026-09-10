@@ -317,10 +317,16 @@ export function planLocalHttpsCertificates(
   }
   const tlsPaths = [paths.certificate, paths.privateKey, paths.rootCertificate];
   const relativeTlsPaths = tlsPaths.map((path) => relative(root, path).split("\\").join("/"));
-  // Progress is journaled after each file, so a legitimate resume may list only
-  // the TLS destinations that had not yet been published when the process stopped.
-  const resumeTls = relativeTlsPaths.some((path) => resumePending.includes(path));
+  const pendingTls = relativeTlsPaths.map((path) => resumePending.includes(path));
+  const hasPendingTls = pendingTls.some(Boolean);
+  const resumeTlsSet = pendingTls.every(Boolean);
   const existing = tlsPaths.every(existsSync);
+  if (hasPendingTls && !resumeTlsSet && !existing) {
+    throw ownershipError(
+      "local HTTPS resume cannot safely replace a TLS file already marked complete by an older receipt",
+      { paths: relativeTlsPaths.filter((_, index) => !pendingTls[index]) },
+    );
+  }
   if (existing) {
     const mkcert = ensureLocalCa(installLocalCa, { discover: discoverLocalCa });
     assertReusableTlsMaterial(paths, topology.certificateNames);
@@ -334,17 +340,21 @@ export function planLocalHttpsCertificates(
     }
     return {
       paths,
-      operations: resumeTls
-        ? tlsPaths.map((path, index) =>
-            operationForContent(path, readFileSync(path, "utf8"), {
-              sensitive: index === 1,
-              mode: index === 1 ? 0o600 : 0o644,
-            }),
+      operations: hasPendingTls
+        ? tlsPaths.flatMap((path, index) =>
+            pendingTls[index]
+              ? [
+                  operationForContent(path, readFileSync(path, "utf8"), {
+                    sensitive: index === 1,
+                    mode: index === 1 ? 0o600 : 0o644,
+                  }),
+                ]
+              : [],
           )
         : [],
     };
   }
-  if (tlsPaths.some(existsSync) && !resumeTls) {
+  if (tlsPaths.some(existsSync) && !resumeTlsSet) {
     throw ownershipError(
       `local HTTPS certificate paths already exist but do not match ${topology.certificateNames.join(", ")}; move them aside before bootstrap`,
       { paths: tlsPaths },
@@ -366,17 +376,17 @@ export function planLocalHttpsCertificates(
         operationForContent(paths.certificate, readFileSync(cert, "utf8"), {
           sensitive: false,
           mode: 0o644,
-          allowUnmanagedUpdate: resumeTls,
+          allowUnmanagedUpdate: resumeTlsSet,
         }),
         operationForContent(paths.privateKey, readFileSync(key, "utf8"), {
           sensitive: true,
           mode: 0o600,
-          allowUnmanagedUpdate: resumeTls,
+          allowUnmanagedUpdate: resumeTlsSet,
         }),
         operationForContent(paths.rootCertificate, rootCertificate, {
           sensitive: false,
           mode: 0o644,
-          allowUnmanagedUpdate: resumeTls,
+          allowUnmanagedUpdate: resumeTlsSet,
         }),
       ],
     };
