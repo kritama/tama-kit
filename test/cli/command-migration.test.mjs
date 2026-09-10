@@ -435,7 +435,13 @@ test("HTTPS inspection reports the service port while retaining public URLs and 
 });
 
 test("HTTPS inspection rejects proxy publications outside loopback", () => {
-  for (const publication of ["443:443", "0.0.0.0:443:443", "[::]:443:443"]) {
+  const replacements = [
+    ["443:443", '"443:443"'],
+    ["0.0.0.0:443:443", '"0.0.0.0:443:443"'],
+    ["[::]:443:443", '"[::]:443:443"'],
+    ["0.0.0.0:8443:443", '"127.0.0.1:443:443"\n      - "0.0.0.0:8443:443"'],
+  ];
+  for (const [publication, replacement] of replacements) {
     const root = temporaryDirectory("tama-https-inspection-binding-");
     const generated = planWithMcp(root, {
       ...preparedFor(root),
@@ -447,7 +453,7 @@ test("HTTPS inspection rejects proxy publications outside loopback", () => {
     const composePath = join(root, "tama/compose.yaml");
     writeFileSync(
       composePath,
-      readFileSync(composePath, "utf8").replace('"127.0.0.1:443:443"', `"${publication}"`),
+      readFileSync(composePath, "utf8").replace('"127.0.0.1:443:443"', replacement),
     );
     assert.throws(
       () => inspectCurrentConfiguration({ cwd: root }),

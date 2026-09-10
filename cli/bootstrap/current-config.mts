@@ -415,15 +415,24 @@ export function inspectCurrentConfiguration(
       JSON.stringify([...allowedOrigins].sort())
     )
       throw ownershipError("contract and Tama allowed origins disagree");
-    const isHttpsTcpPublication = (port: NonNullable<Service["ports"]>[number]) =>
-      Number(port.published) === topology.https_port && (port.protocol ?? "tcp") === "tcp";
+    const isTcpPublication = (port: NonNullable<Service["ports"]>[number]) =>
+      (port.protocol ?? "tcp") === "tcp";
+    const isHttpsPublication = (port: NonNullable<Service["ports"]>[number]) =>
+      Number(port.published) === topology.https_port && isTcpPublication(port);
     const proxy = selectService(
       services,
-      Object.keys(services).filter((name) => services[name].ports?.some(isHttpsTcpPublication)),
+      Object.keys(services).filter((name) => services[name].ports?.some(isHttpsPublication)),
       options.proxyService,
       "--proxy-service",
     );
-    const proxyPublications = services[proxy].ports?.filter(isHttpsTcpPublication) ?? [];
+    const selectedPublications = services[proxy].ports?.filter(isHttpsPublication) ?? [];
+    const proxyTargetPort = Number(selectedPublications[0]?.target);
+    if (!Number.isInteger(proxyTargetPort) || proxyTargetPort < 1 || proxyTargetPort > 65_535)
+      throw ownershipError("the selected HTTPS proxy has no valid container target port");
+    const proxyPublications =
+      services[proxy].ports?.filter(
+        (port) => isTcpPublication(port) && Number(port.target) === proxyTargetPort,
+      ) ?? [];
     if (
       proxyPublications.length === 0 ||
       proxyPublications.some(
@@ -433,9 +442,6 @@ export function inspectCurrentConfiguration(
       throw ownershipError(
         "the selected HTTPS proxy must bind every TCP publication to a loopback host address",
       );
-    const proxyTargetPort = Number(proxyPublications[0].target);
-    if (!Number.isInteger(proxyTargetPort) || proxyTargetPort < 1 || proxyTargetPort > 65_535)
-      throw ownershipError("the selected HTTPS proxy has no valid container target port");
     const tlsMount = services[proxy].volumes?.find(
       (volume) => volume.type === "bind" && volume.target === "/etc/tama-kit/tls",
     );
