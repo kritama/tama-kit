@@ -5,39 +5,34 @@ import {
   createLocalHttpsFetch,
   verifyMcpApp,
 } from "../bootstrap/mcp-app-verify.mjs";
-import { createBootstrapPlan } from "../bootstrap/plan.mjs";
-import { validateWrittenSecretsIgnored } from "../bootstrap/secrets.mjs";
 import {
   probeComposeProviderEndpoint,
   resolveComposeHostGatewayAddress,
   startCompose,
   validateCompose,
 } from "../bootstrap/start.mjs";
-import { activationStep, assertNever } from "../domain/lifecycle.mjs";
+import { activationStep } from "../domain/lifecycle.mjs";
 import { CLIError, startupError } from "../errors.mjs";
 import { applyOperationsTransactionally } from "../shared/write.mjs";
-import { mcpAppOptions } from "./options.mjs";
+import { planTamaModeChange } from "./activation.mjs";
 
-type BootstrapPlan = import("../types.mjs").BootstrapPlan;
-type BootstrapCommandOptions = import("../types.mjs").BootstrapCommandOptions;
-type McpAppPrepared = import("../types.mjs").McpAppPrepared;
-type McpAppBootstrapOptions = import("../types.mjs").McpAppBootstrapOptions;
+type Plan = import("../types.mjs").BootstrapPlan;
+type Options = import("../types.mjs").BootstrapCommandOptions;
 type Progress = ReturnType<typeof import("../terminal.mjs").createProgressBar>;
 
-// Keep the original sanitized failure reason when recovery also fails. Other
-// internal details and raw process output are never copied into the wrapper.
 function diagnosticDetails(...failures: unknown[]) {
-  for (const failure of failures) {
-    if (failure instanceof CLIError && failure.details?.diagnostic) {
+  for (const failure of failures)
+    if (failure instanceof CLIError && failure.details?.diagnostic)
       return { diagnostic: failure.details.diagnostic };
-    }
-  }
   return undefined;
 }
-
+function safeMessage(error: unknown) {
+  return error instanceof CLIError
+    ? error.message
+    : "runtime verification or recovery could not complete";
+}
 const runtimeEffects = {
-  createBootstrapPlan,
-  validateWrittenSecretsIgnored,
+  planTamaModeChange,
   probeComposeProviderEndpoint,
   resolveComposeHostGatewayAddress,
   startCompose,
@@ -51,296 +46,106 @@ const runtimeEffects = {
 };
 
 export function createBootstrapRuntime(overrides: Partial<typeof runtimeEffects> = {}) {
-  const {
-    createBootstrapPlan,
-    validateWrittenSecretsIgnored,
-    probeComposeProviderEndpoint,
-    resolveComposeHostGatewayAddress,
-    startCompose,
-    validateCompose,
-    applyOperationsTransactionally,
-    verifyMcpApp,
-    readFileSync,
-    createHttpHostMappedFetch,
-    createLocalHttpsFetch,
-    platform,
-  } = { ...runtimeEffects, ...overrides };
-  /**
-   * Re-plans the bootstrap with activation withdrawn and rewrites the managed
-   * files, returning both sides to prepared after a failed verification.
-   *
-   */
-  async function rollbackActivation({
-    options,
-    cwd,
-    skillMode,
-    mcpAppPrepared,
-  }: {
-    options: BootstrapCommandOptions;
-    cwd: string;
-    skillMode: import("../types.mjs").AgentSkillMode;
-    mcpAppPrepared: McpAppPrepared;
-  }): Promise<BootstrapPlan> {
-    const plan = createBootstrapPlan({
-      cwd,
-      targetPath: options.targetPath,
-      composePath: options.composePath,
-      port: options.port,
-      image: options.image,
-      skillMode,
-      mcpApp: {
-        ...mcpAppOptions({ ...options, activate: false }),
-        targetMode: "prepared",
-        providerMode: "prepared",
-      },
-      mcpAppPrepared,
+  const effects = { ...runtimeEffects, ...overrides };
+  async function verify(plan: Plan) {
+    if (!plan.mcpApp) return;
+    if (plan.mcpApp.lifecycle === "disabled" || plan.mcpApp.providerLifecycle === "disabled")
+      return;
+    const providerTransportHost =
+      effects.platform === "linux" &&
+      new URL(plan.mcpApp.providerOrigin).hostname === "host.docker.internal"
+        ? effects.resolveComposeHostGatewayAddress(plan)
+        : undefined;
+    const verification = await effects.verifyMcpApp({
+      root: plan.root,
+      plan: plan.mcpApp,
+      fetch: plan.localHttps
+        ? effects.createLocalHttpsFetch(
+            effects.readFileSync(
+              plan.runtime?.caFile ?? localHttpsPaths(plan.root).rootCertificate,
+            ),
+          )
+        : globalThis.fetch,
+      providerFetch: providerTransportHost
+        ? effects.createHttpHostMappedFetch(providerTransportHost)
+        : undefined,
+      probeProviderFromContainer: async (endpoint) =>
+        effects.probeComposeProviderEndpoint(plan, endpoint),
     });
-    await applyOperationsTransactionally(plan.operations, () => {
-      validateWrittenSecretsIgnored(plan);
-      return validateCompose(plan, { checkPrerequisite: false });
-    });
-    return plan;
-  }
-
-  /**
-   * Restores both managed fragments to prepared and restarts the Tama Compose
-   * runtime so its live mode matches the files. The provider process remains
-   * operator-owned and may still require its own restart.
-   *
-   */
-  async function restorePreparedRuntime(
-    input: {
-      options: BootstrapCommandOptions;
-      cwd: string;
-      skillMode: import("../types.mjs").AgentSkillMode;
-      mcpAppPrepared: McpAppPrepared;
-      quiet: boolean;
-    },
-    failure: unknown,
-  ) {
-    try {
-      const rollbackPlan = await rollbackActivation(input);
-      await startCompose(rollbackPlan, { quiet: input.quiet });
-      return rollbackPlan;
-    } catch (recoveryError) {
-      const original = failure instanceof Error ? failure.message : String(failure);
-      const recovery =
-        recoveryError instanceof Error ? recoveryError.message : String(recoveryError);
+    plan.mcpAppVerification = verification;
+    if (!verification.verified)
       throw startupError(
-        `MCP App activation failed: ${original}. Restoring prepared mode also failed: ${recovery}. Inspect the managed configuration and both services before retrying.`,
-        diagnosticDetails(failure, recoveryError),
+        `MCP App verification failed. Failed probes: ${verification.probes
+          .filter((probe) => !probe.ok)
+          .map((probe) => `${probe.name}: ${probe.reason ?? "verification failed"}`)
+          .join("; ")}`,
       );
+  }
+  return async function startBootstrapRuntime({
+    options,
+    plan,
+    progress,
+    probeOnly = false,
+  }: {
+    options: Options;
+    plan: Plan;
+    progress: Progress;
+    probeOnly?: boolean;
+    cwd?: string;
+    skillMode?: import("../types.mjs").AgentSkillMode;
+    mcpAppPrepared?: import("../types.mjs").McpAppPrepared | null;
+  }) {
+    let healthUrl: string | undefined;
+    if (options.start && !probeOnly) {
+      progress.update(4, "Starting selected Tama services");
+      healthUrl = await effects.startCompose(plan, { quiet: options.json });
     }
-  }
-
-  function failedProbeSummary(verification: import("../types.mjs").McpAppVerification) {
-    return verification.probes
-      .filter((entry) => !entry.ok)
-      .map((entry) => `${entry.name}: ${entry.reason ?? "verification failed"}`)
-      .join("; ");
-  }
-
-  function verificationFetch(plan: BootstrapPlan) {
-    return plan.localHttps
-      ? createLocalHttpsFetch(readFileSync(localHttpsPaths(plan.root).rootCertificate))
-      : globalThis.fetch;
-  }
-
-  async function verifyPlan(
-    plan: BootstrapPlan,
-    providerFetch: Parameters<typeof verifyMcpApp>[0]["providerFetch"],
-    recover?: (failure: unknown) => Promise<unknown>,
-  ) {
-    if (!plan.mcpApp) throw startupError("MCP App verification plan was unexpectedly empty");
+    progress.update(5, "Verifying current MCP App configuration");
     try {
-      return await verifyMcpApp({
-        root: plan.root,
-        plan: plan.mcpApp,
-        fetch: verificationFetch(plan),
-        probeProviderFromContainer: async (endpoint) =>
-          probeComposeProviderEndpoint(plan, endpoint),
-        providerFetch,
-      });
+      await verify(plan);
     } catch (error) {
-      if (recover) await recover(error);
-      const message = error instanceof Error ? error.message : String(error);
       throw startupError(
-        `MCP App verification could not complete. ${recover ? "Tama was restarted in prepared mode and the provider fragment was restored to prepared; restart the provider so its live state also returns to prepared. " : "The integration remains prepared. "}Verification failure: ${message}`,
+        `${safeMessage(error)}. Configuration was preserved.`,
         diagnosticDetails(error),
       );
     }
-  }
-
-  return async function startBootstrapRuntime({
-    options,
-    cwd,
-    skillMode,
-    mcpAppPrepared,
-    plan,
-    progress,
-  }: {
-    options: BootstrapCommandOptions;
-    cwd: string;
-    skillMode: import("../types.mjs").AgentSkillMode;
-    mcpAppPrepared: McpAppPrepared | null;
-    plan: BootstrapPlan;
-    progress: Progress;
-  }) {
-    const recoveryContext = mcpAppPrepared
-      ? { options, cwd, skillMode, mcpAppPrepared, quiet: options.json }
-      : null;
-    async function recover(failure: unknown, step: number) {
-      if (!recoveryContext)
-        throw startupError("Cannot recover an MCP App runtime without its prepared identity");
-      progress.update(step, "Restoring prepared configuration");
-      return restorePreparedRuntime(recoveryContext, failure);
-    }
-    let healthUrl: string | undefined;
-    const requestedMcpApp = mcpAppPrepared ? mcpAppOptions(options) : undefined;
-    if (options.start) {
-      progress.update(4, "Starting Tama services");
+    if (
+      !plan.mcpApp ||
+      probeOnly ||
+      activationStep(options.activate, plan.mcpApp.lifecycle, plan.mcpApp.providerLifecycle)
+        .kind !== "enable-tama"
+    )
+      return { plan, healthUrl };
+    const change = effects.planTamaModeChange(plan);
+    progress.update(6, "Enabling Tama MCP App mode");
+    await effects.applyOperationsTransactionally([change.operation], () =>
+      effects.validateCompose(change.plan, { checkPrerequisite: false }),
+    );
+    try {
+      progress.update(7, "Restarting selected Tama services");
+      healthUrl = await effects.startCompose(change.plan, { quiet: options.json });
+      progress.update(8, "Verifying enabled Tama state");
+      await verify(change.plan);
+    } catch (failure) {
+      progress.update(9, "Restoring this activation's mode change");
       try {
-        healthUrl = await startCompose(plan, { quiet: options.json });
-      } catch (error) {
-        if (plan.mcpApp?.lifecycle === "enabled" && mcpAppPrepared) {
-          await recover(error, 6);
-          const message = error instanceof Error ? error.message : String(error);
-          throw startupError(
-            "Tama failed to start in enabled MCP App mode. Tama was restarted in prepared mode and the provider fragment was restored to prepared; restart the provider so its live state also returns to prepared. " +
-              `Startup failure: ${message}`,
-            diagnosticDetails(error),
-          );
-        }
-        throw error;
-      }
-      if (plan.mcpApp && mcpAppPrepared) {
-        let providerTransportHost: string | undefined;
-        try {
-          providerTransportHost =
-            platform === "linux" &&
-            new URL(plan.mcpApp.providerOrigin).hostname === "host.docker.internal"
-              ? resolveComposeHostGatewayAddress(plan)
-              : undefined;
-        } catch (error) {
-          const wasEnabled = plan.mcpApp.lifecycle === "enabled";
-          if (wasEnabled) {
-            await recover(error, 6);
-          }
-          const message = error instanceof Error ? error.message : String(error);
-          throw startupError(
-            `${wasEnabled ? "MCP App activation" : "MCP App prepared-state"} verification could not resolve the provider transport. ` +
-              `${wasEnabled ? "Tama was restarted in prepared mode and the provider fragment was restored to prepared; restart the provider so its live state also returns to prepared. " : "The integration remains prepared. "}` +
-              `Transport failure: ${message}`,
-            diagnosticDetails(error),
-          );
-        }
-        const providerFetch = providerTransportHost
-          ? createHttpHostMappedFetch(providerTransportHost)
-          : undefined;
-        progress.update(5, "Verifying MCP App integration");
-        const verification = await verifyPlan(
-          plan,
-          providerFetch,
-          plan.mcpApp.lifecycle === "enabled" ? (failure) => recover(failure, 6) : undefined,
+        const restore = change.restore();
+        await effects.applyOperationsTransactionally([restore], () =>
+          effects.validateCompose(plan, { checkPrerequisite: false }),
         );
-        plan.mcpAppVerification = verification;
-        if (!verification.verified) {
-          const wasEnabled = plan.mcpApp.lifecycle === "enabled";
-          if (wasEnabled) {
-            await recover(new Error(`Failed probes: ${failedProbeSummary(verification)}`), 6);
-          }
-          throw startupError(
-            `${wasEnabled ? "MCP App activation" : "MCP App prepared-state"} verification failed. ` +
-              `${wasEnabled ? "Tama was restarted in prepared mode and the provider fragment was restored to prepared; restart the provider so its live state also returns to prepared. " : "The integration remains prepared. "}` +
-              `Failed probes: ${failedProbeSummary(verification)}`,
-            {
-              providerOrigin: plan.mcpApp.providerOrigin,
-              tamaOrigin: plan.mcpApp.tamaOrigin,
-              providerReachable: verification.providerReachable,
-              tamaReachable: verification.tamaReachable,
-            },
-          );
-        }
-
-        const step = activationStep(
-          options.activate,
-          plan.mcpApp.lifecycle,
-          plan.mcpApp.providerLifecycle,
+        await effects.startCompose(plan, { quiet: options.json });
+      } catch (recovery) {
+        throw startupError(
+          `MCP App activation failed: ${safeMessage(failure)}. Restoring the selected Tama mode also failed: ${safeMessage(recovery)}. Inspect the current configuration before retrying.`,
+          diagnosticDetails(failure, recovery),
         );
-        switch (step.kind) {
-          case "observe":
-            break;
-          case "enable-tama": {
-            progress.update(6, "Enabling Tama MCP App mode");
-            const tamaEnabledPlan = createBootstrapPlan({
-              cwd,
-              targetPath: options.targetPath,
-              composePath: options.composePath,
-              port: options.port,
-              image: options.image,
-              skillMode,
-              mcpApp: {
-                ...(requestedMcpApp as McpAppBootstrapOptions),
-                activate: true,
-                targetMode: step.targetMode,
-                providerMode: step.providerMode,
-              },
-              mcpAppPrepared,
-              materializeSecrets: true,
-            });
-            if (!tamaEnabledPlan.mcpApp) {
-              throw startupError("MCP App activation plan was unexpectedly empty");
-            }
-            await applyOperationsTransactionally(tamaEnabledPlan.operations, () => {
-              validateWrittenSecretsIgnored(tamaEnabledPlan);
-              progress.update(7, "Validating enabled Tama configuration");
-              return validateCompose(tamaEnabledPlan, { checkPrerequisite: false });
-            });
-            progress.update(8, "Restarting Tama in enabled mode");
-            try {
-              healthUrl = await startCompose(tamaEnabledPlan, { quiet: options.json });
-            } catch (error) {
-              await recover(error, 9);
-              const message = error instanceof Error ? error.message : String(error);
-              throw startupError(
-                "Tama failed to start in enabled MCP App mode. Tama was restarted in prepared mode; the provider remained prepared. " +
-                  `Startup failure: ${message}`,
-                diagnosticDetails(error),
-              );
-            }
-            progress.update(9, "Verifying enabled Tama state");
-            const enabledVerification = await verifyPlan(
-              tamaEnabledPlan,
-              providerFetch,
-              (failure) => recover(failure, 9),
-            );
-            tamaEnabledPlan.mcpAppVerification = enabledVerification;
-            if (!enabledVerification.verified) {
-              await recover(
-                new Error(`Failed probes: ${failedProbeSummary(enabledVerification)}`),
-                9,
-              );
-              throw startupError(
-                "Tama MCP App activation verification failed. Tama was restarted in prepared mode; the provider remained prepared. " +
-                  `Failed probes: ${failedProbeSummary(enabledVerification)}`,
-                {
-                  providerOrigin: tamaEnabledPlan.mcpApp.providerOrigin,
-                  tamaOrigin: tamaEnabledPlan.mcpApp.tamaOrigin,
-                  providerReachable: enabledVerification.providerReachable,
-                  tamaReachable: enabledVerification.tamaReachable,
-                },
-              );
-            }
-            plan = tamaEnabledPlan;
-            break;
-          }
-          default:
-            assertNever(step);
-        }
       }
+      throw startupError(
+        `MCP App activation failed: ${safeMessage(failure)}. Tama was restarted in its previous mode; provider configuration was preserved.`,
+        diagnosticDetails(failure),
+      );
     }
-
-    return { plan, healthUrl };
+    return { plan: change.plan, healthUrl };
   };
 }
 export const startBootstrapRuntime = createBootstrapRuntime();

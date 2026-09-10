@@ -5,8 +5,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runBootstrap } from "./commands/bootstrap.mjs";
 import { runDev } from "./commands/dev.mjs";
+import { runGenerate } from "./commands/generate.mjs";
 import { runOAuth } from "./commands/oauth.mjs";
 import { terminalQuestion } from "./commands/questions.mjs";
+import { runSetup } from "./commands/setup.mjs";
 import { CLIError, EXIT_CODES } from "./errors.mjs";
 
 /** @typedef {import("./types.mjs").CommandIO} CommandIO */
@@ -23,6 +25,9 @@ function usage() {
     "",
     "Commands:",
     "  bootstrap [path]  Prepare a local Tama runtime and Terraform root",
+    "  generate mcp-app [path]  Add MCP App to an existing runtime",
+    "  setup [path]      Start/activate current project configuration",
+    "  doctor [path]     Inspect current configuration without writes",
     "  init [path]       Alias for bootstrap",
     "  dev setup [path]  Prepare a Tama source checkout for development",
     "  oauth generate-key  Generate a System OAuth private JWK outside bootstrap",
@@ -70,6 +75,8 @@ export async function run(argv, providedIO = {}) {
     if (command === "bootstrap" || command === "init") {
       return await runBootstrap(args, io);
     }
+    if (command === "setup" || command === "doctor") return await runSetup(args, io, command);
+    if (command === "generate") return await runGenerate(args, io);
     if (command === "dev") {
       return await runDev(args, io);
     }

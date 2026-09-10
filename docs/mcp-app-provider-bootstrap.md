@@ -1,274 +1,151 @@
-# MCP App provider bootstrap
+# MCP App provider bootstrap and setup
 
-Tama Kit can prepare a host-native application as the OAuth provider for
-Tama's exact `/mcp/app` protected resource. The provider owns its application
-configuration, process lifecycle, access-token signing key, and OAuth policy.
-Tama owns its resource policy and introspection client key. Tama Kit only plans
-and verifies the shared local-development contract.
+Tama Kit generates initial configuration for an application OAuth provider and
+Tama's `/mcp/app` resource. The application owns OAuth behavior, access-token
+keys, environment loading, provider mode and process lifecycle. Tama has a
+separate introspection-client key. Configuration files belong to the developer
+immediately after generation.
 
-## Local bootstrap contract
+## Initial generation
 
-Every `bootstrap --mcp-app` run resolves one normalized, non-secret local
-contract and manages it at `tama/contracts/mcp-app-provider-v1.json`. The
-contract records the accepted provider identity, exact nine semantic variable
-bindings, public provider endpoint paths, source provenance, and statically
-verified environment-loader evidence. The same in-memory document is validated
-before key generation and then drives provider and Tama environment planning.
+From a fresh application's root:
 
-This file configures the local bridge; it does not certify that the provider
-implements OAuth metadata, JWKS, introspection, authorization, or lifecycle
-behavior. It never contains private JWKs, tokens, passwords, assertions, or
-environment values. Tama Kit writes it in the same managed transaction as the
-environment fragments, Compose files, Terraform root, and manifest. An
-identical rerun leaves it unchanged, while a user edit or identity/binding drift
-stops bootstrap instead of being overwritten.
+```bash
+tama-kit bootstrap --mcp-app --provider-name acme --dry-run --json
+tama-kit bootstrap --mcp-app --provider-name acme
+```
 
-When no application-owned contract exists, the local contract records
-`source.type: "generated"` and uses conventional bindings derived from the
-accepted provider prefix. This generated projection is immediately usable for
-local file generation and does not require a separate promotion step.
+Use a pinned official `<version>-server` image in the intersection of the
+bundled `>= 0.13.2 and < 0.14.0` range and the optional provider contract's range.
+The default is `0.13.2-server` when the provider does not narrow the range.
+Generation may prepare configuration before provider implementation is ready;
+it cannot supply actor, consent, issuance, persistence or revocation behavior.
 
-## Application-owned provider contract
+Fresh generation creates the public identities `https://app.localhost` and
+`https://tama.app.localhost/mcp/app`. Caddy forwards privately to
+`host.docker.internal:<provider-port>` and `tama:4000`. Use `--local-domain`
+and `--provider-port` to customize initial generation. Private upstreams are
+not OAuth identities. Custom non-`.localhost` names require explicit
+`--acknowledge-local-domain-risk` and operator-managed DNS. Local certificates
+need mkcert; installation of CA trust is a separate, explicitly authorized host
+operation. Tama Kit does not install Docker or start its daemon.
 
-A contract-aware provider commits
-`priv/contracts/tama-mcp-app-bootstrap-v1.json`. The contract must use schema
-version `1` and compatibility identifier `tama-mcp-app-bootstrap-v1`. Tama Kit
-validates the lifecycle, every semantic environment binding, public endpoint
-paths, local topology, loader declaration, limits, and supported version ranges
-before generating secrets or planning files.
+Allowed client origins default to the provider origin in fresh local HTTPS
+configuration. Supply up to 32 unique origins using repeated `--allowed-origin`.
+HTTP is permitted only for loopback client origins; other origins require HTTPS.
 
-The application-owned contract remains optional and authoritative only for
-the provider declarations it contains. Tama Kit reads it but never creates or
-rewrites it. A matching contract added after a conventional bootstrap changes
-the local contract provenance to `provider-contract` without renaming bindings
-or rotating keys. A mismatching identity or binding remains drift and requires
-an explicit migration.
+## Current contracts and private bindings
 
-Every contract that declares a provider identity is cross-checked against its
-declared `variables`: each role is bound either by the contract's `bindings`
-map or, when that map is omitted, by the conventional names derived from the
-declared environment prefix. Every variable a role resolves to must be
-declared, and a declared constraint must be satisfiable by the values the
-planner writes — the lifecycle mode variable must accept both `prepared` and
-`enabled`, and the signing-algorithm variable must accept the hard-coded
-`RS256`. This runs before secrets are generated, so a binding to an undeclared
-variable or an unsatisfiable constraint fails the contract instead of silently
-writing over the provider's configuration. The planned values themselves are
-held to the remaining declared constraints before any file is written —
-`format`, `exact_path`, `same_origin_as`, `max_bytes`, and `max_items` — so a
-resource variable declared with `exact_path: "/different"` or an issuer with
-`max_bytes: 1` is rejected rather than violated once the planner's origins and
-paths are known.
+The optional application contract at
+`priv/contracts/tama-mcp-app-bootstrap-v1.json` declares compatibility, exact
+semantic bindings, public endpoint paths, limits, and supported Tama versions.
+It uses schema version 1 and compatibility `tama-mcp-app-bootstrap-v1`.
+Tama Kit reads this contract during generation without creating or rewriting it.
+Declared bindings must name declared variables whose constraints permit the
+planned modes, RS256 signing algorithm, public identities and key material.
 
-Providers without a contract use conventional variables derived from
-`--provider-name` and must supply `--provider-origin`. Environment prefixes are
-limited to 24 characters and may not use reserved Tama, database, Docker, or
-Compose namespaces. A contract's `provider.environment_file` must be inside
-`tama/` and must not collide with bootstrap-managed files such as
-`tama/.tama.env`, `tama/.tama.postgres.env`, `tama/.gitignore`, Compose,
-contracts, or Terraform files, because the fragment write would overwrite that
-content.
+Generation writes a non-secret local projection at
+`tama/contracts/mcp-app-provider-v1.json`. It describes the provider identity,
+nine semantic bindings, public endpoints and local topology. Without an
+application contract it uses conventional bindings derived from the provider
+name. This local projection is project-owned and can be edited with its runtime
+configuration. It is not an attestation of OAuth implementation or live loading.
 
-## Exact topology
+The provider fragment, Tama private environment and TLS keys must be ignored,
+untracked, and private. Never print their values, assertions or setup URLs.
+The application owns its signing key; Tama owns the separate introspection key.
+Public JWKS expose only public members. Preserve keys during routine setup and
+configuration changes; use a deliberate rotation workflow for key replacement.
 
-For the generated local HTTPS profile, Caddy publishes the provider at
-`https://app.localhost` and forwards to the provider's selected host-native
-port. The application owns that development listener and its external URL
-configuration; Tama Kit only supplies the semantic OAuth bindings and does
-not generate provider-specific proxy, bind-address, or upstream-port flags.
-
-`--provider-origin` is both the public OAuth issuer and the origin used by Tama
-for provider metadata, JWKS, and introspection. It must be reachable from the
-host and the Tama container. Any loopback provider origin is rejected —
-`localhost`, the full `127.0.0.0/8` range, `::1`, and IPv4-mapped loopback
-forms — because those names resolve inside the Tama container rather than to
-the host-native provider. Unspecified addresses
-(`0.0.0.0`, `::`) are rejected for the same reason: the host can reach a
-locally bound provider through those names, but from inside the container they
-name the container's own interface. An `https://host.docker.internal` origin is
-also rejected because the gateway name resolves only inside the container, so
-host-side TLS probes could not validate the certificate for that name; use
-`http://host.docker.internal:<port>` for the container-gateway topology. If its
-hostname is `host.docker.internal`, Tama Kit adds the Compose host-gateway
-mapping and keeps it on ordinary reruns. On Linux hosts the verification also
-inspects the host's listening sockets for the effective provider port (80 or
-443 when the origin names none): a provider bound to loopback only — including
-IPv4-mapped binds such as `::ffff:127.0.0.1` — passes every host-side probe
-yet is unreachable from the Tama container through the gateway, so
-verification fails with a `provider_host_listener` probe until the
-provider binds `0.0.0.0` or the Docker bridge interface. Provider metadata,
-JWKS, and introspection probes use the exact host-gateway address installed in
-the running Tama container rather than assuming loopback, so a provider bound
-only to the Docker bridge can still pass verification. Independently of the
-host bind diagnostic, Tama Kit also requests the provider metadata endpoint
-from inside the running Tama container. The required
-`provider_container_reachability` probe therefore covers container DNS,
-network-namespace routing, and host firewall policy rather than inferring
-reachability from host state.
-
-`--tama-origin` is the exact public Tama origin. It defaults from an accepted
-contract or to loopback at the selected Tama port. A fresh run without
-`--port` selects the Tama port the accepted contract documents (normally
-`4001`), and a selected port that collides with a `host.docker.internal`
-provider origin is rejected because both host-native services would share the
-same host port. Origins are persisted and compared on reruns. A
-`bootstrap --mcp-app --port <new-port>` rerun updates the Tama origin, resource,
-introspection client id, and both owner-specific environment files atomically
-without renaming bindings or rotating keys. Changing `localhost` to
-`127.0.0.1`, changing to `::1`, or changing the public scheme or host remains
-an explicit topology migration. An ordinary bootstrap without `--mcp-app`
-still rejects a Tama port change because it cannot safely update the provider
-fragment as part of that plan.
-
-Pass at least one repeatable `--allowed-origin` for the actual browser or MCP
-client. Tama Kit never infers client origins from either service origin.
-
-## Tama image
-
-The MCP App integration writes trust material before the runtime starts, so
-`--mcp-app` requires a Tama image pinned to a stable release inside the bundled
-contract's supported range. Floating tags such as `latest` are rejected: they
-can move outside the range after secrets are written, leaving a runtime Tama
-Kit cannot hold to the contract. Prerelease and build tags are rejected as
-well: SemVer orders a prerelease below the stable version it decorates, and the
-range grammar cannot express prerelease bounds, so such a tag cannot be held to
-the range. While an integration is persisted, ordinary reruns without
-`--mcp-app` must pass the same pinned, supported `--image`: the floating
-default tag would otherwise silently replace the pinned runtime. Ordinary
-reruns also keep the managed MCP App example in `tama/.tama.env.example` and the
-README section in sync with the persisted integration, so the public
-documentation is not dropped by a rerun.
-
-## Private files
-
-Bootstrap manages `tama/.tama.env`, `tama/.tama.postgres.env`, and the provider
-fragment such as `tama/.memovee.integration.env` as mode `0600` secret files.
-Exact rules in `tama/.gitignore` are written before the files, and tracked or
-staged secret files cause bootstrap to stop — including a persisted provider fragment on an
-ordinary rerun, because the fragment holds the provider's private signing key.
-Existing keys and valid public overlap sets are
-preserved. A fresh overlap set is `[]`; the current public key is published by
-the runtime and must not be duplicated in its rotation set. Persisted overlap
-members are republished by the runtime as trusted `RS256` material, so each
-must be an RSA public key at least 2048 bits with a sane public exponent and
-no cheaply detectable small factor — the same strength the private signing
-key is held to — or the re-bootstrap fails. Key identifiers use the portable
-dotenv-safe alphabet documented by `tama-kit oauth generate-key`.
-
-Dry-run does not generate keys or write files. It still renders and validates
-the local contract in memory, reports its planned operation in the
-`providerContract` result block, and uses it for the rest of the plan. Repeated
-JSON dry-runs with the same inputs are deterministic and contain no private
-material.
-
-An `environment_loading` declaration in an application-owned contract is not
-loader evidence by itself. Tama Kit reports loading as verified only when an
-exact active `.envrc` `dotenv`/`dotenv_load` directive or a Compose service
-`env_file` entry consumes the provider fragment. Otherwise bootstrap can
-prepare the files, but reports the integration as not yet runnable until the
-application owner wires the loader.
-
-## Identity migration
-
-A normal rerun refuses provider identity or binding drift. To migrate an
-identity, keep the provider in prepared mode, update its loader and committed
-contract (when present) to the new derived fragment filename, then pass
-`--migrate-provider-identity --provider-name <new-name>`. An optional
-`--provider-prefix` selects a different bounded prefix, and
-`--provider-env-file` selects a different fragment path (both require
-`--provider-name` and `--mcp-app`).
-
-Migration preserves the private access-token signing JWK, key identifier,
-valid overlap keys, and unrelated provider-owned fragment entries. It renames
-the managed bindings, writes the new fragment before removing the old managed
-fragment, updates exact rules in `tama/.gitignore`, and changes the manifest in the
-same transaction. Migration and `--activate` cannot be combined; verify the
-new prepared identity before activating it.
-
-## Activation and recovery
-
-Run bootstrap with `--start --activate`. Tama Kit first writes and starts both
-sides as prepared, then verifies provider metadata, both JWKS documents, the
-inactive-token introspection — first proving the provider rejects a
-structurally valid client assertion signed by an unrelated key (negative
-control), then requiring the authenticated request to answer exactly as an
-inactive token must — plus a provider-metadata request issued inside the
-running Tama container. Every probe is read-only. On Linux, host-side provider
-probes use the exact gateway address installed in the container while the
-container probe uses the configured origin itself; the advertised issuer and
-JWKS URI remain bound to the exact planned origin. Each JWKS must publish an
-RSA signing member (compatible `RS256`
-metadata, no private members) whose modulus and exponent match the persisted
-private JWK, so a stale or misloaded key under the expected identifier fails
-the probe. The prepared checkpoint also requires provider metadata not to
-advertise a protected resource; this catches a provider process that has not
-been restarted after an enabled-state rollback. Only after that checkpoint
-does it enable and restart Tama and
-verify protected-resource metadata and `/mcp/app`; the protected route must
-reject the deliberately anonymous probe with `401` or `403`, so a publicly
-accessible `/mcp/app` fails verification.
-
-Tama Kit cannot control a host-native provider process. It leaves the provider
-prepared and reports the exact provider mode variable to set to `enabled`.
-Restart the provider yourself, then rerun the same bootstrap command. The
-second run verifies the provider's exact resource advertisement before
-reporting the integration activated.
-
-If enabled-state verification fails, Tama Kit restores the prepared files and
-restarts Tama in prepared mode while preserving trust material. If the provider
-had already consumed enabled configuration, its owner must restart it after
-the fragment is restored.
+Setup and doctor resolve current Compose files, effective environment values,
+the selected local contract and current loader wiring. They never derive desired
+configuration from receipts or require template hashes. Missing receipts do not
+block them. Inconsistent identities or unsafe private files require fixing the
+actual configuration, not regenerating the scaffold.
 
 ## Provider runtime topology
 
-The default provider runs natively on the host. For a provider that already
-runs in the application's root Compose project, pass `--provider-service NAME`
-(or `--provider-runtime compose --provider-service NAME`). `--provider-port`
-is the private container listening port in this mode; it need not be published
-on the host. Tama Kit does not create the provider service or its Dockerfile.
+Fresh generation can reference an existing application-owned Compose provider:
 
-The selected service must be declared directly in the selected root Compose
-file, join the default network shared with Tama's include, and be available
-without a Compose profile. Unresolved `extends`, provider services declared
-only in included files, and `network_mode` are not supported. A dependency
-back to Caddy is rejected. Caddy uses `service_healthy` when the provider has
-an active declared health check, and otherwise `service_started`. Image-only
-health checks are not inferred by the offline planner.
+```bash
+tama-kit bootstrap --mcp-app --provider-name acme \
+  --provider-service acme --provider-port 4000
+```
 
-The selected service must load the reported private integration fragment through
-`env_file`. An entry on another service, or a host `.envrc`, does not verify
-loading by this provider. Configure the application's listener and public
-issuer as instructed by its provider contract. The application's runtime may
-remain in development mode while Tama uses its pinned production release.
+The initial generation selector expects a service in the root Compose file and
+rejects unsupported profile/extends/include declarations. The application owns
+the image, Dockerfile, listener, health check and loader. Caddy forwards privately
+to `acme:4000`; the service must load its reported fragment through `env_file`.
+A host `.envrc` is not evidence that a Compose service loads the fragment.
+Host-native providers use an application-owned environment loader.
 
-Tama Kit records `providerService`, `providerDependency`, and the derived
-private upstream in the manifest's local HTTPS topology. It generates Caddy's
-route and dependency and omits the unused host gateway entry. Ordinary reruns
-validate and reuse this selection, including runs without `--mcp-app`.
-Application-owned service changes are read on every plan; missing services or
-invalid network/dependency changes fail before managed writes. Changes to a
-service's declared health check update the managed dependency. Unexpected
-changes to hashed Tama-owned files still fail as drift.
+After generation, edit project-owned Compose and proxy configuration directly.
+Setup and doctor use the native effective Compose model, including includes,
+renamed services and ordered overrides. Select custom layouts explicitly:
 
-To change service or switch runtime, first return both Tama and the provider
-to `prepared` through the existing lifecycle workflow. Then select the new
-runtime/service with `--migrate-provider-topology`; this explicit migration
-preserves public OAuth identities and signing material. To switch to the
-host, use `--provider-runtime host --migrate-provider-topology` without a
-service selection. Do not combine migration with `--activate`. A legacy HTTP
-integration must first complete its explicit local HTTPS migration.
+```bash
+tama-kit doctor --compose deploy/compose.yaml --compose deploy/local.yaml \
+  --service engine --proxy-service gateway \
+  --env-file private/tama.env --contract config/provider.json \
+  --provider-service application --ca-file certs/rootCA.pem --json
+```
 
-Start the selected runtime with `--start` after reviewing the plan. Compose
-starts the provider as Caddy's declared dependency. Provider code, environment
-loading, and the enable/restart handoff remain application-owned. Static
-configuration and loader evidence do not establish live OAuth readiness.
+Use the same selection with setup for validation, startup and runtime probes.
+Inspection requires Compose support for `config --format json` and
+`--no-env-resolution`; it does not require a running daemon. Current setup does
+not infer arbitrary application restart commands from configuration.
 
-## Startup diagnostics
+## Staged activation and recovery
 
-Quiet JSON startup failures preserve the `startup` category and exit code 6.
-They also return a bounded `error.diagnostic` projection with operation
-`compose-up` and reason `port-conflict`, `unhealthy-service`,
-`image-unavailable`, `dependency-failed`, or `compose-failed`. A recognized
-bind failure includes its port. Unknown stderr is not copied into the result:
-Compose output can contain application secrets, URLs, or private keys.
-Human mode continues to display native Compose diagnostics.
+1. Implement the provider's OAuth contract and load its private fragment.
+2. Start it in prepared mode. Complete private root-user setup and Terraform
+   provisioning separately. Existing files do not prove an active root recipient.
+3. Run authorized `tama-kit setup --activate`. It verifies prepared metadata,
+   public JWKS, authenticated inactive-token introspection, protected-resource
+   behavior, routing and Tama-container reachability.
+4. Tama Kit changes only Tama's mode from prepared to enabled and restarts Tama.
+   It reports the provider mode-change and restart handoff.
+5. Set the provider's reported mode variable to enabled, restart it through the
+   application's workflow, and run `tama-kit setup` to verify both live services.
+
+Prepared `/mcp/app` returns 404 intentionally. Only successful live enabled
+verification reports the enabled phase. `setup.runtimeHealth`,
+`setup.runtimeVerified` and `setup.foundation` distinguish service health,
+integration verification and still-unverified Terraform provisioning.
+OAuth clients use authorization code with PKCE; provisioner credentials and
+Tama's introspection credentials must never be used as client credentials.
+
+Automatic activation requires one unshadowed, safely editable Tama mode
+assignment in its loaded environment file. Inline overrides, conflicting files
+or ambiguous sources require a manual edit. The provider fragment is never
+rewritten. If verification fails after this invocation enables Tama, recovery
+restores only its own mode assignment, preserving unrelated edits. A concurrent
+mode edit blocks automatic restoration. Verification of already-enabled
+configuration never resets either mode. Sanitized startup diagnostics suppress
+raw Compose output that could expose secrets.
+
+## Developer ownership and native tools
+
+All generated Terraform, Compose, contracts, instructions and copied skills are
+project-owned. Completed bootstrap reruns preserve edited and deleted output.
+Bootstrap migration flags no longer change an existing project. Review public
+identities, allowed origins, bindings, certificates and routes together when
+making a topology change; preserve keys and use prepared modes during migration.
+
+Version-2 receipts record generation provenance and temporary pending paths for
+an unfinished operation. Resume only with its explicit `--resume <id>` and the
+original generation options. Existing output is preserved. Version-1 manifests
+are historical provenance; hashes and saved topology are not a configuration
+source. Do not edit a receipt to bypass a generation conflict.
+
+Use `doctor --json` for read-only configuration diagnostics, or `doctor --runtime`
+for probes without startup or writes. Doctor reports absent tooling,
+uninitialized Terraform providers or invalid Terraform without running init.
+Select a different Terraform directory with `--terraform-root`.
+Use `setup --dry-run --json` to inspect the selected runtime, adding `--activate`
+to preview the Tama mode edit. JSON and non-TTY invocations never prompt.
+
+Native `docker compose -f … up`, `ps`, and `config`, plus `terraform init`,
+`fmt -check`, `validate` and `plan`, remain available without Tama Kit or receipts.
+Review plans and authorize apply separately. The generated README documents the
+initial layout; update its commands when the project changes.

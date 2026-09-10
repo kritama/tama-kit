@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { inspectCurrentConfiguration } from "../bootstrap/current-config.mjs";
 import {
   discoverMkcert,
   localHttpsPaths,
@@ -15,6 +16,7 @@ import { applyOperationsTransactionally } from "../shared/write.mjs";
 import { planBootstrap, reviewedPlanDigest } from "./bootstrap-plan.mjs";
 import { startBootstrapRuntime } from "./mcp-app-runtime.mjs";
 import { mcpAppOptions } from "./options.mjs";
+import { writeScaffold } from "./scaffold-write.mjs";
 
 type BootstrapPlan = import("../types.mjs").BootstrapPlan;
 type BootstrapCommandOptions = import("../types.mjs").BootstrapCommandOptions;
@@ -40,7 +42,6 @@ export function createBootstrapWorkflow(overrides: Partial<typeof bootstrapEffec
     validateWrittenSecretsIgnored,
     validateComposePrerequisite,
     validateCompose,
-    applyOperationsTransactionally,
     startBootstrapRuntime,
     resolveLocalHttpsNames,
     discoverMkcert,
@@ -137,17 +138,26 @@ export function createBootstrapWorkflow(overrides: Partial<typeof bootstrapEffec
           await validateReview();
           const certificatePlan = planLocalHttpsCertificates(plan.root, plan.localHttps, {
             installLocalCa: options.installLocalCa,
+            resumePending: options.resumePending,
           });
           plan.operations.push(...certificatePlan.operations);
         }
         await validateReview();
-        progress.update(2, "Writing managed files");
-        await applyOperationsTransactionally(plan.operations, () => {
+        progress.update(2, "Writing project-owned files");
+        const apply = (validate: () => void | Promise<void>) => writeScaffold(plan, validate);
+        await apply(() => {
           validateWrittenSecretsIgnored(plan);
           progress.update(3, "Validating Compose configuration");
           return validateCompose(plan, { checkPrerequisite: false });
         });
         if (options.start) {
+          const current = inspectCurrentConfiguration({
+            cwd,
+            targetPath: plan.root,
+            composeFiles: [plan.composeFile],
+            providerService: options.providerService,
+          });
+          plan = { ...current, operations: plan.operations };
           ({ plan, healthUrl } = await startBootstrapRuntime({
             options,
             cwd,

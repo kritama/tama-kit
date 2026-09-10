@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { validateSecretFilesIgnored } from "../../cli/bootstrap/gitignore.mjs";
@@ -11,12 +11,10 @@ import {
 } from "../../cli/bootstrap/mcp-app-contract.mjs";
 import { createBootstrapPlan } from "../../cli/bootstrap/plan.mjs";
 import { resolveProviderIdentity } from "../../cli/bootstrap/provider-identity.mjs";
-import { validateWrittenSecretsIgnored } from "../../cli/bootstrap/secrets.mjs";
 import { CLIError, EXIT_CODES } from "../../cli/errors.mjs";
 import { applyOperations, applyOperationsTransactionally } from "../../cli/shared/write.mjs";
 import {
   command,
-  MEMOVEE,
   memoveeContract,
   PINNED_TAMA_IMAGE,
   planWithMcp,
@@ -40,36 +38,12 @@ test("bootstrap preserves unrelated .integration.env ignore entries on MCP App r
   const gitignorePath = join(root, "tama", ".gitignore");
   writeFileSync(gitignorePath, `${readFileSync(gitignorePath, "utf8")}.other.integration.env\n`);
 
-  applyOperations(
-    planWithMcp(
-      root,
-      await prepareFor(root, { providerOrigin: "http://host.docker.internal:5000" }),
-      { providerOrigin: "http://host.docker.internal:5000" },
-    ).operations,
-  );
-  let gitignore = readFileSync(gitignorePath, "utf8");
-  assert.match(gitignore, /^\/?\.other\.integration\.env$/mu);
-  assert.match(gitignore, /^\/\.acme\.integration\.env$/mu);
-
-  writeFileSync(join(root, ".envrc"), 'dotenv_load "tama/.beta.integration.env"\n');
-  const migratedPrepared = await prepareFor(root, {
-    providerName: "beta",
-    providerPrefix: "BETA",
-    providerOrigin: "http://host.docker.internal:5000",
-    migrateProviderIdentity: true,
-  });
-  applyOperations(
-    planWithMcp(root, migratedPrepared, {
-      providerOrigin: "http://host.docker.internal:5000",
-      migrateProviderIdentity: true,
-    }).operations,
-  );
-  gitignore = readFileSync(gitignorePath, "utf8");
-  assert.doesNotMatch(gitignore, /acme\.integration\.env/u);
-  assert.match(gitignore, /^\/?\.other\.integration\.env$/mu);
-  assert.match(gitignore, /^\/\.beta\.integration\.env$/mu);
-  assert.equal(gitignore.split("# Tama Kit local runtime").length - 1, 1);
-  assert.equal(gitignore.split("# Tama Kit MCP App integration").length - 1, 1);
+  const before = readFileSync(gitignorePath, "utf8");
+  const response = await command(root, ["bootstrap", root, "--json"]);
+  assert.equal(response.exitCode, 0);
+  assert.equal(readFileSync(gitignorePath, "utf8"), before);
+  assert.match(before, /^\/?\.other\.integration\.env$/mu);
+  assert.match(before, /^\/\.acme\.integration\.env$/mu);
 });
 
 test("bootstrap rejects nested Git ignore overrides and rolls generated secrets back", async () => {
@@ -115,71 +89,6 @@ test("bootstrap rejects nested Git ignore overrides and rolls generated secrets 
   assert.equal(existsSync(join(root, "tama", ".tama.env")), false);
   assert.equal(existsSync(join(root, "tama", ".tama.postgres.env")), false);
   assert.equal(existsSync(join(root, "tama", "config", "provider.env")), false);
-});
-
-test("ordinary reruns validate effective ignores for the persisted provider fragment", async () => {
-  const root = project();
-  execFileSync("git", ["init", "--quiet"], { cwd: root });
-  mkdirSync(join(root, "tama", "config"), { recursive: true });
-
-  const contract = memoveeContract();
-  contract.provider = {
-    name: "memovee",
-    environment_prefix: "MEMOVEE",
-    environment_file: "tama/config/provider.env",
-  };
-  contract.environment_loading.loads = "tama/config/provider.env";
-  const contractDocument = validateMcpAppContract(contract);
-  const contractPath = writeContract(root, contract);
-  const initial = planWithMcp(
-    root,
-    preparedFor(root, {
-      contractPath,
-      contractDocument,
-      identity: {
-        name: "memovee",
-        environmentPrefix: "MEMOVEE",
-        environmentFile: "tama/config/provider.env",
-        source: "contract",
-      },
-    }),
-  );
-  applyOperations(initial.operations);
-  writeFileSync(join(root, "tama", "config", ".gitignore"), "!provider.env\n");
-
-  const ordinary = createBootstrapPlan({
-    cwd: root,
-    targetPath: root,
-    image: PINNED_TAMA_IMAGE,
-  });
-  await assert.rejects(
-    () =>
-      applyOperationsTransactionally(ordinary.operations, () => {
-        validateWrittenSecretsIgnored(ordinary);
-      }),
-    /not effectively ignored by Git: tama\/config\/provider\.env/u,
-  );
-});
-
-test("bootstrap rejects a Tama port change while an MCP App integration is persisted", () => {
-  const root = project();
-  const contractPath = writeContract(root);
-  const contract = validContract();
-  applyOperations(
-    planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })).operations,
-  );
-  assert.throws(
-    () => createBootstrapPlan({ cwd: root, targetPath: root, port: 4020 }),
-    (error) =>
-      error instanceof CLIError &&
-      error.exitCode === EXIT_CODES.USAGE &&
-      /persisted MCP App integration advertises Tama at http:\/\/127\.0\.0\.1:4001/u.test(
-        error.message,
-      ),
-  );
-  assert.doesNotThrow(() =>
-    createBootstrapPlan({ cwd: root, targetPath: root, image: PINNED_TAMA_IMAGE }),
-  );
 });
 
 test("contractTamaPort derives the fresh Tama port from the accepted contract", () => {
@@ -268,166 +177,6 @@ test("bootstrap rejects an HTTPS Tama origin without TLS termination", () => {
       error instanceof CLIError &&
       error.exitCode === EXIT_CODES.USAGE &&
       /must use an http loopback origin.*does not terminate TLS/u.test(error.message),
-  );
-});
-
-test("bootstrap retains the host-gateway mapping on ordinary reruns", () => {
-  const root = project();
-  const contractPath = writeContract(root);
-  const contract = validContract();
-  const first = planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract }), {
-    providerOrigin: "http://host.docker.internal:4000",
-  });
-  applyOperations(first.operations);
-  assert.match(readFileSync(join(root, "tama", "compose.yaml"), "utf8"), /host-gateway/u);
-
-  // The mapping is derived from the persisted provider origin, so an
-  // ordinary rerun re-renders the identical Compose file.
-  const rerun = createBootstrapPlan({ cwd: root, targetPath: root, image: PINNED_TAMA_IMAGE });
-  const composeOperation = rerun.operations.find((operation) =>
-    operation.path.endsWith(join("tama", "compose.yaml")),
-  );
-  assert.equal(composeOperation?.action, "unchanged");
-});
-
-test("ordinary reruns keep the MCP App documentation rendered from the persisted integration", () => {
-  const root = project();
-  const contractPath = writeContract(root);
-  const contract = validContract();
-  const first = planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract }), {
-    providerOrigin: "http://host.docker.internal:4000",
-  });
-  applyOperations(first.operations);
-  assert.match(
-    readFileSync(join(root, "tama", ".tama.env.example"), "utf8"),
-    /host\.docker\.internal/u,
-  );
-
-  // An ordinary rerun does not plan the MCP App topology, but the managed
-  // example and README section must still render from the persisted state —
-  // otherwise the re-render drops them and rewrites the files.
-  const rerun = createBootstrapPlan({ cwd: root, targetPath: root, image: PINNED_TAMA_IMAGE });
-  const envExample = rerun.operations.find((operation) =>
-    operation.path.endsWith(".tama.env.example"),
-  );
-  assert.equal(envExample?.action, "unchanged");
-  const readme = rerun.operations.find((operation) => operation.path.endsWith("README.md"));
-  assert.equal(readme?.action, "unchanged");
-});
-
-test("ordinary reruns reject drift in persisted MCP App environment variables", () => {
-  const root = project();
-  const contractPath = writeContract(root);
-  const contract = validContract();
-  const first = planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract }), {
-    providerOrigin: "http://host.docker.internal:4000",
-  });
-  applyOperations(first.operations);
-  const filename = join(root, "tama", ".tama.env");
-  const original = readFileSync(filename, "utf8");
-  const drifts = [
-    ["TAMA_MCP_APP_RESOURCE", "http://127.0.0.1:4001/mcp/app?drifted=true"],
-    ["TAMA_MCP_APP_AUTHORIZATION_SERVER", "http://host.docker.internal:4000/wrong"],
-    ["TAMA_MCP_APP_JWKS_URI", "http://host.docker.internal:4000/wrong"],
-    ["TAMA_MCP_APP_INTROSPECTION_ENDPOINT", "http://host.docker.internal:4000/wrong"],
-    ["TAMA_MCP_APP_SIGNING_ALGORITHMS", "RS256,HS256"],
-    ["TAMA_MCP_APP_ALLOWED_ORIGINS", "http://127.0.0.1:3000,http://example.test"],
-    ["TAMA_MCP_APP_INTROSPECTION_CLIENT_ID", "drifted-client"],
-    ["TAMA_MCP_APP_INTROSPECTION_SIGNING_ALGORITHM", "HS256"],
-    ["TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS", "not-json"],
-    ["TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY", "not-json"],
-  ];
-
-  for (const [name, value] of drifts) {
-    const drifted = original.replace(new RegExp(`^${name}=.*$`, "mu"), `${name}=${value}`);
-    assert.notEqual(drifted, original, `${name} must exist in the generated environment`);
-    writeFileSync(filename, drifted);
-    assert.throws(
-      () => createBootstrapPlan({ cwd: root, targetPath: root, image: PINNED_TAMA_IMAGE }),
-      (error) =>
-        error instanceof CLIError &&
-        error.exitCode === EXIT_CODES.OWNERSHIP &&
-        error.message.includes(name),
-      `${name} drift must fail closed`,
-    );
-  }
-  writeFileSync(filename, original);
-  assert.doesNotThrow(() =>
-    createBootstrapPlan({ cwd: root, targetPath: root, image: PINNED_TAMA_IMAGE }),
-  );
-});
-
-test("an ordinary rerun selects the pinned MCP App image", () => {
-  const root = project();
-  const contractPath = writeContract(root);
-  const contract = validContract();
-  const first = planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract }), {
-    providerOrigin: "http://host.docker.internal:4000",
-  });
-  applyOperations(first.operations);
-
-  const rerun = createBootstrapPlan({ cwd: root, targetPath: root });
-  assert.equal(rerun.tamaImage, PINNED_TAMA_IMAGE);
-  assert.match(
-    readFileSync(join(root, "tama", "compose.yaml"), "utf8"),
-    new RegExp(PINNED_TAMA_IMAGE.replaceAll(".", "\\."), "u"),
-  );
-  assert.doesNotThrow(() =>
-    createBootstrapPlan({ cwd: root, targetPath: root, image: PINNED_TAMA_IMAGE }),
-  );
-});
-
-test("ordinary reruns enforce the persisted provider Tama version range", () => {
-  const root = project();
-  const contract = validContract();
-  contract.supported_tama_versions = ">= 0.13.3 and < 0.14.0";
-  const contractPath = writeContract(root, contract);
-  const first = createBootstrapPlan({
-    cwd: root,
-    targetPath: root,
-    image: "ghcr.io/upmaru/tama:0.13.3-server",
-    port: 4001,
-    mcpApp: {
-      requested: true,
-      activate: false,
-      allowedOrigins: ["http://127.0.0.1:3000"],
-    },
-    mcpAppPrepared: preparedFor(root, { contractPath, contractDocument: contract }),
-  });
-  applyOperations(first.operations);
-
-  assert.throws(
-    () => createBootstrapPlan({ cwd: root, targetPath: root, image: PINNED_TAMA_IMAGE }),
-    (error) =>
-      error instanceof CLIError &&
-      error.exitCode === EXIT_CODES.USAGE &&
-      /outside the supported Tama range >= 0\.13\.3 and < 0\.14\.0/u.test(error.message) &&
-      /persisted provider contract/u.test(error.message),
-  );
-});
-
-test("project-local provider contract paths remain valid after the project moves", async () => {
-  const root = project();
-  const contractPath = writeContract(root);
-  const contract = validContract();
-  const first = planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract }));
-  applyOperations(first.operations);
-
-  const persisted = JSON.parse(readFileSync(join(root, "tama", ".tama-kit.json"), "utf8"));
-  assert.equal(
-    persisted.mcpAppProvider.contractPath,
-    "priv/contracts/tama-mcp-app-bootstrap-v1.json",
-  );
-
-  const movedRoot = `${root}-moved`;
-  renameSync(root, movedRoot);
-  assert.doesNotThrow(() =>
-    createBootstrapPlan({ cwd: movedRoot, targetPath: movedRoot, image: PINNED_TAMA_IMAGE }),
-  );
-  const preparedAfterMove = await prepareFor(movedRoot);
-  assert.equal(
-    preparedAfterMove.contractPath,
-    join(movedRoot, "priv", "contracts", "tama-mcp-app-bootstrap-v1.json"),
   );
 });
 
@@ -525,21 +274,9 @@ test("resolveProviderIdentity rejects reserved and unsafe provider fragment path
         resolveProviderIdentity({
           root,
           framework: "generic",
-          manifestProvider: null,
           contractDocument: null,
           name: "acme",
           environmentFile,
-        }),
-      (error) => error instanceof CLIError && pattern.test(error.message),
-    );
-    // Persisted manifest state (the production rerun path).
-    assert.throws(
-      () =>
-        resolveProviderIdentity({
-          root,
-          framework: "generic",
-          manifestProvider: { ...MEMOVEE, source: "manifest", environmentFile },
-          contractDocument: null,
         }),
       (error) => error instanceof CLIError && pattern.test(error.message),
     );
@@ -547,59 +284,10 @@ test("resolveProviderIdentity rejects reserved and unsafe provider fragment path
   const identity = resolveProviderIdentity({
     root,
     framework: "generic",
-    manifestProvider: null,
     contractDocument: null,
     name: "acme",
   });
   assert.equal(identity.environmentFile, "tama/.acme.integration.env");
-});
-
-test("bootstrap fails closed when a persisted provider fragment path no longer matches", () => {
-  const root = project();
-  const contractPath = writeContract(root);
-  const contract = validContract();
-  applyOperations(
-    planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })).operations,
-  );
-
-  // The manifest is disk-resident trusted state: a tampered fragment path
-  // must fail closed instead of overwriting a bootstrap-managed file. In the
-  // production path resolveProviderIdentity re-validates the persisted path;
-  // here the plan-level mismatch guard catches the divergence first.
-  const manifestPath = join(root, "tama", ".tama-kit.json");
-  const manifest = /** @type {Record<string, any>} */ (
-    JSON.parse(readFileSync(manifestPath, "utf8"))
-  );
-  manifest.mcpAppProvider.environmentFile = "tama/.tama.env";
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  assert.throws(
-    () => planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })),
-    (error) =>
-      error instanceof CLIError && /does not match the resolved identity/u.test(error.message),
-  );
-});
-
-test("bootstrap rejects a tracked provider fragment even on ordinary reruns", () => {
-  const root = project();
-  execFileSync("git", ["init", "--quiet"], { cwd: root });
-  const contractPath = writeContract(root);
-  const contract = validContract();
-  const first = planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract }), {
-    providerOrigin: "http://host.docker.internal:4000",
-  });
-  applyOperations(first.operations);
-
-  // The fragment holds the provider's private signing key: force-adding it to
-  // the index must fail every subsequent plan, not only --mcp-app runs.
-  execFileSync("git", ["add", "--force", "tama/.memovee.integration.env"], { cwd: root });
-  assert.throws(
-    () => createBootstrapPlan({ cwd: root, targetPath: root }),
-    (error) =>
-      error instanceof CLIError &&
-      error.exitCode === EXIT_CODES.OWNERSHIP &&
-      error.message.includes("tama/.memovee.integration.env") &&
-      error.details.paths.includes("tama/.memovee.integration.env"),
-  );
 });
 
 test("the bootstrap command plans the provider integration from explicit flags", async () => {

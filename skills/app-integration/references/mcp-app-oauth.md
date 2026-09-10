@@ -10,7 +10,7 @@ remain authoritative for exact names and versions.
 | --- | --- |
 | Application | OAuth authorization server, actor authentication and consent, clients, grants, authorization codes, access and refresh tokens, access-token signing key, public JWKS, authenticated introspection, revocation, persistence, cleanup, and lifecycle policy |
 | Tama | Exact protected resource `/mcp/app`, protected-resource metadata, offline access-token validation, authenticated introspection client, introspection signing key, MCP session principal, and `mcp.message` enforcement |
-| Tama Kit | Local provider/Tama environment provisioning, key generation for both owners, normalized local contract, loader evidence, managed-file safety, Compose wiring, and staged live verification |
+| Tama Kit | Initial and additive generation of developer-owned provider/Tama configuration, key generation for both owners, normalized local contract, loader evidence, safe file creation and preservation, Compose wiring, and staged verification of current configuration |
 | Protocol library | Reusable OAuth/JWT/JWKS/PKCE/private-key-JWT parsing and cryptographic mechanics; it must not own application actors, grants, consent, persistence, or lifecycle policy |
 
 Never reuse Tama's `/mcp/system` local authorization for this integration. It

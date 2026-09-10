@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import { allowedOrigin } from "../../cli/bootstrap/mcp-app.mjs";
 import {
   contractLocalOrigin,
   discoverProviderContract,
@@ -399,6 +400,48 @@ test("local MCP App contract render, validation, and serialization are stable", 
   assert.throws(() => validateMcpAppLocalContract(invalid), /cannot claim evidence/u);
 });
 
+test("local HTTPS contract topology must remain coherent", () => {
+  const root = project();
+  const prepared = preparedFor(root, { allowedOrigins: ["https://app.localhost"] });
+  const plan = planWithMcp(root, prepared, { localDomain: "app.localhost" });
+  assert.ok(plan.mcpApp?.localContract);
+  for (const mutate of [
+    (topology) => {
+      topology.provider_port = 70_000;
+    },
+    (topology) => {
+      topology.provider_host = "wrong.localhost";
+    },
+    (topology) => {
+      topology.health_url = "https://evil.example/";
+    },
+    (topology) => {
+      topology.certificate_names = ["evil.example"];
+    },
+    (topology) => {
+      topology.trust_mechanism = "none";
+    },
+  ]) {
+    const invalid = structuredClone(plan.mcpApp.localContract);
+    mutate(invalid.topology);
+    assert.throws(
+      () => validateMcpAppLocalContract(invalid, { currentConfiguration: true }),
+      /topology contains invalid values/u,
+    );
+  }
+});
+
+test("local HTTPS contracts accept the CLI's IPv6 loopback origins", () => {
+  for (const input of ["http://[::1]:3000", "http://[::ffff:127.0.0.1]:3000"]) {
+    const root = project();
+    const prepared = preparedFor(root);
+    const normalized = allowedOrigin(input);
+    prepared.allowedOrigins = [normalized];
+    const plan = planWithMcp(root, prepared, { localDomain: "app.localhost" });
+    assert.deepEqual(plan.mcpApp?.localContract?.topology?.allowed_origins, [normalized]);
+  }
+});
+
 test("verifyEnvironmentLoading confirms application-owned loaders", () => {
   const root = project();
   assert.equal(verifyEnvironmentLoading(root, "tama/.acme.integration.env", null), "unverified");
@@ -424,6 +467,27 @@ test("verifyEnvironmentLoading confirms application-owned loaders", () => {
       environment_loading: { mechanism: "direnv" },
     }),
     "verified",
+  );
+
+  const orderedRoot = project();
+  writeFileSync(join(orderedRoot, "compose.yaml"), "services:\n  app:\n    image: example/app\n");
+  writeFileSync(
+    join(orderedRoot, "override.yaml"),
+    "services:\n  app:\n    env_file: [./tama/.acme.integration.env]\n",
+  );
+  assert.deepEqual(
+    verifyEnvironmentLoadingEvidence(
+      orderedRoot,
+      "tama/.acme.integration.env",
+      null,
+      ["compose.yaml", "override.yaml"],
+      "app",
+    ),
+    {
+      status: "verified",
+      mechanism: "compose-env-file",
+      evidencePath: "override.yaml",
+    },
   );
 
   const unquotedRoot = project();

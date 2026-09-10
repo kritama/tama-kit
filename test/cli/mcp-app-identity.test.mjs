@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { basename } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import test from "node:test";
 import {
   environmentFileForName,
@@ -38,32 +39,9 @@ test("provider environment prefixes are conservatively bounded and avoid reserve
 test("resolveProviderIdentity applies precedence when explicit identity signals agree", () => {
   const root = project();
   const contract = validContract();
-  const manifest = {
-    name: "memovee",
-    environmentPrefix: "MEMOVEE",
-    environmentFile: "tama/.memovee.integration.env",
-    source: "manifest",
-  };
-  const fromManifest = resolveProviderIdentity({
-    root,
-    framework: "generic",
-    manifestProvider: manifest,
-    contractDocument: contract,
-    name: "memovee",
-    prefix: "MEMOVEE",
-    environmentFile: "tama/.memovee.integration.env",
-  });
-  assert.deepEqual(fromManifest, {
-    name: "memovee",
-    environmentPrefix: "MEMOVEE",
-    environmentFile: "tama/.memovee.integration.env",
-    source: "manifest",
-  });
-
   const fromContract = resolveProviderIdentity({
     root,
     framework: "generic",
-    manifestProvider: null,
     contractDocument: contract,
     name: "flagged",
     prefix: "FLAGGED",
@@ -76,7 +54,6 @@ test("resolveProviderIdentity applies precedence when explicit identity signals 
   const fromFlags = resolveProviderIdentity({
     root,
     framework: "generic",
-    manifestProvider: null,
     contractDocument: null,
     name: "My Service",
     prefix: undefined,
@@ -94,7 +71,6 @@ test("resolveProviderIdentity applies precedence when explicit identity signals 
       resolveProviderIdentity({
         root,
         framework: "generic",
-        manifestProvider: null,
         contractDocument: null,
         name: undefined,
         prefix: "ACME",
@@ -106,7 +82,6 @@ test("resolveProviderIdentity applies precedence when explicit identity signals 
   const detected = resolveProviderIdentity({
     root,
     framework: "generic",
-    manifestProvider: null,
     contractDocument: null,
     name: undefined,
     prefix: undefined,
@@ -206,34 +181,27 @@ test("prepareMcpApp resolves contract and flag identities without prompting", as
   assert.equal(prompted, false);
 });
 
-test("prepareMcpApp rejects identity drift from flags or a contract", async () => {
+test("provider preparation follows the current contract without reading old manifest identity", async () => {
   const root = project();
   const contractPath = writeContract(root);
-  const contract = validContract();
   applyOperations(
-    planWithMcp(root, preparedFor(root, { contractPath, contractDocument: contract })).operations,
+    planWithMcp(root, preparedFor(root, { contractPath, contractDocument: validContract() }))
+      .operations,
   );
-
+  const receipt = join(root, "tama/.tama-kit.json");
+  writeFileSync(receipt, "not configuration");
   const prepared = await prepareFor(root, { providerName: "memovee" }, { nonInteractive: true });
-  assert.equal(prepared.identity.name, "memovee");
-  assert.equal(prepared.identity.source, "manifest");
-  assert.equal(prepared.persisted?.identity.name, "memovee");
-
-  await assert.rejects(
-    () => prepareFor(root, { providerName: "acme" }, { nonInteractive: true }),
-    /provider flags resolve a different identity.*--migrate-provider-identity/u,
-  );
-
-  const driftedContract = memoveeContract();
-  driftedContract.provider = {
+  assert.equal(prepared.identity.source, "contract");
+  assert.equal(prepared.persisted, undefined);
+  const current = memoveeContract();
+  current.provider = {
     name: "acme",
     environment_prefix: "ACME",
     environment_file: "tama/.acme.integration.env",
   };
-  driftedContract.environment_loading.loads = "tama/.acme.integration.env";
-  writeContract(root, driftedContract);
-  await assert.rejects(
-    () => prepareFor(root, {}, { nonInteractive: true }),
-    /provider contract resolves a different identity.*--migrate-provider-identity/u,
-  );
+  current.environment_loading.loads = "tama/.acme.integration.env";
+  writeContract(root, current);
+  const changed = await prepareFor(root, {}, { nonInteractive: true });
+  assert.equal(changed.identity.name, "acme");
+  assert.equal(readFileSync(receipt, "utf8"), "not configuration");
 });

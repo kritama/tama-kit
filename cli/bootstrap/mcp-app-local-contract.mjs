@@ -4,9 +4,12 @@
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 
+import { isGenerationPath } from "../domain/generation.mjs";
 import { usageError } from "../errors.mjs";
 import { contentDigest } from "../shared/files.mjs";
+import { isLoopbackHostname } from "../shared/network.mjs";
 import { BOOTSTRAP_PATHS } from "./constants.mjs";
+import { LOCAL_HTTPS_TRUST_MECHANISM, normalizeLocalDomain } from "./local-https.mjs";
 import {
   assertUnreservedFragmentPath,
   MCP_APP_COMPATIBILITY_IDENTIFIER,
@@ -71,6 +74,27 @@ function nonEmptyString(value, label) {
   return value;
 }
 
+/** @param {string} value */
+function validTopologyAllowedOrigin(value) {
+  try {
+    const url = new URL(value);
+    if (
+      !["http:", "https:"].includes(url.protocol) ||
+      url.username ||
+      url.password ||
+      url.pathname !== "/" ||
+      url.search ||
+      url.hash ||
+      url.origin !== value
+    )
+      return false;
+    if (url.protocol === "https:") return true;
+    return isLoopbackHostname(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 /** @param {string} root @param {string} path */
 function portableSourcePath(root, path) {
   const local = relative(root, path);
@@ -110,9 +134,10 @@ function providerContractDigest(path, expectedDocument) {
  * Validates Tama Kit's normalized, non-secret local provider contract.
  *
  * @param {unknown} document
+ * @param {{currentConfiguration?: boolean}} [options]
  * @returns {import("../types.mjs").McpAppLocalContract}
  */
-export function validateMcpAppLocalContract(document) {
+export function validateMcpAppLocalContract(document, options = {}) {
   if (!isPlainObject(document)) {
     throw usageError("local MCP App contract must be a JSON object");
   }
@@ -159,28 +184,44 @@ export function validateMcpAppLocalContract(document) {
     if (required.some((key) => !(key in topology))) {
       throw usageError("local MCP App contract topology is incomplete");
     }
-    if (
-      topology.profile !== "mcp-app-local-https" ||
-      typeof topology.local_domain !== "string" ||
-      typeof topology.provider_host !== "string" ||
-      typeof topology.tama_host !== "string" ||
-      typeof topology.provider_origin !== "string" ||
-      typeof topology.tama_origin !== "string" ||
-      typeof topology.resource !== "string" ||
-      typeof topology.health_url !== "string" ||
-      topology.https_port !== 443 ||
-      !Number.isInteger(topology.provider_port) ||
-      !Array.isArray(topology.certificate_names) ||
-      topology.certificate_names.some((name) => typeof name !== "string") ||
-      typeof topology.trust_mechanism !== "string" ||
-      !Array.isArray(topology.allowed_origins) ||
-      topology.allowed_origins.length === 0 ||
-      topology.allowed_origins.length > 32 ||
-      topology.allowed_origins.some(
-        (origin) => typeof origin !== "string" || origin.length === 0,
-      ) ||
-      new Set(topology.allowed_origins).size !== topology.allowed_origins.length
-    ) {
+    let localDomain;
+    try {
+      localDomain =
+        typeof topology.local_domain === "string"
+          ? normalizeLocalDomain(topology.local_domain)
+          : null;
+    } catch {
+      localDomain = null;
+    }
+    const expectedTamaHost = localDomain ? `tama.${localDomain}` : null;
+    const coherent =
+      localDomain !== null &&
+      topology.profile === "mcp-app-local-https" &&
+      topology.provider_host === localDomain &&
+      topology.tama_host === expectedTamaHost &&
+      topology.provider_origin === `https://${localDomain}` &&
+      topology.tama_origin === `https://${expectedTamaHost}` &&
+      topology.resource === `https://${expectedTamaHost}/mcp/app` &&
+      topology.health_url === `https://${expectedTamaHost}/` &&
+      topology.https_port === 443 &&
+      typeof topology.provider_port === "number" &&
+      Number.isInteger(topology.provider_port) &&
+      topology.provider_port >= 1 &&
+      topology.provider_port <= 65_535 &&
+      Array.isArray(topology.certificate_names) &&
+      topology.certificate_names.length === 2 &&
+      new Set(topology.certificate_names).size === 2 &&
+      topology.certificate_names.includes(localDomain) &&
+      topology.certificate_names.includes(expectedTamaHost) &&
+      topology.trust_mechanism === LOCAL_HTTPS_TRUST_MECHANISM &&
+      Array.isArray(topology.allowed_origins) &&
+      topology.allowed_origins.length > 0 &&
+      topology.allowed_origins.length <= 32 &&
+      new Set(topology.allowed_origins).size === topology.allowed_origins.length &&
+      topology.allowed_origins.every(
+        (origin) => typeof origin === "string" && validTopologyAllowedOrigin(origin),
+      );
+    if (!coherent) {
       throw usageError("local MCP App contract topology contains invalid values");
     }
   }
@@ -225,11 +266,19 @@ export function validateMcpAppLocalContract(document) {
   ) {
     throw usageError("local MCP App contract provider.environment_prefix is invalid");
   }
-  const environmentFile = safeRelativePath(
-    document.provider.environment_file,
-    "local MCP App contract provider.environment_file",
-  );
-  assertUnreservedFragmentPath(environmentFile, "local MCP App contract provider.environment_file");
+  if (options.currentConfiguration) {
+    if (!isGenerationPath(document.provider.environment_file))
+      throw usageError("current provider environment_file must be a safe project-relative path");
+  } else {
+    const environmentFile = safeRelativePath(
+      document.provider.environment_file,
+      "local MCP App contract provider.environment_file",
+    );
+    assertUnreservedFragmentPath(
+      environmentFile,
+      "local MCP App contract provider.environment_file",
+    );
+  }
 
   if (!isPlainObject(document.lifecycle)) {
     throw usageError("local MCP App contract lifecycle must be an object");
@@ -276,7 +325,7 @@ export function validateMcpAppLocalContract(document) {
     if (typeof value !== "string" || !ENDPOINT_PATH_PATTERN.test(value)) {
       throw usageError(`local MCP App contract public_endpoints.${name} is invalid`);
     }
-    if (supportedEndpoints[name] !== value) {
+    if (!options.currentConfiguration && supportedEndpoints[name] !== value) {
       throw usageError(
         `local MCP App contract public_endpoints.${name} must be ${supportedEndpoints[name]}`,
       );

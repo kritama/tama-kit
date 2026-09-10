@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
-import { readMcpAppProvider } from "../../cli/bootstrap/manifest.mjs";
 import { prepareMcpApp } from "../../cli/bootstrap/mcp-app.mjs";
 import { validateMcpAppContract } from "../../cli/bootstrap/mcp-app-contract.mjs";
 import { verifyMcpApp as verifyMcpAppImplementation } from "../../cli/bootstrap/mcp-app-verify.mjs";
@@ -191,10 +190,9 @@ export const MEMOVEE = {
  *   },
  * }} [extra]
  */
-export function preparedFor(root, extra = {}) {
+export function preparedFor(_root, extra = {}) {
   return {
     identity: extra.identity ?? { ...MEMOVEE, source: "flags" },
-    persisted: readMcpAppProvider(join(root, "tama")),
     contractPath: extra.contractPath ?? null,
     contractDocument: extra.contractDocument ?? null,
     allowedOrigins: ["http://127.0.0.1:3000"],

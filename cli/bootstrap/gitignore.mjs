@@ -67,33 +67,19 @@ export function validateSecretFilesIgnored(root, secretFiles = SECRET_FILES) {
  * @param {string} root
  * @param {{
  *   current: string | null,
- *   persisted: string | null,
  *   localHttps?: boolean,
  * }} [mcpAppFragments]
- *   The fragment the current run manages and the fragment a previous run
- *   persisted. Both lines may be removed; every other .integration.env line
- *   is user-owned and preserved.
+ *   Consolidate the selected fragment ignore entry; preserve unrelated entries.
  * @returns {FileOperation[]}
  */
-export function planGitignore(root, mcpAppFragments = { current: null, persisted: null }) {
+export function planGitignore(root, mcpAppFragments = { current: null }) {
   const tamaLines = TAMA_MANAGED_BLOCK.split("\n");
   /** @type {RegExp[]} */
   const removalPatterns = [];
   if (mcpAppFragments.current !== null) {
     const current = tamaRelativeFragment(mcpAppFragments.current);
     tamaLines.push("", MCP_APP_IGNORE_HEADER, `/${current}`);
-    const fragmentFiles = [
-      ...new Set([
-        current,
-        ...(mcpAppFragments.persisted !== null
-          ? [tamaRelativeFragment(mcpAppFragments.persisted)]
-          : []),
-      ]),
-    ];
-    removalPatterns.push(
-      MCP_APP_IGNORE_HEADER_PATTERN,
-      ...fragmentFiles.map((file) => fragmentLinePattern(file)),
-    );
+    removalPatterns.push(MCP_APP_IGNORE_HEADER_PATTERN, fragmentLinePattern(current));
   }
   if (mcpAppFragments.localHttps) {
     tamaLines.push("", LOCAL_HTTPS_IGNORE_BLOCK);

@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ownershipError } from "../errors.mjs";
 import { isValidVaultKey, parseEnvironment, token } from "../shared/environment.mjs";
-import { hasManagedMarker, operationForContent } from "../shared/files.mjs";
+import { operationForContent } from "../shared/files.mjs";
 import {
   generateOAuthPrivateJwk,
   validateOAuthPrivateJwk,
@@ -234,31 +234,6 @@ function validateDatabaseUrl(values, filename) {
       { path: filename, variable: "DATABASE_URL" },
     );
   }
-}
-
-/**
- * Replace the retired TAMA_OAUTH_SIGNING_KEY/TAMA_OAUTH_SIGNING_KEY_ID lines
- * in place with a fresh private JWK pair, preserving every other line.
- * @param {string} content
- */
-function migrateOAuthKeyPair(content) {
-  const oauth = generateOAuthPrivateJwk();
-  let replaced = 0;
-  const lines = content.split(/\r?\n/u).map((line) => {
-    if (line.startsWith("TAMA_OAUTH_SIGNING_KEY=")) {
-      replaced += 1;
-      return `TAMA_OAUTH_PRIVATE_JWK='${oauth.jwk}'`;
-    }
-    if (line.startsWith("TAMA_OAUTH_SIGNING_KEY_ID=")) {
-      replaced += 1;
-      return `TAMA_OAUTH_PRIVATE_JWK_ID=${oauth.kid}`;
-    }
-    return line;
-  });
-  if (replaced !== 2) {
-    throw new Error("internal error: retired OAuth signing key lines are missing");
-  }
-  return lines.join("\n");
 }
 
 /** @param {Map<string, string>} values @param {string} filename */
@@ -631,18 +606,13 @@ export function planEnvironment(
         { path: filename, variables: RETIRED_OAUTH_VARIABLES },
       );
     }
-    if (retiredKey) {
-      if (!hasManagedMarker(original)) {
-        throw ownershipError(
-          `${filename} still uses the retired ${RETIRED_OAUTH_VARIABLES.join(
-            " and ",
-          )} variables but is not a Tama Kit managed file; replace them manually with a valid TAMA_OAUTH_PRIVATE_JWK and TAMA_OAUTH_PRIVATE_JWK_ID pair`,
-          { path: filename, variables: RETIRED_OAUTH_VARIABLES },
-        );
-      }
-      content = migrateOAuthKeyPair(original);
-    }
+    if (retiredKey)
+      throw ownershipError(
+        `${filename} uses retired OAuth signing variables; migrate explicitly to TAMA_OAUTH_PRIVATE_JWK and TAMA_OAUTH_PRIVATE_JWK_ID before generation. No keys were replaced.`,
+        { path: filename, variables: RETIRED_OAUTH_VARIABLES },
+      );
   }
+
   if (requestedPort !== undefined) {
     content = updateEnvironment(content, {
       TAMA_PORT: port,

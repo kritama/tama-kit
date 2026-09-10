@@ -51,6 +51,7 @@ export type FileOperationOptions = {
   sensitive?: boolean;
   mode?: number;
   allowUnmanagedUpdate?: boolean;
+  validateExisting?: (content: string) => void;
 };
 
 export type Framework = "rails" | "phoenix" | "node" | "generic";
@@ -79,6 +80,8 @@ export type LocalHttpsTopology = {
   providerDependency?: "service_started" | "service_healthy";
   tamaPort: number;
   httpsPort: number;
+  /** Container port reached through the proxy; may differ from its published host port. */
+  proxyTargetPort: number;
   certificateNames: string[];
   caddyImage: string;
   trustMechanism: string;
@@ -131,7 +134,7 @@ export type ProviderIdentity = {
   name: string;
   environmentPrefix: string;
   environmentFile: string;
-  source: "manifest" | "contract" | "flags" | "framework" | "git" | "directory";
+  source: "contract" | "flags" | "framework" | "git" | "directory";
 };
 
 export type ProviderBindings = {
@@ -139,22 +142,18 @@ export type ProviderBindings = {
   source: "contract" | "conventional";
 };
 
-export type PersistedMcpAppProvider = {
+export type ResolvedMcpAppProvider = {
   identity: ProviderIdentity;
   contractSource: "contract" | "conventional";
   contractPath: string | null;
   bindings: Record<string, string>;
   environmentLoading: "verified" | "unverified";
-  environmentLoadingMechanism?: "direnv" | "compose-env-file" | null;
-  environmentLoadingEvidencePath?: string | null;
   providerOrigin?: string;
   tamaOrigin?: string;
   allowedOrigins?: string[];
   localHttps?: LocalHttpsTopology | null;
   tamaImage?: string;
-};
 
-export type ResolvedMcpAppProvider = PersistedMcpAppProvider & {
   localContract: McpAppLocalContract;
   bindingSource: "contract" | "conventional";
   environmentLoadingMechanism: "direnv" | "compose-env-file" | null;
@@ -175,16 +174,9 @@ export type McpAppBootstrapOptions = {
   providerPort?: number;
   providerRuntime?: "host" | "compose";
   providerService?: string;
-  migrateProviderTopology?: boolean;
   httpsPort?: number;
   installLocalCa?: boolean;
-  migrateLocalHttps?: boolean;
   localHttps?: LocalHttpsTopology | null;
-  activate: boolean;
-  targetMode?: McpAppMode;
-  providerMode?: McpAppMode;
-  preserveEnabledProvider?: boolean;
-  migrateProviderIdentity?: boolean;
   identitySource?: ProviderIdentity["source"];
 };
 
@@ -206,7 +198,6 @@ export type McpAppEnvironmentValidation = {
 
 export type McpAppPrepared = {
   identity: ProviderIdentity;
-  persisted: PersistedMcpAppProvider | null;
   contractPath: string | null;
   contractDocument: McpAppContract | null;
   allowedOrigins: string[];
@@ -219,6 +210,9 @@ export type FrameworkDetection = {
 };
 
 export type BootstrapPlanOptions = {
+  generationId?: string;
+  resumePending?: string[];
+  resumeId?: string;
   cwd: string;
   targetPath?: string;
   composePath?: string;
@@ -261,6 +255,8 @@ export type TerraformPlan = {
 };
 
 export type McpAppPlan = {
+  tamaEnvironment?: Map<string, string>;
+  providerEnvironment?: Map<string, string>;
   provider: ProviderIdentity;
   contractSource: "contract" | "conventional";
   contractPath: string | null;
@@ -298,6 +294,7 @@ export type McpAppVerification = {
 };
 
 export type BootstrapPlan = {
+  runtime?: import("./domain/runtime.mjs").RuntimeSelection;
   schemaVersion: number;
   root: string;
   framework: Framework;
@@ -425,8 +422,10 @@ export type ExitCode = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 export type CLIErrorDetails = Record<string, unknown>;
 
 export type BootstrapCommandOptions = {
+  generationId?: string;
+  resumePending?: string[];
+  resumeId?: string;
   nonInteractive?: boolean;
-  preserveLifecycle?: boolean;
   targetPath?: string;
   composePath?: string;
   port?: number;

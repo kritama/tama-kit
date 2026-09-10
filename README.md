@@ -36,12 +36,10 @@ changes. Choose to prepare files, start services, or explicitly activate a ready
 MCP App integration. Type `:back` to revisit a configuration step or `:cancel`
 to exit. EOF and Ctrl-C also pause setup. Dry runs remain read-only.
 
-Rerun the same bare command to continue, inspect configured status, or edit
-settings. Saved Compose/image selections and provider topology are reused;
-configured lifecycle modes are preserved. The ordered checklist in
-`tama/README.md` covers browser setup, Terraform review, provider restart, and
-client connection. Existing files or checkpoints do not prove current runtime
-health or Terraform provisioning.
+After generation, use `tama-kit setup` to start and verify current configuration
+or `tama-kit doctor` for read-only diagnosis. The interactive bootstrap rerun
+offers these next steps. It does not refresh files or change saved settings.
+Existing files or receipts do not prove runtime health or Terraform provisioning.
 
 Flags remain available for automation and advanced callers:
 
@@ -52,10 +50,10 @@ npx @kritama/tama-kit bootstrap --skills local --dry-run --json
 
 JSON and non-TTY invocations never prompt; `--non-interactive` disables all
 questions even in a terminal. These modes default to manual skill installation
-unless a valid recorded choice or explicit flag selects local skills. JSON
+unless an explicit flag selects local skills during initial generation. JSON
 output includes non-secret setup phases and next-action identifiers.
 
-Bootstrap creates private runtime files under `tama/`, adds managed Tama and
+Bootstrap creates private runtime files under `tama/`, adds project-owned Tama and
 PostgreSQL services, and generates a Terraform root with focused agent guidance.
 It preserves the owned global foundation and refuses ambiguous ownership.
 It does not require a separate Tama source checkout. Terminal colors and
@@ -72,9 +70,26 @@ is available, the agent opens the URL there; otherwise it follows the local
 README instructions. Treat that URL as a secret. JSON output exposes a
 token-redacted version as `agentPrompt`; dry-run output sets it to `null`.
 
-Generated non-sensitive files are tracked by `tama/.tama-kit.json`. If a
-tracked file has been edited since the previous bootstrap, Tama Kit stops and
-reports the drift instead of overwriting the user's changes.
+All generated files are developer-owned immediately, including Terraform,
+Compose, contracts, examples, instructions and copied skills. Edit them directly.
+The optional version-2 `tama/.tama-kit.json` receipt contains provenance and
+incomplete-generation progress only; no permanent content hashes or desired
+configuration. Completed reruns preserve customized and deleted output. Legacy
+version-1 manifests are accepted as history without comparing file hashes.
+Use `--resume <operation-id>` with the original options only for an explicitly
+unfinished generation; existing output is preserved.
+
+Setup and doctor read the native Compose model, environment bindings, current
+contract and Terraform source without consulting receipts. For custom layouts,
+select repeatable `--compose` roots/overrides, `--service`, `--proxy-service`,
+`--env-file`, `--contract`, `--provider-service`, and `--ca-file`. Doctor accepts
+`--terraform-root` and reports uninitialized providers without running init.
+`setup --dry-run --json` previews without writes or startup; `doctor --runtime`
+adds probes of existing services. Current inspection requires Compose's native
+`config --format json --no-env-resolution` support. Older Compose releases that
+discard declarations use a native model-rendering fallback for literal environment
+file paths; interpolated paths require a newer Compose release. Native Docker Compose and
+Terraform commands remain usable without Tama Kit or any receipt.
 
 Inspect the proposed changes without writing:
 
@@ -87,6 +102,36 @@ Generate and start the local services:
 ```bash
 npx @kritama/tama-kit bootstrap --start
 ```
+
+### Add MCP App to an existing standard project
+
+Use the dedicated capability generator:
+
+```bash
+npx @kritama/tama-kit generate mcp-app --provider-name my-app \
+  --image ghcr.io/upmaru/tama:0.13.2-server --dry-run --json
+```
+
+Remove `--dry-run` to write the reviewed additions. It reads current Compose
+configuration, preserves existing runtime keys and Terraform, and creates
+`tama/compose.mcp-app.yaml`, a separate private `tama/.mcp-app.env`, the provider
+fragment, local bridge contract, and `tama/MCP_APP.md`. Only missing secret-ignore
+entries are appended to existing integration files. An existing pinned compatible
+image is reused; a floating tag or custom build requires an explicit `--image`.
+
+For custom layouts, select ordered `--compose` files, `--service`, and `--env-file`.
+Follow the emitted `setup` and native Docker commands: they append the generated
+Compose override to your existing selection. Local HTTPS uses Caddy, a derived CA
+image, and an atomic private certificate/key bundle under `tama/mcp-app-tls/`.
+The override clears Tama's old published ports and requires Compose 2.24.4+.
+Even its dry run requires the Compose CLI for current configuration inspection;
+no daemon is needed. Generation never starts the provider or activates either side.
+
+The separate `tama/.tama-kit-mcp-app.json` receipt records this operation only.
+Completed reruns preserve changes and deletions. Use `--resume <id>` with the
+original options only for an unfinished addition. Use `setup` for subsequent
+activation and verification; provider loading, CA trust, and restarts remain
+application-owned. See `tama/MCP_APP.md` for the exact handoff.
 
 ### Bootstrap an MCP App provider integration
 
@@ -121,7 +166,7 @@ allowed origin must use HTTPS. Supply at most 32 unique allowed origins.
 A custom non-`.localhost` name additionally requires
 `--acknowledge-local-domain-risk` after its local DNS behavior is verified.
 
-The same command also manages
+Initial generation also writes
 `tama/contracts/mcp-app-provider-v1.json`, a non-secret local contract that
 normalizes provider identity, exact environment bindings, public endpoint
 paths, source provenance, and environment-loader evidence before either
@@ -146,49 +191,30 @@ service must load the reported `tama/` integration fragment and share the
 default Compose network. Services declared only through `extends`, includes,
 or optional profiles are not currently supported as provider selections.
 
-Bootstrap records the effective service and dependency, so reruns reuse them
-without editing generated Caddy or Compose files. To change a recorded runtime
-or service, put both runtimes in `prepared` and explicitly select
-`--migrate-provider-topology`. Use `--provider-runtime host` when moving back
-to a host-native provider. Migration preserves keys and cannot be combined
-with activation. See [provider topology](docs/mcp-app-provider-bootstrap.md#provider-runtime-topology)
-for the ownership and migration contract.
+To change an existing topology, edit the project-owned Compose, proxy,
+certificates, contracts and environment bindings directly. Preserve keys,
+review identities, then use doctor and setup to inspect and verify the change.
+Bootstrap migration flags no longer upgrade existing projects.
 
 Activation is deliberately two-step:
 
 ```bash
-npx @kritama/tama-kit bootstrap --mcp-app \
-  --provider-name acme \
-  --start --activate
+npx @kritama/tama-kit setup --activate
 ```
 
 The first run verifies prepared state and enables/restarts Tama, then reports
 the provider-owned mode change. Set the reported provider mode variable to
-`enabled`, restart the provider, and rerun the same command. Tama Kit records
-an enabled checkpoint only after both live services pass metadata, JWKS,
+`enabled`, restart the provider, and rerun the same command. Tama Kit reports
+an enabled state only after both live services pass metadata, JWKS,
 introspection, protected-resource, route, and direct Tama-container
 reachability probes. It never executes provider lifecycle commands. See
 [MCP App provider bootstrap](docs/mcp-app-provider-bootstrap.md)
 for the contract, secret ownership, rerun, and recovery rules.
 
-Provider identity is immutable during a normal rerun. To migrate it, first
-update the provider-owned loader (and contract, when present) for the new
-fragment, keep the current provider mode prepared, then run with an explicit
-new name:
-
-```bash
-npx @kritama/tama-kit bootstrap --mcp-app \
-  --migrate-provider-identity --provider-name new-name \
-  --provider-origin http://host.docker.internal:4000 \
-  --tama-origin http://127.0.0.1:4001 \
-  --allowed-origin http://127.0.0.1:3000 \
-  --port 4001 \
-  --image ghcr.io/upmaru/tama:<pinned-version-in-intersection>-server
-```
-
-The migration moves preserved provider-owned entries to the new fragment,
-renames the managed bindings, preserves signing material and overlap keys,
-removes the old managed fragment transactionally, and records the new identity.
+Activation edits only Tama's safely identified mode assignment. It never
+rewrites environment fragments or changes provider mode. A failure during an
+already-enabled check preserves configuration. Recovery after its own mode
+change restores that assignment while preserving unrelated developer edits.
 
 The first release uses Tama's supported interactive setup flow to create root
 and provisioner credentials. Bootstrap does not use the test-only provisioner

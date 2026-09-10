@@ -1,8 +1,10 @@
 // @ts-check
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BOOTSTRAP_PATHS } from "./constants.mjs";
 import { validateSecretFilesIgnored } from "./gitignore.mjs";
-import { readMcpAppProvider } from "./manifest.mjs";
+import { validateMcpAppLocalContract } from "./mcp-app-local-contract.mjs";
+
 /** @typedef {import("../types.mjs").BootstrapPlan} BootstrapPlan */
 
 /** @param {BootstrapPlan} plan */
@@ -12,9 +14,10 @@ export function validateWrittenSecretsIgnored(plan) {
   if (plan.mcpApp) {
     files.add(plan.mcpApp.provider.environmentFile);
   }
-  const persistedProvider = readMcpAppProvider(join(plan.root, "tama"));
-  if (persistedProvider) {
-    files.add(persistedProvider.identity.environmentFile);
+  const contractPath = join(plan.root, BOOTSTRAP_PATHS.mcpAppLocalContract);
+  if (!plan.mcpApp && existsSync(contractPath)) {
+    const contract = validateMcpAppLocalContract(JSON.parse(readFileSync(contractPath, "utf8")));
+    files.add(contract.provider.environment_file);
   }
   if (plan.localHttps) {
     files.add("tama/tls/local.pem");

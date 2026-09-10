@@ -48,10 +48,16 @@ function fixture({
   let verifications = 0;
   const runtime = createBootstrapRuntime({
     platform: transportFailure ? "linux" : "darwin",
-    createBootstrapPlan(input) {
-      const result = plan(input.mcpApp.targetMode, input.mcpApp.providerMode);
-      events.push(`plan:${result.mcpApp.lifecycle}/${result.mcpApp.providerLifecycle}`);
-      return result;
+    planTamaModeChange() {
+      events.push("mode:enabled");
+      return {
+        operation: {},
+        plan: plan("enabled", "prepared"),
+        restore() {
+          events.push("mode:restore");
+          return {};
+        },
+      };
     },
     async applyOperationsTransactionally(_operations, validate) {
       events.push("write");
@@ -69,23 +75,23 @@ function fixture({
       if (starts === startFailure)
         throw startDiagnostic
           ? startupError("startup fault", { diagnostic: startDiagnostic, internal: "do-not-copy" })
-          : new Error("startup fault");
+          : startupError("startup fault");
       if (recoveryFailure && starts > 1 && value.mcpApp.lifecycle === "prepared") {
         throw recoveryDiagnostic
           ? startupError("recovery fault", {
               diagnostic: recoveryDiagnostic,
               internal: "do-not-copy",
             })
-          : new Error("recovery fault");
+          : startupError("recovery fault");
       }
       return "https://tama.app.localhost/";
     },
     resolveComposeHostGatewayAddress() {
-      throw new Error("transport fault");
+      throw startupError("transport fault");
     },
     async verifyMcpApp({ plan: value }) {
       verifications++;
-      if (verifications === verifyException) throw new Error("verification exception");
+      if (verifications === verifyException) throw startupError("verification exception");
       events.push(`verify:${value.lifecycle}/${value.providerLifecycle}`);
       return {
         verified: verifications !== verifyFailure,
@@ -119,9 +125,8 @@ test("activation verifies prepared services before enabling Tama and requesting 
   assert.deepEqual(f.events, [
     "start:prepared/prepared",
     "verify:prepared/prepared",
-    "plan:enabled/prepared",
+    "mode:enabled",
     "write",
-    "secrets",
     "validate",
     "start:enabled/prepared",
     "verify:enabled/prepared",
@@ -143,52 +148,51 @@ test("starting prepared services without activation leaves both services prepare
   assert.deepEqual(f.events, ["start:prepared/prepared", "verify:prepared/prepared"]);
 });
 
+test("a disabled lifecycle on either side skips live MCP endpoint verification", async () => {
+  for (const [tama, provider] of [
+    ["prepared", "disabled"],
+    ["disabled", "prepared"],
+    ["disabled", "enabled"],
+  ]) {
+    const f = fixture({ verifyException: 1 });
+    const result = await f.run(plan(tama, provider), { activate: false });
+    assert.deepEqual(f.events, [`start:${tama}/${provider}`]);
+    assert.equal(result.plan.mcpAppVerification, null);
+  }
+});
+
 test("failed prepared verification cannot enable or rewrite the integration", async () => {
   const f = fixture({ verifyFailure: 1 });
   await assert.rejects(
     f.run(),
-    /The integration remains prepared.*Failed probes: checkpoint: probe fault/u,
+    /Failed probes: checkpoint: probe fault.*Configuration was preserved/u,
   );
   assert.deepEqual(f.events, ["start:prepared/prepared", "verify:prepared/prepared"]);
 });
 
-test("failed enabled startup restores both fragments and restarts Tama prepared", async () => {
+test("failed startup of an already-enabled project never writes configuration", async () => {
   const f = fixture({ startFailure: 1 });
-  await assert.rejects(
-    f.run(plan("enabled", "enabled")),
-    /restart the provider.*Startup failure: startup fault/u,
-  );
-  assert.deepEqual(f.events, [
-    "start:enabled/enabled",
-    "plan:prepared/prepared",
-    "write",
-    "secrets",
-    "validate",
-    "start:prepared/prepared",
-  ]);
+  await assert.rejects(f.run(plan("enabled", "enabled")), /startup fault/u);
+  assert.deepEqual(f.events, ["start:enabled/enabled"]);
 });
 
-test("failed verification after enabling Tama restores prepared state", async () => {
+test("failed verification after this invocation enables Tama restores only its own mode change", async () => {
   const f = fixture({ verifyFailure: 2 });
-  await assert.rejects(
-    f.run(),
-    /provider remained prepared.*Failed probes: checkpoint: probe fault/u,
-  );
-  assert.deepEqual(f.events.slice(-5), [
-    "plan:prepared/prepared",
+  await assert.rejects(f.run(), /provider configuration was preserved/u);
+  assert.deepEqual(f.events.slice(-4), [
+    "mode:restore",
     "write",
-    "secrets",
     "validate",
     "start:prepared/prepared",
   ]);
 });
 
-test("failed enabled transport resolution restores prepared state", async () => {
+test("failed transport resolution preserves previously enabled configuration", async () => {
   const f = fixture({ transportFailure: true });
   const value = plan("enabled", "enabled");
   value.mcpApp.providerOrigin = "http://host.docker.internal:4000";
-  await assert.rejects(f.run(value), /Transport failure: transport fault/u);
-  assert.equal(f.events.at(-1), "start:prepared/prepared");
+  await assert.rejects(f.run(value), /transport fault.*Configuration was preserved/u);
+  assert.deepEqual(f.events, ["start:enabled/enabled"]);
 });
 
 test("dry-run planning does not invoke write, prerequisite, or startup effects", async () => {
@@ -241,54 +245,39 @@ test("development prepare-only writes files without Docker, Mix, or foundation s
   assert.deepEqual(events, ["write"]);
 });
 
-test("a rejected enabled verification effect compensates before reporting failure", async () => {
+test("failed verification of an already-enabled project never compensates with generation", async () => {
   const f = fixture({ verifyException: 1 });
   await assert.rejects(
     f.run(plan("enabled", "enabled")),
-    /Verification failure: verification exception/u,
+    /verification exception.*Configuration was preserved/u,
   );
-  assert.equal(f.events.at(-1), "start:prepared/prepared");
+  assert.deepEqual(f.events, ["start:enabled/enabled"]);
 });
 
-test("a failed recovery reports both the activation and recovery failures", async () => {
-  const f = fixture({ startFailure: 1, recoveryFailure: true });
-  await assert.rejects(f.run(plan("enabled", "enabled")), (error) => {
-    assert.equal(error.category, "startup");
-    assert.match(
-      error.message,
-      /startup fault.*Restoring prepared mode also failed: recovery fault/u,
-    );
-    return true;
-  });
+test("failed recovery retains both sanitized failures", async () => {
+  const f = fixture({ startFailure: 2, recoveryFailure: true });
+  await assert.rejects(
+    f.run(),
+    /startup fault.*Restoring the selected Tama mode also failed: recovery fault/u,
+  );
 });
 
-test("activation recovery preserves the sanitized startup diagnostic", async () => {
+test("activation recovery preserves the original sanitized startup diagnostic", async () => {
   const diagnostic = { operation: "compose-up", reason: "port-conflict", port: 443 };
   const recoveryDiagnostic = { operation: "compose-up", reason: "image-unavailable" };
-  for (const initiallyEnabled of [false, true]) {
-    for (const recoveryFailure of [false, true]) {
-      const f = fixture({
-        startFailure: initiallyEnabled ? 1 : 2,
-        startDiagnostic: diagnostic,
-        recoveryFailure,
-        recoveryDiagnostic,
-      });
-      await assert.rejects(
-        f.run(initiallyEnabled ? plan("enabled", "enabled") : plan()),
-        (error) => {
-          assert.equal(error.category, "startup");
-          assert.deepEqual(error.details, { diagnostic });
-          assert.doesNotMatch(JSON.stringify(error.details), /do-not-copy/);
-          if (recoveryFailure) assert.match(error.message, /Restoring prepared mode also failed/);
-          return true;
-        },
-      );
-      assert.equal(f.events.at(-1), "start:prepared/prepared");
-    }
+  for (const recoveryFailure of [false, true]) {
+    const f = fixture({
+      startFailure: 2,
+      startDiagnostic: diagnostic,
+      recoveryFailure,
+      recoveryDiagnostic,
+    });
+    await assert.rejects(f.run(), (error) => {
+      assert.equal(error.category, "startup");
+      assert.deepEqual(error.details, { diagnostic });
+      assert.doesNotMatch(JSON.stringify(error.details), /do-not-copy/);
+      return true;
+    });
+    assert.equal(f.events.at(-1), "start:prepared/prepared");
   }
-  const f = fixture({ startFailure: 1, recoveryFailure: true, recoveryDiagnostic });
-  await assert.rejects(f.run(plan("enabled", "enabled")), (error) => {
-    assert.deepEqual(error.details, { diagnostic: recoveryDiagnostic });
-    return true;
-  });
 });

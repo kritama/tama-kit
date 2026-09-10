@@ -51,6 +51,12 @@ test("bootstrap JSON startup errors expose a single sanitized diagnostic envelop
     docker,
     `#!${process.execPath}
 if (process.argv.includes('version')) console.log('2.20.0');
+else if (process.argv.includes('config') && process.argv.includes('--format')) {
+  const { readFileSync } = require('node:fs');
+  const { parseEnv } = require('node:util');
+  const path = require('node:path').join(process.cwd(), 'tama/.tama.env');
+  console.log(JSON.stringify({ services: { tama: process.argv.includes('--no-env-resolution') ? { env_file: [{ path }] } : { environment: parseEnv(readFileSync(path, 'utf8')) } } }));
+}
 else if (process.argv.includes('up')) {
   process.stderr.write('TOKEN=do-not-emit\\nBind for 127.0.0.1:4000 failed: port is already allocated\\n');
   process.exitCode = 1;

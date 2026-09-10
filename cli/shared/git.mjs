@@ -82,7 +82,7 @@ export function validateSecretFilesIgnored(root, secretFiles) {
 
   const notIgnored = [];
   for (const file of secretFiles) {
-    const literalPath = `./${file}`;
+    const literalPath = `./${isAbsolute(file) ? relative(root, file) : file}`;
     const ignored = spawnSync(
       "git",
       ["-C", root, "check-ignore", "--no-index", "--quiet", "--", literalPath],
