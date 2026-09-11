@@ -12,9 +12,15 @@ permissions:
 
 jobs:
   test:
-    name: Test, lint, and type-check
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: ["20.12.0", "24"]
 
     steps:
       - name: Check out repository
@@ -23,7 +29,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - name: Restore installed dependencies
@@ -31,7 +37,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: node_modules
-          key: ${{ runner.os }}-${{ runner.arch }}-node-24-modules-${{ hashFiles('package.json', 'package-lock.json') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-node-${{ matrix.node }}-modules-${{ hashFiles('package.json', 'package-lock.json') }}
 
       - name: Install dependencies
         if: steps.dependency-cache.outputs.cache-hit != 'true'
@@ -46,14 +52,45 @@ jobs:
       - name: Type-check CLI
         run: npm run typecheck
 
+      - name: Install Docker CLI and Compose for macOS configuration tests
+        if: runner.os == 'macOS'
+        run: |
+          brew install docker docker-compose
+          mkdir -p "$HOME/.docker/cli-plugins"
+          ln -sf "$(brew --prefix)/bin/docker-compose" "$HOME/.docker/cli-plugins/docker-compose"
+
+      - name: Verify native Compose configuration tooling
+        run: docker compose version
+
       - name: Run Node test suite
         run: npm test
+
+      - name: Report macOS native crashes
+        if: failure() && runner.os == 'macOS'
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          from pathlib import Path
+          for path in (Path.home() / "Library/Logs/DiagnosticReports").glob("node*.ips"):
+              try:
+                  text = path.read_text()
+                  report = json.loads(text.split("\n", 1)[1])
+                  print(json.dumps({
+                      "report": path.name,
+                      "exception": report.get("exception"),
+                      "termination": report.get("termination"),
+                      "frames": [frame.get("symbol") for thread in report.get("threads", [])
+                                 if thread.get("triggered") for frame in thread.get("frames", [])]
+                  }))
+              except (ValueError, OSError):
+                  pass
+          PYTHON
 
       - name: Validate public submission metadata
         run: npm run validate:submission
 
-      - name: Validate package contents
-        run: npm pack --dry-run
+      - name: Validate installed CLI package
+        run: npm run validate:package
 
   bootstrap-integration:
     name: Bootstrap integration and runtime
@@ -97,8 +134,17 @@ jobs:
       - name: Validate MCP App local HTTPS runtime
         run: npm run validate:mcp-app:runtime
 
-  memovee-local-https-integration:
-    name: Memovee local HTTPS integration
+      - name: Validate Compose-managed MCP App provider runtime
+        run: node scripts/validate-mcp-app-local-https.mjs --compose-provider
+
+      - name: Validate additive MCP App with host provider
+        run: node scripts/validate-mcp-app-local-https.mjs --addition
+
+      - name: Validate additive MCP App with Compose provider
+        run: node scripts/validate-mcp-app-local-https.mjs --addition --compose-provider
+
+  app-local-https-integration:
+    name: App local HTTPS integration
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -132,7 +178,7 @@ jobs:
       - name: Install local HTTPS certificate tooling
         run: sudo apt-get update && sudo apt-get install --yes mkcert libnss3-tools
 
-      - name: Validate Memovee dev and official Tama release together
+      - name: Validate app provider and official Tama release together
         env:
           MEMOVEE_CHECKOUT: ${{ github.workspace }}/.runtime/memovee
         run: npm run validate:memovee:runtime

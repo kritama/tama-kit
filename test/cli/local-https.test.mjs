@@ -2,15 +2,15 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   rmSync,
   symlinkSync,
   unlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { createServer } from "node:https";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
@@ -26,9 +26,11 @@ import {
   usesLocalHttpsTopology,
 } from "../../cli/bootstrap/local-https.mjs";
 import { createLocalHttpsFetch } from "../../cli/bootstrap/mcp-app-verify.mjs";
+import { validateAdditionCertificateBundle } from "../../cli/workflows/mcp-app-certificates.mjs";
+import { temporaryDirectory } from "../helpers/temporary.mjs";
 
 function certificateFixture() {
-  const root = mkdtempSync(join(tmpdir(), "tama-kit-local-https-test-"));
+  const root = temporaryDirectory("tama-kit-local-https-test-");
   const paths = localHttpsPaths(root);
   mkdirSync(paths.directory, { recursive: true });
   const rootKey = join(root, "root-key.pem");
@@ -128,14 +130,12 @@ test("fresh MCP App runs use HTTPS while explicit origins retain the legacy path
     usesLocalHttpsTopology({ requested: true, providerOrigin: "http://host.docker.internal:4000" }),
     false,
   );
-  assert.equal(usesLocalHttpsTopology({ requested: true, migrateLocalHttps: true }), true);
-  const legacy = { providerOrigin: "http://host.docker.internal:4000" };
-  assert.equal(usesLocalHttpsTopology({ requested: true, providerPort: 4100 }, legacy), false);
+  const contract = { local_development: { provider_origin: "http://host.docker.internal:4000" } };
+  assert.equal(usesLocalHttpsTopology({ requested: true }, contract), false);
   assert.equal(
-    usesLocalHttpsTopology({ requested: true, localDomain: "app.localhost" }, legacy),
-    false,
+    usesLocalHttpsTopology({ requested: true, localDomain: "app.localhost" }, contract),
+    true,
   );
-  assert.equal(usesLocalHttpsTopology({ requested: true, migrateLocalHttps: true }, legacy), true);
 });
 
 test("local HTTPS names must resolve only to loopback addresses", async () => {
@@ -246,6 +246,109 @@ test("certificate reuse validates file type, key permissions, key pairing, and i
     );
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("MCP App certificate validation never installs the local CA during planning", () => {
+  const fixture = certificateFixture();
+  const topology = resolveLocalHttpsTopology();
+  const bundle = `${readFileSync(fixture.paths.certificate, "utf8").trim()}\n${readFileSync(fixture.paths.privateKey, "utf8").trim()}\n`;
+  let authorized;
+  try {
+    assert.doesNotThrow(() =>
+      validateAdditionCertificateBundle(topology, bundle, true, (value) => {
+        authorized = value;
+        return {
+          path: "mkcert",
+          caRoot: fixture.root,
+          rootCertificate: fixture.paths.rootCertificate,
+        };
+      }),
+    );
+    assert.equal(authorized, false);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("resumed local HTTPS validation adopts persisted TLS with a shrinking pending set", () => {
+  const fixture = certificateFixture();
+  const topology = resolveLocalHttpsTopology();
+  const options = {
+    discoverLocalCa: () => ({
+      path: "mkcert",
+      caRoot: fixture.root,
+      rootCertificate: fixture.paths.rootCertificate,
+    }),
+  };
+  try {
+    for (const resumePending of [
+      ["tama/tls/local.pem", "tama/tls/local-key.pem", "tama/tls/rootCA.pem"],
+      ["tama/tls/local-key.pem", "tama/tls/rootCA.pem"],
+      ["tama/tls/rootCA.pem"],
+    ]) {
+      const result = planLocalHttpsCertificates(fixture.root, topology, {
+        ...options,
+        resumePending,
+      });
+      assert.deepEqual(
+        result.operations.map(({ action }) => action),
+        resumePending.map(() => "unchanged"),
+      );
+    }
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("resumed local HTTPS generation never replaces a completed TLS file", () => {
+  const source = certificateFixture();
+  const target = temporaryDirectory("tama-kit-partial-local-https-test-");
+  const paths = localHttpsPaths(target);
+  const mkcert = join(source.root, "test-mkcert");
+  mkdirSync(paths.directory, { recursive: true });
+  copyFileSync(source.paths.certificate, paths.certificate);
+  writeFileSync(
+    mkcert,
+    `#!/usr/bin/env node
+const { copyFileSync } = require("node:fs");
+const arguments_ = process.argv.slice(2);
+copyFileSync(${JSON.stringify(source.paths.certificate)}, arguments_[arguments_.indexOf("-cert-file") + 1]);
+copyFileSync(${JSON.stringify(source.paths.privateKey)}, arguments_[arguments_.indexOf("-key-file") + 1]);
+`,
+  );
+  chmodSync(mkcert, 0o755);
+  try {
+    const options = {
+      ensureLocalCa: () => ({
+        path: mkcert,
+        caRoot: source.root,
+        rootCertificate: source.paths.rootCertificate,
+      }),
+    };
+    assert.throws(
+      () =>
+        planLocalHttpsCertificates(target, resolveLocalHttpsTopology(), {
+          ...options,
+          resumePending: ["tama/tls/local-key.pem", "tama/tls/rootCA.pem"],
+        }),
+      /cannot safely replace a TLS file already marked complete/u,
+    );
+    assert.equal(
+      readFileSync(paths.certificate, "utf8"),
+      readFileSync(source.paths.certificate, "utf8"),
+    );
+    const result = planLocalHttpsCertificates(target, resolveLocalHttpsTopology(), {
+      ...options,
+      resumePending: ["tama/tls/local.pem", "tama/tls/local-key.pem", "tama/tls/rootCA.pem"],
+    });
+    assert.deepEqual(
+      result.operations.map(({ action }) => action),
+      ["unchanged", "create", "create"],
+    );
+  } finally {
+    rmSync(source.root, { recursive: true, force: true });
+    rmSync(target, { recursive: true, force: true });
   }
 });
 

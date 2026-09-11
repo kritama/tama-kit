@@ -104,6 +104,12 @@ Classify the overall path as:
 ## Validate
 
 Run repository checks and the narrowest safe Terraform validation available.
+Prefer `terraform fmt -check -recursive`, `terraform validate`, and existing
+native Terraform plan tests. Inspect test provider and command settings before
+running them; mock-provider tests establish static contracts only. Do not create
+a parallel configuration validator or an application-local copy of Tama Kit
+tooling during an audit. Keep application semantic tests and live runtime probes
+distinct from graph validation.
 Do not run `terraform apply`. If asked to fix findings, preserve the original
 trace, make the smallest change, and audit the repaired path against the same
 invariants.

@@ -107,3 +107,29 @@ test("local HTTPS provider probes preserve authority while connecting through Ca
     "https://app.localhost/.well-known/oauth-authorization-server",
   );
 });
+
+test("local HTTPS provider probes use the proxy container target port", () => {
+  const calls = [];
+  const plan = {
+    root: "/tmp/example",
+    composeFile: "/tmp/example/compose.yaml",
+    runtime: { proxyService: "proxy" },
+    localHttps: {
+      providerHost: "app.localhost",
+      httpsPort: 8443,
+      proxyTargetPort: 443,
+    },
+  };
+  assert.equal(
+    probeComposeProviderEndpoint(
+      plan,
+      "https://app.localhost/.well-known/oauth-authorization-server",
+      (_command, args) => {
+        calls.push(args);
+        return "200";
+      },
+    ),
+    true,
+  );
+  assert.ok(calls[0].includes("app.localhost:443:proxy:443"));
+});

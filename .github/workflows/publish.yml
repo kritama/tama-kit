@@ -81,7 +81,7 @@ jobs:
           otp-version: "27.3.4.16"
           elixir-version: "1.19.5"
 
-      - name: Validate Memovee dev and official Tama release together
+      - name: Validate app provider and official Tama release together
         env:
           MEMOVEE_CHECKOUT: ${{ github.workspace }}/.runtime/memovee
         run: npm run validate:memovee:runtime

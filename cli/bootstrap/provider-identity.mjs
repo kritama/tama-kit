@@ -1,4 +1,5 @@
 // @ts-check
+/** @typedef {import("../domain/contracts.mjs").McpAppContract} McpAppContract */
 
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
@@ -207,8 +208,7 @@ export function detectProviderIdentity(root, framework) {
  * @typedef {object} ResolveIdentityInput
  * @property {string} root
  * @property {Framework} framework
- * @property {ProviderIdentity | null} manifestProvider
- * @property {Record<string, unknown> | null} contractDocument
+ * @property {McpAppContract | null} contractDocument
  * @property {string | undefined} name
  * @property {string | undefined} prefix
  * @property {string | undefined} environmentFile
@@ -217,8 +217,8 @@ export function detectProviderIdentity(root, framework) {
 
 /**
  * A provider fragment may only be written to a safe project-relative path
- * that no bootstrap-managed or application-owned file occupies, no matter
- * where the path came from (contract, manifest, or flag).
+ * that no generated or application-owned file occupies, no matter
+ * where the path came from (contract or flag).
  *
  * @param {unknown} value
  * @param {string} label
@@ -231,14 +231,14 @@ function assertFragmentPath(value, label) {
 }
 
 /**
- * @param {Record<string, unknown> | null} contractDocument
+ * @param {McpAppContract | null} contractDocument
  * @param {ProviderIdentity["source"] | undefined} identitySource
  * @returns {ProviderIdentity | null}
  */
 function contractProviderIdentity(contractDocument, identitySource) {
   const contractIdentity =
     contractDocument !== null && isIdentityDocument(contractDocument.provider)
-      ? /** @type {Record<string, unknown>} */ (contractDocument.provider)
+      ? contractDocument.provider
       : null;
   const contractName =
     typeof contractIdentity?.name === "string" ? contractIdentity.name : undefined;
@@ -291,18 +291,9 @@ function flagProviderIdentity(name, prefix, environmentFile, identitySource) {
   };
 }
 
-/** @param {ProviderIdentity} left @param {ProviderIdentity} right */
-function identitiesMatch(left, right) {
-  return (
-    left.name === right.name &&
-    left.environmentPrefix === right.environmentPrefix &&
-    left.environmentFile === right.environmentFile
-  );
-}
-
 /**
  * Resolves the accepted provider identity using the documented precedence:
- * managed manifest, then explicit contract identity, then explicit flags, then
+ * explicit contract identity, then explicit flags, then
  * safe static detection. The directory name is only ever a suggestion and is
  * accepted here when a stronger signal is absent; the command layer is
  * responsible for interactive confirmation and for requiring an explicit name
@@ -312,48 +303,14 @@ function identitiesMatch(left, right) {
  * @returns {ProviderIdentity}
  */
 export function resolveProviderIdentity(input) {
-  const {
-    root,
-    framework,
-    manifestProvider,
-    contractDocument,
-    name,
-    prefix,
-    environmentFile,
-    identitySource,
-  } = input;
+  const { root, framework, contractDocument, name, prefix, environmentFile, identitySource } =
+    input;
 
   const contractIdentity = contractProviderIdentity(contractDocument, identitySource);
   const flagIdentity =
-    manifestProvider || contractIdentity === null
+    contractIdentity === null
       ? flagProviderIdentity(name, prefix, environmentFile, identitySource)
       : null;
-
-  if (manifestProvider) {
-    // The manifest is trusted state, but it is disk-resident: re-validate the
-    // fragment path so a tampered or stale entry cannot point the fragment at
-    // a bootstrap-managed file.
-    const persistedIdentity = {
-      name: manifestProvider.name,
-      environmentPrefix: manifestProvider.environmentPrefix,
-      environmentFile: assertFragmentPath(
-        manifestProvider.environmentFile,
-        "the persisted MCP App provider environment file",
-      ),
-      source: /** @type {const} */ ("manifest"),
-    };
-    if (contractIdentity !== null && !identitiesMatch(persistedIdentity, contractIdentity)) {
-      throw usageError(
-        "the provider contract resolves a different identity than the persisted MCP App provider; use --migrate-provider-identity for an intentional identity change",
-      );
-    }
-    if (flagIdentity !== null && !identitiesMatch(persistedIdentity, flagIdentity)) {
-      throw usageError(
-        "the provider flags resolve a different identity than the persisted MCP App provider; use --migrate-provider-identity for an intentional identity change",
-      );
-    }
-    return persistedIdentity;
-  }
 
   if (contractIdentity !== null) {
     return contractIdentity;

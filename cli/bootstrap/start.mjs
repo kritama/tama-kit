@@ -1,34 +1,17 @@
 // @ts-check
 
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createConnection, isIP } from "node:net";
-
 import { prerequisiteError, startupError } from "../errors.mjs";
+import { CapturedProcessError, runCapturedProcess } from "../shared/captured-process.mjs";
+import { composeArguments } from "../shared/compose.mjs";
+import { runProcess } from "../shared/process.mjs";
+import { composeStartupDiagnostic } from "./diagnostics.mjs";
 import { localHttpsPaths } from "./local-https.mjs";
 import { createLocalHttpsFetch } from "./mcp-app-verify.mjs";
 
 /** @typedef {import("../types.mjs").BootstrapPlan} BootstrapPlan */
-
-/**
- * @param {string} command
- * @param {string[]} args
- * @param {import("node:child_process").SpawnOptions} [options]
- * @returns {Promise<void>}
- */
-function runProcess(command, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, options);
-    child.once("error", reject);
-    child.once("exit", (code, signal) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`${command} exited with ${code ?? signal}`));
-      }
-    });
-  });
-}
 
 /** @param {unknown} error @param {string} code */
 function hasErrorCode(error, code) {
@@ -74,14 +57,14 @@ export async function assertLocalHttpsPortAvailable(port) {
  * Reports whether this exact Compose plan has a running service container.
  * A running managed Caddy is allowed to retain port 443 across idempotent
  * starts; a stopped container does not mask an unrelated listener.
- * @param {{root: string, composeFile: string}} plan
+ * @param {{root: string, composeFile: string, runtime?: import("../domain/runtime.mjs").RuntimeSelection}} plan
  * @param {string} service
  * @param {typeof execFileSync} [execute]
  */
 export function managedComposeServiceExists(plan, service, execute = execFileSync) {
   try {
     return (
-      execute("docker", ["compose", "-f", plan.composeFile, "ps", "-q", service], {
+      execute("docker", [...composeArguments(plan), "ps", "-q", service], {
         cwd: plan.root,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
@@ -167,7 +150,7 @@ function isContainerLocalAddress(address) {
  * only to the Docker bridge remain reachable without weakening the public
  * issuer comparison.
  *
- * @param {{root: string, composeFile: string}} plan
+ * @param {{root: string, composeFile: string, runtime?: import("../domain/runtime.mjs").RuntimeSelection}} plan
  * @returns {string}
  */
 export function resolveComposeHostGatewayAddress(plan) {
@@ -175,7 +158,14 @@ export function resolveComposeHostGatewayAddress(plan) {
   try {
     output = execFileSync(
       "docker",
-      ["compose", "-f", plan.composeFile, "exec", "-T", "tama", "cat", "/etc/hosts"],
+      [
+        ...composeArguments(plan),
+        "exec",
+        "-T",
+        plan.runtime?.service ?? "tama",
+        "cat",
+        "/etc/hosts",
+      ],
       {
         cwd: plan.root,
         encoding: "utf8",
@@ -207,7 +197,7 @@ export function resolveComposeHostGatewayAddress(plan) {
  * not follow redirects unless explicitly requested, so success belongs to the
  * configured provider endpoint itself.
  *
- * @param {{root: string, composeFile: string, localHttps?: {providerHost: string, httpsPort: number} | null}} plan
+ * @param {{root: string, composeFile: string, runtime?: import("../domain/runtime.mjs").RuntimeSelection, localHttps?: {providerHost: string, httpsPort: number, proxyTargetPort?: number} | null}} plan
  * @param {string} endpoint
  * @param {typeof execFileSync} [execute]
  * @returns {boolean}
@@ -226,18 +216,19 @@ export function probeComposeProviderEndpoint(plan, endpoint, execute = execFileS
   const localHttps = plan.localHttps;
   const connectThroughCaddy =
     localHttps && url.hostname === localHttps.providerHost
-      ? ["--connect-to", `${url.hostname}:${endpointPort}:caddy:${localHttps.httpsPort}`]
+      ? [
+          "--connect-to",
+          `${url.hostname}:${endpointPort}:${plan.runtime?.proxyService ?? "caddy"}:${localHttps.proxyTargetPort ?? localHttps.httpsPort}`,
+        ]
       : [];
   try {
     const status = execute(
       "docker",
       [
-        "compose",
-        "-f",
-        plan.composeFile,
+        ...composeArguments(plan),
         "exec",
         "-T",
-        "tama",
+        plan.runtime?.service ?? "tama",
         "curl",
         ...connectThroughCaddy,
         "--fail",
@@ -265,7 +256,7 @@ export function probeComposeProviderEndpoint(plan, endpoint, execute = execFileS
 }
 
 /**
- * @param {{root: string, composeFile: string}} plan
+ * @param {{root: string, composeFile: string, runtime?: import("../domain/runtime.mjs").RuntimeSelection}} plan
  * @param {{quiet?: boolean, checkPrerequisite?: boolean, env?: NodeJS.ProcessEnv}} [options]
  */
 export async function validateCompose(plan, { quiet = true, checkPrerequisite = true, env } = {}) {
@@ -273,7 +264,7 @@ export async function validateCompose(plan, { quiet = true, checkPrerequisite = 
     validateComposePrerequisite();
   }
   try {
-    await runProcess("docker", ["compose", "-f", plan.composeFile, "config", "--quiet"], {
+    await runProcess("docker", [...composeArguments(plan), "config", "--quiet"], {
       cwd: plan.root,
       env,
       stdio: quiet ? "ignore" : "inherit",
@@ -306,9 +297,12 @@ export async function fetchWithTimeout(url, timeoutMs, fetchImpl = fetch) {
 /** @param {BootstrapPlan} plan @param {number} [timeoutMs] @returns {Promise<string>} */
 async function waitForHealth(plan, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs;
-  const url = plan.localHttps?.healthUrl ?? `http://localhost:${plan.port}/`;
+  const url =
+    plan.runtime?.healthUrl ?? plan.localHttps?.healthUrl ?? `http://localhost:${plan.port}/`;
   const fetchImpl = plan.localHttps
-    ? createLocalHttpsFetch(readFileSync(localHttpsPaths(plan.root).rootCertificate))
+    ? createLocalHttpsFetch(
+        readFileSync(plan.runtime?.caFile ?? localHttpsPaths(plan.root).rootCertificate),
+      )
     : fetch;
   /** @type {Error | undefined} */
   let lastError;
@@ -330,16 +324,18 @@ async function waitForHealth(plan, timeoutMs = 60_000) {
 }
 
 /**
- * @param {{composeFile: string, localHttps?: unknown}} plan
+ * @param {{composeFile: string, localHttps?: unknown, runtime?: import("../domain/runtime.mjs").RuntimeSelection}} plan
  */
 export function composeUpArguments(plan) {
   return [
-    "compose",
-    "-f",
-    plan.composeFile,
+    ...composeArguments(plan),
     "up",
     "-d",
-    ...(plan.localHttps ? ["--build", "caddy"] : ["tama"]),
+    ...(plan.runtime?.startServices
+      ? [...(plan.localHttps ? ["--build"] : []), "--no-deps", ...plan.runtime.startServices]
+      : plan.localHttps
+        ? ["--build", plan.runtime?.proxyService ?? "caddy"]
+        : [plan.runtime?.service ?? "tama"]),
   ];
 }
 
@@ -349,17 +345,27 @@ export function composeUpArguments(plan) {
  * @returns {Promise<string>}
  */
 export async function startCompose(plan, { quiet = false } = {}) {
-  const managedCaddyExists = plan.localHttps ? managedComposeServiceExists(plan, "caddy") : false;
+  const managedCaddyExists = plan.localHttps
+    ? managedComposeServiceExists(plan, plan.runtime?.proxyService ?? "caddy")
+    : false;
   if (plan.localHttps && !managedCaddyExists) {
     await assertLocalHttpsPortAvailable(plan.localHttps.httpsPort);
   }
   try {
-    await runProcess("docker", composeUpArguments(plan), {
+    await (quiet ? runCapturedProcess : runProcess)("docker", composeUpArguments(plan), {
       cwd: plan.root,
       stdio: quiet ? "ignore" : "inherit",
     });
   } catch (error) {
-    throw startupError(`Docker Compose startup failed: ${errorMessage(error)}`);
+    const diagnostic = composeStartupDiagnostic(
+      error instanceof CapturedProcessError ? error.stderr : "",
+    );
+    const detail = diagnostic.port
+      ? ` (port ${diagnostic.port} is already in use)`
+      : ` (${diagnostic.reason})`;
+    throw startupError(`Docker Compose startup failed: ${errorMessage(error)}${detail}`, {
+      diagnostic,
+    });
   }
   return waitForHealth(plan);
 }

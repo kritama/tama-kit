@@ -1,4 +1,5 @@
 // @ts-check
+/** @typedef {import("../domain/contracts.mjs").McpAppContract} McpAppContract */
 
 import { execFileSync } from "node:child_process";
 import { createPrivateKey, X509Certificate } from "node:crypto";
@@ -6,11 +7,11 @@ import { lookup } from "node:dns/promises";
 import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { isIP } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 import { ownershipError, prerequisiteError, usageError } from "../errors.mjs";
+import { operationForContent } from "../shared/files.mjs";
 import { BOOTSTRAP_PATHS, DEFAULTS, MANAGED_MARKER } from "./constants.mjs";
-import { operationForContent } from "./files.mjs";
 
 export const LOCAL_HTTPS_DEFAULT_DOMAIN = "app.localhost";
 export const LOCAL_HTTPS_DEFAULT_PORT = 443;
@@ -40,7 +41,7 @@ export function normalizeLocalDomain(value = LOCAL_HTTPS_DEFAULT_DOMAIN) {
 }
 
 /** @param {string} value @returns {boolean} */
-function isLoopbackAddress(value) {
+export function isLoopbackAddress(value) {
   if (value === "::1" || value.toLowerCase() === "0:0:0:0:0:0:0:1") {
     return true;
   }
@@ -53,7 +54,7 @@ function isLoopbackAddress(value) {
  * separate from the private upstreams so Docker transport names cannot leak
  * into OAuth identities.
  *
- * @param {{localDomain?: string, providerPort?: number, httpsPort?: number, allowedOrigins?: string[]}} [input]
+ * @param {{localDomain?: string, providerPort?: number, providerService?: string, providerDependency?: "service_started" | "service_healthy", httpsPort?: number, allowedOrigins?: string[]}} [input]
  */
 export function resolveLocalHttpsTopology(input = {}) {
   const domain = normalizeLocalDomain(input.localDomain);
@@ -65,8 +66,23 @@ export function resolveLocalHttpsTopology(input = {}) {
   if (httpsPort !== LOCAL_HTTPS_DEFAULT_PORT) {
     throw usageError("local HTTPS currently supports only port 443");
   }
-  if (providerPort === httpsPort) {
+  if (!input.providerService && providerPort === httpsPort) {
     throw usageError("--provider-port must not use port 443; Caddy reserves it for local HTTPS");
+  }
+  if (
+    input.providerService !== undefined &&
+    (typeof input.providerService !== "string" ||
+      !/^[a-z0-9][a-z0-9_.-]*$/u.test(input.providerService) ||
+      ["tama", "tama-postgres", "caddy"].includes(input.providerService))
+  ) {
+    throw usageError("--provider-service must name an application-owned Compose service");
+  }
+  if (
+    input.providerDependency !== undefined &&
+    (!input.providerService ||
+      !["service_started", "service_healthy"].includes(input.providerDependency))
+  ) {
+    throw usageError("invalid Compose provider dependency");
   }
   const providerHost = domain;
   const tamaHost = `${LOCAL_HTTPS_TAMA_HOST_PREFIX}${domain}`;
@@ -86,11 +102,18 @@ export function resolveLocalHttpsTopology(input = {}) {
     providerIntrospectionEndpoint: `${providerOrigin}/auth/introspections`,
     tamaJwksUri: `${tamaOrigin}/.well-known/jwks.json`,
     healthUrl: `${tamaOrigin}/`,
-    providerUpstream: `http://host.docker.internal:${providerPort}`,
+    providerUpstream: `http://${input.providerService ?? "host.docker.internal"}:${providerPort}`,
+    ...(input.providerService
+      ? {
+          providerService: input.providerService,
+          providerDependency: input.providerDependency ?? "service_started",
+        }
+      : {}),
     tamaUpstream: `http://tama:${DEFAULTS.containerPort}`,
     providerPort,
     tamaPort: DEFAULTS.containerPort,
     httpsPort,
+    proxyTargetPort: httpsPort,
     certificateNames: [providerHost, tamaHost],
     caddyImage: DEFAULTS.caddyImage,
     trustMechanism: LOCAL_HTTPS_TRUST_MECHANISM,
@@ -99,12 +122,11 @@ export function resolveLocalHttpsTopology(input = {}) {
 }
 
 /**
- * Fresh MCP App runs use local HTTPS unless an explicit old topology input is
- * supplied. This keeps 0.4.3 projects migratable without making the legacy
- * transport the default again.
+ * Fresh MCP App runs default to local HTTPS. Explicit HTTP origins or a
+ * provider contract can select the supported HTTP transport.
  */
-/** @param {import("../types.mjs").McpAppBootstrapOptions | null | undefined} options @param {import("../types.mjs").PersistedMcpAppProvider | null} [persisted] @param {Record<string, unknown> | null} [contractDocument] */
-export function usesLocalHttpsTopology(options, persisted = null, contractDocument = null) {
+/** @param {import("../types.mjs").McpAppBootstrapOptions | null | undefined} options @param {McpAppContract | null} [contractDocument] */
+export function usesLocalHttpsTopology(options, contractDocument = null) {
   const explicitlyLegacyClient = [
     ...(options?.allowedOrigins ?? []),
     options?.providerOrigin,
@@ -113,16 +135,12 @@ export function usesLocalHttpsTopology(options, persisted = null, contractDocume
   const localDevelopment = contractDocument?.local_development;
   const contractOrigins =
     localDevelopment && typeof localDevelopment === "object" && !Array.isArray(localDevelopment)
-      ? Object.values(/** @type {Record<string, unknown>} */ (localDevelopment)).filter(
-          (value) => typeof value === "string",
-        )
+      ? Object.values(localDevelopment).filter((value) => typeof value === "string")
       : [];
   const explicitlyLegacyContract = contractOrigins.some((origin) =>
     /** @type {string} */ (origin).startsWith("http://"),
   );
-  if (persisted?.localHttps) return true;
-  if (options?.migrateLocalHttps) return true;
-  if (persisted?.providerOrigin) return false;
+  if (options?.localDomain) return true;
   return !explicitlyLegacyClient && !explicitlyLegacyContract;
 }
 
@@ -280,7 +298,7 @@ function assertReusableTlsMaterial(paths, names) {
  * replacing an operator-owned key.
  * @param {string} root
  * @param {import("../types.mjs").LocalHttpsTopology} topology
- * @param {{allowGeneration?: boolean, installLocalCa?: boolean, discoverLocalCa?: typeof discoverMkcert, ensureLocalCa?: typeof ensureMkcertLocalCa}} [options]
+ * @param {{allowGeneration?: boolean, installLocalCa?: boolean, resumePending?: string[], discoverLocalCa?: typeof discoverMkcert, ensureLocalCa?: typeof ensureMkcertLocalCa}} [options]
  */
 export function planLocalHttpsCertificates(
   root,
@@ -288,6 +306,7 @@ export function planLocalHttpsCertificates(
   {
     allowGeneration = true,
     installLocalCa = false,
+    resumePending = [],
     discoverLocalCa = discoverMkcert,
     ensureLocalCa = ensureMkcertLocalCa,
   } = {},
@@ -296,7 +315,18 @@ export function planLocalHttpsCertificates(
   if (!allowGeneration) {
     return { paths, operations: [] };
   }
-  const existing = [paths.certificate, paths.privateKey, paths.rootCertificate].every(existsSync);
+  const tlsPaths = [paths.certificate, paths.privateKey, paths.rootCertificate];
+  const relativeTlsPaths = tlsPaths.map((path) => relative(root, path).split("\\").join("/"));
+  const pendingTls = relativeTlsPaths.map((path) => resumePending.includes(path));
+  const hasPendingTls = pendingTls.some(Boolean);
+  const resumeTlsSet = pendingTls.every(Boolean);
+  const existing = tlsPaths.every(existsSync);
+  if (hasPendingTls && !resumeTlsSet && !existing) {
+    throw ownershipError(
+      "local HTTPS resume cannot safely replace a TLS file already marked complete by an older receipt",
+      { paths: relativeTlsPaths.filter((_, index) => !pendingTls[index]) },
+    );
+  }
   if (existing) {
     const mkcert = ensureLocalCa(installLocalCa, { discover: discoverLocalCa });
     assertReusableTlsMaterial(paths, topology.certificateNames);
@@ -308,12 +338,26 @@ export function planLocalHttpsCertificates(
         { path: paths.rootCertificate },
       );
     }
-    return { paths, operations: [] };
+    return {
+      paths,
+      operations: hasPendingTls
+        ? tlsPaths.flatMap((path, index) =>
+            pendingTls[index]
+              ? [
+                  operationForContent(path, readFileSync(path, "utf8"), {
+                    sensitive: index === 1,
+                    mode: index === 1 ? 0o600 : 0o644,
+                  }),
+                ]
+              : [],
+          )
+        : [],
+    };
   }
-  if ([paths.certificate, paths.privateKey, paths.rootCertificate].some(existsSync)) {
+  if (tlsPaths.some(existsSync) && !resumeTlsSet) {
     throw ownershipError(
       `local HTTPS certificate paths already exist but do not match ${topology.certificateNames.join(", ")}; move them aside before bootstrap`,
-      { paths: [paths.certificate, paths.privateKey, paths.rootCertificate] },
+      { paths: tlsPaths },
     );
   }
   const mkcert = ensureLocalCa(installLocalCa, { discover: discoverLocalCa });
@@ -332,17 +376,17 @@ export function planLocalHttpsCertificates(
         operationForContent(paths.certificate, readFileSync(cert, "utf8"), {
           sensitive: false,
           mode: 0o644,
-          allowUnmanagedUpdate: true,
+          allowUnmanagedUpdate: resumeTlsSet,
         }),
         operationForContent(paths.privateKey, readFileSync(key, "utf8"), {
           sensitive: true,
           mode: 0o600,
-          allowUnmanagedUpdate: true,
+          allowUnmanagedUpdate: resumeTlsSet,
         }),
         operationForContent(paths.rootCertificate, rootCertificate, {
           sensitive: false,
           mode: 0o644,
-          allowUnmanagedUpdate: true,
+          allowUnmanagedUpdate: resumeTlsSet,
         }),
       ],
     };
@@ -351,7 +395,7 @@ export function planLocalHttpsCertificates(
   }
 }
 
-/** @param {ReturnType<typeof resolveLocalHttpsTopology>} topology */
+/** @param {import("../types.mjs").LocalHttpsTopology} topology */
 export function renderLocalHttpsCaddyfile(topology) {
   return [
     `# ${MANAGED_MARKER}. Exact local HTTPS MCP App proxy; no catch-all route.`,

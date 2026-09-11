@@ -92,8 +92,8 @@ export function detectFramework(root) {
   return { framework: "generic", evidence: ["no supported framework signature matched"] };
 }
 
-/** @param {BootstrapPlanOptions} options @returns {ProjectInspection} */
-export function inspectProject({ cwd, targetPath, composePath }) {
+/** @param {Pick<BootstrapPlanOptions, "cwd" | "targetPath">} options */
+export function discoverProject({ cwd, targetPath }) {
   const explicitTarget = targetPath !== undefined;
   const requested = resolve(cwd, targetPath ?? ".");
   if (!isDirectory(requested)) {
@@ -102,6 +102,12 @@ export function inspectProject({ cwd, targetPath, composePath }) {
   const root = explicitTarget ? requested : nearestGitRoot(requested);
   const composeCandidates = COMPOSE_FILENAMES.map((name) => join(root, name)).filter(existsSync);
 
+  return { root, composeCandidates, ...detectFramework(root) };
+}
+
+/** @param {BootstrapPlanOptions} options @returns {ProjectInspection} */
+export function inspectProject({ cwd, targetPath, composePath }) {
+  const { root, composeCandidates } = discoverProject({ cwd, targetPath });
   let selectedCompose;
   if (composePath) {
     selectedCompose = isAbsolute(composePath) ? composePath : resolve(root, composePath);

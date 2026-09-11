@@ -38,7 +38,7 @@ authoritative definition.
 ## Discover the repository
 
 1. Read repository instructions such as `AGENTS.md` and inspect the closest complete graph.
-2. Run `node scripts/inspect-tama-repository.mjs <repository>` to inventory the global foundation, provider locks, installed modules, declared module calls, and Tama block types.
+2. Use the bundled `scripts/inspect-tama-repository.mjs` relative to this skill directory when an inventory helps locate the global foundation, provider locks, installed modules, declared module calls, and Tama block types. Invoke it from its installed location; do not copy it into the application or treat its inventory as Terraform validation.
 3. Read [global foundation](references/global-foundation.md). Identify the owner and installed version of the global space, schemas, corpora, and validation chain before designing dependent resources.
 4. Inspect `.terraform/modules/modules.json` and the installed module source for every helper being added or changed. If modules are not installed, follow the repository's approved `terraform init` workflow.
 5. Inspect relevant schemas, actions, specifications, sources, queues, models, prompts, corpora, and external terminals.
@@ -62,6 +62,7 @@ Read only the references that match the request:
 - For crawlers, extraction, relations, generation, embeddings, indexing, or batch reprocessing, read [ingestion and indexing](references/ingestion-and-indexing.md).
 - For helper-module selection, read [Tama base modules](references/tama-base-modules.md).
 - For raw resources, control edges, or trusted context-to-tool argument injection, read [provider primitives](references/provider-primitives.md).
+- For new graph files, component scaffolding, or layout refactors, read [project structure](references/project-structure.md). Use explicit feature files with each handler's resources together.
 - For replacement, removal, renaming, or schema changes, read [lifecycle and migrations](references/lifecycle-and-migrations.md).
 
 Do not force every conversation through a router. Choose a router only when the
@@ -98,7 +99,7 @@ Read [verification](references/verification.md), then:
 
 1. Trace every changed trigger to every terminal.
 2. Verify global foundation ownership, required outputs, routing, bridges, handlers, control edges, operational controls, and lifecycle intent.
-3. Run repository checks, including a decoded-schema check for every `tama_class`, then run `terraform fmt -check -recursive` and `terraform validate` when available.
+3. Run repository checks, `terraform fmt -check -recursive`, and `terraform validate` when available. Use native Terraform tests or resource preconditions for graph assertions, including class-schema metadata; do not generate a parallel Python/JavaScript configuration validator. Keep payload semantics in application tests and live acceptance in runtime checks, as described in [verification](references/verification.md).
 4. Review an approved `terraform plan` for destructive changes when the task changes existing addresses or data-bearing resources.
 5. Report the graph delta, assumptions, validation, runtime prerequisites, and any unverified external behavior.
 6. For an authorized Reflection comment resolution, submit only the comments whose fixes passed validation to `pending_review`, then verify and report each returned transition.

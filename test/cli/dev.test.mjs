@@ -1,26 +1,17 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-
-import { applyOperations } from "../../cli/bootstrap/write.mjs";
 import { createDevSetupPlan } from "../../cli/dev/plan.mjs";
 import { runTestFoundationSetup } from "../../cli/dev/start.mjs";
 import { CLIError, EXIT_CODES } from "../../cli/errors.mjs";
 import { run } from "../../cli/index.mjs";
+import { applyOperations } from "../../cli/shared/write.mjs";
+import { temporaryDirectory } from "../helpers/temporary.mjs";
 
 function tamaProject() {
-  const root = mkdtempSync(join(tmpdir(), "tama-kit-dev-"));
+  const root = temporaryDirectory("tama-kit-dev-");
   mkdirSync(join(root, "config"), { recursive: true });
   mkdirSync(join(root, "lib", "tama"), { recursive: true });
   writeFileSync(
@@ -125,7 +116,7 @@ test("development setup refuses private environment files already tracked by Git
 });
 
 test("an existing test foundation does not require OpenTofu or mise on a rerun", async () => {
-  const root = mkdtempSync(join(tmpdir(), "tama-kit-dev-ready-"));
+  const root = temporaryDirectory("tama-kit-dev-ready-");
   const bin = join(root, "bin");
   mkdirSync(bin);
   for (const command of ["tofu", "mise"]) {
@@ -339,7 +330,7 @@ test("dev setup reports named usage errors for invalid ports", async () => {
 });
 
 test("dev setup rejects non-Tama Phoenix repositories", () => {
-  const root = mkdtempSync(join(tmpdir(), "tama-kit-not-tama-"));
+  const root = temporaryDirectory("tama-kit-not-tama-");
   assert.throws(
     () => createDevSetupPlan({ cwd: root, targetPath: root }),
     (error) => error instanceof CLIError && error.exitCode === EXIT_CODES.USAGE,

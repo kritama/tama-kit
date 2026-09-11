@@ -1,24 +1,8 @@
 // @ts-check
 
-import { spawn } from "node:child_process";
-
 import { startupError } from "../errors.mjs";
-import { processEnvironment } from "./environment.mjs";
-
-/** @param {string} command @param {string[]} args @param {import("node:child_process").SpawnOptions} options */
-function runProcess(command, args, options) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, options);
-    child.once("error", reject);
-    child.once("exit", (code, signal) => {
-      if (code === 0) {
-        resolve(undefined);
-      } else {
-        reject(new Error(`${command} exited with ${code ?? signal}`));
-      }
-    });
-  });
-}
+import { processEnvironment } from "../shared/environment.mjs";
+import { runProcess } from "../shared/process.mjs";
 
 /** @param {unknown} error */
 function errorMessage(error) {

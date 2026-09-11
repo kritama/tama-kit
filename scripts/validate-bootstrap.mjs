@@ -3,7 +3,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createPrivateKey, createPublicKey } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,7 +12,7 @@ import { parseEnv } from "node:util";
 
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const runtime = process.argv.slice(2).includes("--runtime");
-const temporaryRoot = mkdtempSync(join(tmpdir(), "tama-kit-bootstrap-validation-"));
+const temporaryRoot = mkdtempSync(join(realpathSync(tmpdir()), "tama-kit-bootstrap-validation-"));
 const project = join(temporaryRoot, "project");
 const packageDirectory = join(temporaryRoot, "package");
 const installDirectory = join(temporaryRoot, "install");
@@ -41,6 +42,10 @@ mkdirSync(npxProject);
 function execute(command, args, options = {}) {
   return execFileSync(command, args, {
     cwd: REPOSITORY_ROOT,
+    env: {
+      ...process.env,
+      COMPOSE_PROJECT_NAME: `tama-kit-bootstrap-${temporaryRoot.split("/").at(-1).toLowerCase()}`,
+    },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     ...options,
@@ -150,7 +155,15 @@ try {
     "local",
   ];
   if (runtime) {
-    bootstrapArguments.push("--start");
+    const port = await new Promise((resolvePort, reject) => {
+      const server = createServer();
+      server.on("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        const address = server.address();
+        server.close((error) => (error ? reject(error) : resolvePort(address.port)));
+      });
+    });
+    bootstrapArguments.push("--start", "--port", String(port));
   }
   let bootstrapOutput;
   try {
@@ -197,8 +210,17 @@ try {
     );
   }
 
+  execute("npm", ["run", "build"]);
   const packed = JSON.parse(
-    execute("npm", ["pack", "--json", "--pack-destination", packageDirectory, "--cache", npmCache]),
+    execute("npm", [
+      "pack",
+      "--ignore-scripts",
+      "--json",
+      "--pack-destination",
+      packageDirectory,
+      "--cache",
+      npmCache,
+    ]),
   );
   const tarball = join(packageDirectory, packed[0].filename);
   execute("npm", [
