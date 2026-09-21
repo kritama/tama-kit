@@ -53,6 +53,17 @@ modules to their contained resources and external edges.
 - Each batch-reprocessing path has a `tama_thought_path_activation` for the explicit entity chain.
 - A path without activation is not assumed to run the intended reprocessing chain.
 
+## Deterministic primitives
+
+- Render, Dispatch, and Result satisfy the module-specific checks in
+  [deterministic primitive invariants](deterministic-primitives.md).
+- A provider-valid configuration is static intent rather than proof that a
+  Render output, Dispatch selection, or durable Result publication occurred.
+- `tama/concepts/dispatch` remains distinct from listener delivery, reactive
+  nodes, generic thought paths, and path activation.
+- `tama/agentic/result` is an intentional terminal and does not require an
+  outgoing path or a newly created result concept.
+
 ## Cross-cutting consistency
 
 - Resource names, class names, prompt examples, action names, and relation strings agree.
