@@ -41,12 +41,20 @@ Execute a module such as:
 - `tama/agentic/reply`
 - `tama/actions/caller`
 - `tama/concepts/forward`
+- `tama/concepts/render`
+- `tama/concepts/dispatch`
 - `tama/concepts/embed`
 - `tama/classes/process`
+- `tama/agentic/result`
 
 Treat `relation` as part of the graph contract. Thread focus, await behavior,
 preloads, prompts, and downstream consumers frequently depend on exact relation
 names.
+
+Render, Dispatch, and Result are deterministic modules with contracts that
+differ from model-backed generation and routing. Read [deterministic graph
+primitives](deterministic-primitives.md) before configuring their module
+parameters, inputs, paths, or terminal behavior.
 
 ### `tama_delegated_thought`
 
@@ -61,6 +69,11 @@ the delegating chain's output.
 Connect a thought output to a semantic target class. A path is incomplete when
 its target has neither a downstream handler nor an intentional persisted or
 external terminal.
+
+For `tama/concepts/dispatch`, every path also carries a provider-supported JSON
+`parameters` object defining scalar cases or the one default. This is distinct
+from generic path dispatch; see [deterministic graph
+primitives](deterministic-primitives.md).
 
 ### `tama_space_bridge`
 
@@ -148,6 +161,11 @@ a `nil` user message.
 
 Pass a corpus into deterministic modules such as callers and embedders. Do not
 substitute a prompt context when the module requires an entity or concept input.
+
+Render requires exactly one entity or concept input, and Dispatch requires
+exactly one concept input. Result follows forwarding provenance and must not
+have a module input used to select a result. Their exact contracts are in
+[deterministic graph primitives](deterministic-primitives.md).
 
 For `tama/actions/caller`, render the complete action-argument envelope, not
 only the eventual HTTP payload. Match the action's OpenAPI contract and include

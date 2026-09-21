@@ -111,3 +111,32 @@ though its index and requested resource differ. Keep the initializer whose
 Terraform address already owns the handoff anchor and combine all three
 requests into its resources list.
 ```
+
+## Ambiguous Render concept input
+
+```text
+blocking — normalize-result binds a concept corpus but omits the exact primary
+relation. Two concepts of the bound class can reach the Step, so the graph does
+not define one deterministic Render input. Configure the intended relation and
+keep named relation inputs unique; do not select an arbitrary latest concept.
+```
+
+## Dispatch confused with listener delivery
+
+```text
+high — the graph declares tama/concepts/dispatch with pointer /status, but its
+thought paths have no path case parameters. The listener filter proves that the
+chain may run; it does not define the Dispatch primitive's scalar cases. Add
+non-overlapping cases and exactly one default using the provider-supported path
+parameters.
+```
+
+## Complete durable Result terminal
+
+```text
+info — publish-submission-result ends with tama/agentic/result in the
+Submission root space. No outgoing thought path is required: the declared
+terminal publishes the existing forwarded concept. Terraform proves the
+intentional terminal shape; durable result, text, terminal_step_id, and
+terminal_concept_id remain runtime evidence.
+```

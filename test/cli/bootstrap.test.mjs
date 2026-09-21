@@ -6,12 +6,13 @@ import {
   chownSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { parseEnv } from "node:util";
 import { formatAgentSetupPrompt } from "../../cli/bootstrap/agent-prompt.mjs";
@@ -30,6 +31,37 @@ function project(prefix = "tama-kit-bootstrap-") {
 
 function planFor(root, extra = {}) {
   return createBootstrapPlan({ cwd: root, targetPath: root, ...extra });
+}
+
+function assertInstalledSkillReferencesExist(root, skillName) {
+  const skillRoot = join(root, ".agents", "skills", skillName);
+  const markdownFiles = [join(skillRoot, "SKILL.md")];
+  const pendingDirectories = [join(skillRoot, "references")];
+
+  while (pendingDirectories.length > 0) {
+    const directory = pendingDirectories.pop();
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) pendingDirectories.push(path);
+      if (entry.isFile() && entry.name.endsWith(".md")) markdownFiles.push(path);
+    }
+  }
+
+  let referenceCount = 0;
+  for (const markdownFile of markdownFiles) {
+    const content = readFileSync(markdownFile, "utf8");
+    const references = [...content.matchAll(/\]\(([^)#]+\.md)(?:#[^)]+)?\)/gu)].map(
+      (match) => match[1],
+    );
+
+    referenceCount += references.length;
+    for (const reference of references) {
+      const target = resolve(dirname(markdownFile), reference);
+      assert.ok(existsSync(target), `${skillName} is missing ${reference} from ${markdownFile}`);
+    }
+  }
+
+  assert.ok(referenceCount > 0, `${skillName} must link to its reference files`);
 }
 
 test("bootstrap help explains allowed origins and official versioned image tags", async () => {
@@ -144,6 +176,29 @@ test("bootstrap installs complete repository-local agent skills when selected", 
   assert.ok(
     existsSync(join(root, ".agents", "skills", "tama-kit-cli", "references", "cli-reference.md")),
   );
+
+  assertInstalledSkillReferencesExist(root, "graph-builder");
+  assertInstalledSkillReferencesExist(root, "graph-audit");
+
+  const builderPrimitives = readFileSync(
+    join(root, ".agents", "skills", "graph-builder", "references", "deterministic-primitives.md"),
+    "utf8",
+  );
+  assert.match(builderPrimitives, /tama\/concepts\/render/u);
+  assert.match(builderPrimitives, /tama\/concepts\/dispatch/u);
+  assert.match(builderPrimitives, /tama\/agentic\/result/u);
+  assert.match(builderPrimitives, /at most 16 named inputs/iu);
+  assert.match(builderPrimitives, /no more than 32 scalar cases/u);
+  assert.match(builderPrimitives, /65,536\s+bytes/u);
+
+  const auditPrimitives = readFileSync(
+    join(root, ".agents", "skills", "graph-audit", "references", "deterministic-primitives.md"),
+    "utf8",
+  );
+  assert.match(auditPrimitives, /exactly one.*concept.*module input/su);
+  assert.match(auditPrimitives, /exactly one path is the default/u);
+  assert.match(auditPrimitives, /terminal_concept_id/u);
+  assert.match(auditPrimitives, /Static Terraform can prove/u);
 
   const manifest = JSON.parse(readFileSync(join(root, "tama", ".tama-kit.json"), "utf8"));
   assert.equal(manifest.schemaVersion, 2);

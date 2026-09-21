@@ -61,6 +61,7 @@ Read only the references that match the request:
 - For routed conversations, shared reply chains, direct forwarding, or action terminals, read [conversation graphs](references/conversation-graphs.md).
 - For crawlers, extraction, relations, generation, embeddings, indexing, or batch reprocessing, read [ingestion and indexing](references/ingestion-and-indexing.md).
 - For helper-module selection, read [Tama base modules](references/tama-base-modules.md).
+- For deterministic persisted rendering, scalar path routing, or durable MCP result terminals, read [deterministic graph primitives](references/deterministic-primitives.md).
 - For raw resources, control edges, or trusted context-to-tool argument injection, read [provider primitives](references/provider-primitives.md).
 - For new graph files, component scaffolding, or layout refactors, read [project structure](references/project-structure.md). Use explicit feature files with each handler's resources together.
 - For replacement, removal, renaming, or schema changes, read [lifecycle and migrations](references/lifecycle-and-migrations.md).
@@ -78,7 +79,7 @@ contract does not require a root reply.
 4. Create every bridge in the direction of its actual cross-space handoff. Do not add an unused reverse bridge.
 5. Bind each trigger to the correct reactive, explicit, listener-filtered, lifecycle-state, or path-activated execution mode.
 6. Create ordered thoughts plus their contexts, inputs, processors, tools, tool modifiers, queues, preloads, pruning, directives, and paths. Consolidate resources that share one thought, initializer anchor class, and reference into a single initializer. For model-generated tool calls that require trusted execution metadata, attach `tama_thought_tool_modifier` to the exact thought tool and keep the modifier-owned leaf out of the agent's responsibility. For structured model generation, verify that the active contexts materialize a user message carrying the runtime corpora; a system-only context is incomplete even when context inputs exist. For deterministic action callers, render the complete request-argument envelope expected by the installed runtime.
-7. Give every branch an intentional terminal, including empty, failure, clarification, and asynchronous outcomes.
+7. Give every branch an intentional terminal, including empty, failure, clarification, and asynchronous outcomes. Treat `tama/agentic/result` as complete when it durably publishes the existing forwarded concept; do not add an outgoing path or a new result concept merely to make the graph appear connected.
 8. Keep shared reply generation in the root messaging space when that is the repository architecture. Attach branch-specific prompts with path directives rather than cloning reply chains.
 9. For sibling domain graphs, use a parity matrix but preserve independent class IDs, actions, relations, and lifecycle controls.
 10. Update prompts, schemas, listener filters, documentation, and tests in the same change as their Terraform edges. Every JSON schema passed to `tama_class.schema_json` must include non-empty top-level `title` and `description` fields; property-level descriptions do not satisfy this class contract. Check the decoded schemas before apply because ordinary Terraform validation may not exercise Tama's remote schema validation.

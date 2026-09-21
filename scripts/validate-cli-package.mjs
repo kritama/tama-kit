@@ -58,6 +58,10 @@ try {
     "cli/bootstrap/generation-receipt.mjs",
     "cli/templates/bootstrap/compose.yaml",
     "cli/bootstrap/contracts/mcp-app-bootstrap-v1.json",
+    "skills/graph-builder/SKILL.md",
+    "skills/graph-builder/references/deterministic-primitives.md",
+    "skills/graph-audit/SKILL.md",
+    "skills/graph-audit/references/deterministic-primitives.md",
     "skills/tama-kit-cli/SKILL.md",
   ])
     assert.ok(paths.has(required), `missing runtime asset: ${required}`);

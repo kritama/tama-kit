@@ -75,6 +75,10 @@ Read [graph invariants](references/graph-invariants.md) for topology and
 [operational invariants](references/operational-invariants.md) for retries,
 queues, preloads, pruning, versioning, and runtime boundaries. Read [finding
 examples](references/finding-examples.md) when classifying evidence.
+For `tama/concepts/render`, `tama/concepts/dispatch`, or
+`tama/agentic/result`, also read [deterministic primitive
+invariants](references/deterministic-primitives.md) and keep their static and
+runtime evidence separate.
 
 Do not require a router, reverse bridge, listener filter, or root reply unless
 the selected architecture needs it. A one-way component flow ending in an
