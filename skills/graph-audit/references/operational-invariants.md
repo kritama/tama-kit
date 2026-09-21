@@ -100,3 +100,9 @@ Static source can prove topology and declared policy. It cannot prove:
 
 Report those as runtime unknowns unless logs, plans, state, or execution traces
 are available.
+
+For Render, Dispatch, and Result, apply the more specific static/runtime split
+in [deterministic primitive invariants](deterministic-primitives.md). In
+particular, Terraform cannot prove rendered payload validity for actual input,
+the selected Dispatch case, forwarding lineage, or durable Submission
+completion.
