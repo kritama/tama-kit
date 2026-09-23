@@ -6,10 +6,49 @@ in the target repository.
 
 ## Contents
 
+- Action resolution
 - Routed component conversation
 - Shared root reply with a path directive
 - Direct forwarded action
 - Conversation invariants
+
+## Action resolution
+
+Every `tama_thought_tool` in these examples binds to an action resolved from
+the OpenAPI specification owned by the state that owns the integration:
+
+```hcl
+data "http" "catalog_api" {
+  url = var.catalog_openapi_url
+}
+
+resource "tama_specification" "catalog_api" {
+  space_id = tama_space.catalog-conversate.id
+  endpoint = var.catalog_openapi_url
+  version  = var.catalog_api_version
+  schema   = jsonencode(jsondecode(data.http.catalog_api.response_body))
+}
+
+data "tama_action" "create_results" {
+  specification_id = tama_specification.catalog_api.id
+  identifier       = "create_results"
+}
+
+data "tama_action" "create_artifact" {
+  specification_id = tama_specification.catalog_api.id
+  identifier       = "create_artifact"
+}
+
+data "tama_action" "create_search_artifact" {
+  specification_id = tama_specification.catalog_api.id
+  identifier       = "create_search_artifact"
+}
+```
+
+Do not replace these lookups with copied remote action IDs when this state owns
+the integration. For ownership, the document/source/version distinction,
+conditional activation, and adoption of existing specifications, read
+[external integrations](external-integrations.md).
 
 ## Routed component conversation
 
@@ -163,7 +202,7 @@ resource "tama_thought_tool" "create-catalog-results" {
   depends_on = [tama_space_bridge.catalog-to-ui]
 
   thought_id = tama_modular_thought.catalog-search.id
-  action_id  = var.create_results_action_id
+  action_id  = data.tama_action.create_results.id
 }
 
 resource "tama_modular_thought" "catalog-search-routing" {
@@ -257,7 +296,7 @@ resource "tama_modular_thought" "root-artifact" {
 
 resource "tama_thought_tool" "create-artifact" {
   thought_id = tama_modular_thought.root-artifact.id
-  action_id  = var.create_artifact_action_id
+  action_id  = data.tama_action.create_artifact.id
 }
 
 resource "tama_thought_processor" "root-artifact" {
@@ -515,7 +554,7 @@ resource "tama_thought_tool" "create-search-artifact" {
   depends_on = [tama_space_bridge.catalog-search-to-ui]
 
   thought_id = tama_modular_thought.catalog-search-action.id
-  action_id  = var.create_search_artifact_action_id
+  action_id  = data.tama_action.create_search_artifact.id
 }
 
 resource "tama_node" "catalog-search-action" {
@@ -526,7 +565,8 @@ resource "tama_node" "catalog-search-action" {
 }
 ```
 
-The `create-search-artifact` action is the terminal contract.
+The `create-search-artifact` action is the terminal contract, resolved from the
+owned specification rather than a copied remote ID.
 
 ## Conversation invariants
 

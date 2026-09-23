@@ -4,6 +4,11 @@ Use these patterns for API-backed records, nested extraction, relation
 networks, generated enrichment, embeddings, external indexing, and batch
 reprocessing. Replace versions and interfaces with installed definitions.
 
+The same Terraform ownership rules apply to API-backed action graphs that are
+not crawlers or indexers, including synchronous tool/action terminals; read
+[external integrations](external-integrations.md) before binding a thought tool
+to an API action.
+
 ## Contents
 
 - Source and identity
@@ -32,7 +37,7 @@ data "http" "catalog_api" {
 resource "tama_specification" "catalog_api" {
   space_id = tama_space.catalog.id
   endpoint = var.catalog_openapi_url
-  version  = "3.0.0"
+  version  = var.catalog_api_version # Application versioning convention, not the OpenAPI format version
   schema   = jsonencode(jsondecode(data.http.catalog_api.response_body))
 
   wait_for {
@@ -387,6 +392,7 @@ resource "tama_class_corpus" "catalog-item-indexing" {
 }
 
 data "tama_action" "index_document" {
+  # External owner: the search-index state owns this specification, so consume it as a documented dependency.
   specification_id = var.search_index_specification_id
   method           = "PUT"
   path             = "/{index}/_doc/{id}"

@@ -39,6 +39,10 @@ success.
 ## Operational checks
 
 - Tools resolve actions from the intended specification, method, and path.
+- Every API-backed integration is declared through `tama_specification` in the owning Terraform state or consumed through an explicit documented external dependency; nothing is provisioned out of band through Tama's API.
+- Each specification keeps the OpenAPI document URL (`endpoint`), the `servers`-derived API source endpoint, and the application-version `version` distinct.
+- Action lookups and dependent thought tools are uninstantiated until their operation is explicitly configured, and configured activation resolves the exact intended operation.
+- Existing remote specifications are adopted through `terraform import` with a reviewed plan before apply, and no duplicate specification exists for one document.
 - Deterministic callers receive a stable corpus and identifier.
 - Retries are bounded and safe for the action's idempotency.
 - Queue and priority match the expected workload.
