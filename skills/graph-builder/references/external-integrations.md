@@ -112,7 +112,7 @@ locals {
 }
 
 data "tama_action" "memory_api" {
-  for_each         = var.memory_api_operations
+  for_each         = local.remember_enabled ? var.memory_api_operations : toset([])
   specification_id = tama_specification.memory_api.id
   identifier       = each.key
 }

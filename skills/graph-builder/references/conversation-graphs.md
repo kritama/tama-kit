@@ -27,6 +27,13 @@ resource "tama_specification" "catalog_api" {
   endpoint = var.catalog_openapi_url
   version  = var.catalog_api_version
   schema   = jsonencode(jsondecode(data.http.catalog_api.response_body))
+
+  wait_for {
+    field {
+      name = "current_state"
+      in   = ["completed", "failed"]
+    }
+  }
 }
 
 data "tama_action" "create_results" {

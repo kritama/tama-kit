@@ -45,7 +45,10 @@ test("graph-builder makes Terraform ownership of OpenAPI specifications explicit
   assert.match(external, /does not bind a tool/u);
 
   // Conditional activation leaves lookup and tool uninstantiated until configured.
-  assert.match(external, /for_each\s*=\s*var\.memory_api_operations/u);
+  assert.match(
+    external,
+    /for_each\s*=\s*local\.remember_enabled \? var\.memory_api_operations : toset\(\[\]\)/u,
+  );
   assert.match(external, /count = local\.remember_enabled \? 1 : 0/u);
   assert.match(external, /are not instantiated/u);
 
