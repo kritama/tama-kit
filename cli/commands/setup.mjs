@@ -227,6 +227,12 @@ export async function runSetup(argv, io, command = "setup") {
             exitCode: failure.exitCode,
             message: failure.message,
             ...(failure.details?.diagnostic ? { diagnostic: failure.details.diagnostic } : {}),
+            ...(Array.isArray(failure.details?.missingEnvironmentFiles)
+              ? {
+                  missingEnvironmentFiles: failure.details.missingEnvironmentFiles,
+                  suggestedCommands: failure.details.suggestedCommands ?? [],
+                }
+              : {}),
           },
         }),
       );

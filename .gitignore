@@ -14,3 +14,8 @@ __pycache__/
 /cli/commands/generate.mjs
 
 /cli/bootstrap/compose-inspection.mjs
+
+/cli/commands/env.mjs
+
+# Intentionally violating CLI best-practice fixtures (agent skill evals)
+.agents/skills/nodejs-cli-best-practices/evals/

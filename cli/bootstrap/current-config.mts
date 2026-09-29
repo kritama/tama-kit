@@ -1,7 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { parseEnv } from "node:util";
+import {
+  classifyEnvironmentReference,
+  type EnvironmentFileReference,
+  environmentPreflight,
+  missingEnvironmentDiagnosis,
+} from "../domain/environment.mjs";
 import type { InspectOptions, RuntimePlan } from "../domain/runtime.mjs";
 import { ambiguityError, ownershipError, usageError } from "../errors.mjs";
 import { isValidVaultKey, parseEnvironment } from "../shared/environment.mjs";
@@ -10,12 +16,12 @@ import { validateSecretFilesIgnored, validateSecretFilesUntracked } from "../sha
 import { validateOAuthPrivateJwk, validatePublicJwkSet } from "../shared/oauth-key.mjs";
 import type { LocalHttpsTopology, McpAppMode } from "../types.mjs";
 import {
+  type ComposeDeclarationService,
+  type ComposeExecute,
   composeExecuter,
   inspectComposeDeclarations,
   loadComposeConfig,
   requireInspectableDeclarations,
-  type ComposeDeclarationService,
-  type ComposeExecute,
 } from "./compose-inspection.mjs";
 import { verifyEnvironmentLoadingEvidence } from "./contracts/environment-loading.mjs";
 import { isLoopbackAddress } from "./local-https.mjs";
@@ -117,6 +123,83 @@ export function inspectCurrentConfiguration(
   const composeFiles = selection.composeFiles;
   const declarations = selection.services;
   requireInspectableDeclarations(selection);
+  // Declaration-stage preflight: missing private environment files are named
+  // before the fully resolved render can fail with a generic error. Compose
+  // stderr and resolved values never reach the diagnosis.
+  const contractPath = resolve(
+    root,
+    options.contractPath ?? "tama/contracts/mcp-app-provider-v1.json",
+  );
+  const contractReferenced =
+    options.contractPath !== undefined ||
+    (options.discoverMcpContract !== false && existsSync(contractPath));
+  let contract: ReturnType<typeof validateMcpAppLocalContract> | undefined;
+  if (contractReferenced) {
+    if (!inspectRegularFile(contractPath))
+      throw ownershipError(
+        "MCP App configuration requires its current local contract; select it with --contract",
+        { path: contractPath },
+      );
+    try {
+      contract = validateMcpAppLocalContract(JSON.parse(readFileSync(contractPath, "utf8")), {
+        currentConfiguration: true,
+      });
+    } catch {
+      throw ownershipError("the selected local MCP App contract is invalid", {
+        path: contractPath,
+      });
+    }
+  }
+  const providerFragment = contract
+    ? {
+        path: resolve(root, contract.provider.environment_file),
+        relative: relative(root, resolve(root, contract.provider.environment_file)),
+      }
+    : undefined;
+  const preflightReferences: EnvironmentFileReference[] = [
+    ...selection.envReferences
+      .filter((reference) => !reference.interpolated)
+      .map(
+        (reference): EnvironmentFileReference => ({
+          role: classifyEnvironmentReference(
+            basename(reference.path),
+            providerFragment ? basename(providerFragment.path) : undefined,
+          ),
+          path: reference.path,
+          relative: reference.relative,
+          services: reference.services,
+          required: reference.required,
+          source: "compose",
+        }),
+      ),
+    ...(providerFragment
+      ? [
+          {
+            role: "provider" as const,
+            path: providerFragment.path,
+            relative: providerFragment.relative,
+            services: [] as string[],
+            required: true,
+            source: "contract" as const,
+          },
+        ]
+      : []),
+  ];
+  const preflight = environmentPreflight(
+    preflightReferences,
+    (path) => inspectRegularFile(path) !== null,
+  );
+  if (preflight.missing.length > 0 || preflight.missingUnsupported.length > 0) {
+    const diagnosis = missingEnvironmentDiagnosis(preflight, {
+      targetPath: options.targetPath,
+      compose: options.composeFiles,
+      service: options.service,
+      envFile: options.environmentFile,
+      contract: options.contractPath,
+      providerService: options.providerService,
+    });
+    throw ownershipError(diagnosis.message, diagnosis.details);
+  }
   const services = loadComposeConfig(root, composeFiles, {}, execute);
   const serviceName = selectService(
     services,
@@ -151,15 +234,13 @@ export function inspectCurrentConfiguration(
       throw ownershipError("invalid effective MCP App resource URL");
     }
   }
-  const files = (declarations[serviceName]?.env_file ?? []).flatMap(
-    ({ path, required }) => {
-      const filename = resolve(root, path);
-      // Compose skips missing optional declarations. Existing files still pass
-      // the regular-file, permissions, ignore and content checks below.
-      if (required === false && inspectRegularFile(filename) === null) return [];
-      return [filename];
-    },
-  );
+  const files = (declarations[serviceName]?.env_file ?? []).flatMap(({ path, required }) => {
+    const filename = resolve(root, path);
+    // Compose skips missing optional declarations. Existing files still pass
+    // the regular-file, permissions, ignore and content checks below.
+    if (required === false && inspectRegularFile(filename) === null) return [];
+    return [filename];
+  });
   const envFiles = new Map(files.map((path) => [path, readPrivateEnvironment(path)]));
   const selectedEnvironment = options.environmentFile
     ? resolve(root, options.environmentFile)
@@ -187,10 +268,6 @@ export function inspectCurrentConfiguration(
     envFiles.get(modeFile)?.get("TAMA_MCP_APP_MODE") === values.get("TAMA_MCP_APP_MODE")
       ? { path: modeFile, value: values.get("TAMA_MCP_APP_MODE") ?? "" }
       : undefined;
-  const contractPath = resolve(
-    root,
-    options.contractPath ?? "tama/contracts/mcp-app-provider-v1.json",
-  );
   const hasMcp =
     values.has("TAMA_MCP_APP_MODE") ||
     options.contractPath !== undefined ||
@@ -224,26 +301,29 @@ export function inspectCurrentConfiguration(
   };
   if (values.has("TAMA_MCP_APP_MODE")) mode(values.get("TAMA_MCP_APP_MODE"));
   if (!hasMcp) return plan;
-  if (!inspectRegularFile(contractPath))
-    throw ownershipError(
-      "MCP App configuration requires its current local contract; select it with --contract",
-      { path: contractPath },
-    );
-  let contract: ReturnType<typeof validateMcpAppLocalContract>;
-  try {
-    contract = validateMcpAppLocalContract(JSON.parse(readFileSync(contractPath, "utf8")), {
-      currentConfiguration: true,
-    });
-  } catch {
-    throw ownershipError("the selected local MCP App contract is invalid", { path: contractPath });
+  if (!contract) {
+    // The MCP App configuration is declared inline without a contract file on
+    // disk or an explicit selection; the preflight load above did not run.
+    if (!inspectRegularFile(contractPath))
+      throw ownershipError(
+        "MCP App configuration requires its current local contract; select it with --contract",
+        { path: contractPath },
+      );
+    try {
+      contract = validateMcpAppLocalContract(JSON.parse(readFileSync(contractPath, "utf8")), {
+        currentConfiguration: true,
+      });
+    } catch {
+      throw ownershipError("the selected local MCP App contract is invalid", {
+        path: contractPath,
+      });
+    }
   }
   const providerPath = resolve(root, contract.provider.environment_file);
   const providerValues = readPrivateEnvironment(providerPath);
   const roles = contract.bindings;
   const candidates = Object.keys(declarations).filter((name) =>
-    (declarations[name].env_file ?? []).some(
-      ({ path }) => resolve(root, path) === providerPath,
-    ),
+    (declarations[name].env_file ?? []).some(({ path }) => resolve(root, path) === providerPath),
   );
   const providerService = options.providerService
     ? selectService(services, candidates, options.providerService, "--provider-service")

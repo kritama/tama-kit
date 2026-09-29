@@ -1,15 +1,15 @@
 import {
-  execFileSync,
   type ExecFileSyncOptions,
   type ExecFileSyncOptionsWithStringEncoding,
+  execFileSync,
 } from "node:child_process";
 import { relative, resolve } from "node:path";
 import { ownershipError, prerequisiteError, usageError } from "../errors.mjs";
 import { composeArguments } from "../shared/compose.mjs";
 import { inspectRegularFile } from "../shared/files.mjs";
+import type { Framework } from "../types.mjs";
 import { inspectProject } from "./detect-project.mjs";
 import { validateComposePrerequisite } from "./start.mjs";
-import type { Framework } from "../types.mjs";
 
 /**
  * Reusable native Compose declaration inspection.
@@ -55,6 +55,14 @@ export type ComposeEnvReference = {
   services: string[];
   /** Required unless every declaration is `required: false`. */
   required: boolean;
+  /**
+   * The declaration contained interpolation. Its effective path depends on
+   * host environment state, so it is reported as unresolved and never
+   * treated as a project-owned destination.
+   */
+  interpolated: boolean;
+  /** The literal declaration exactly as written in Compose. */
+  declaredPath: string;
 };
 
 export type ComposeDeclarationInspection = {
@@ -67,7 +75,7 @@ export type ComposeDeclarationInspection = {
   envReferences: ComposeEnvReference[];
   /** The fallback was required and Compose still lost interpolated env_file paths. */
   interpolationLoss: boolean;
-  /** env_file destinations still containing interpolation; reported, never resolved. */
+  /** Literal env_file declarations containing interpolation; reported, never resolved. */
   unresolvedInterpolation: string[];
 };
 
@@ -76,7 +84,11 @@ export type ComposeLoadOptions = {
   noInterpolation?: boolean;
 };
 
-export type ComposeExecute = (command: string, args: string[], options: ExecFileSyncOptions) => string;
+export type ComposeExecute = (
+  command: string,
+  args: string[],
+  options: ExecFileSyncOptions,
+) => string;
 
 export function composeExecuter(): ComposeExecute {
   return (command, args, options) =>
@@ -162,6 +174,12 @@ export function inspectComposeDeclarations(
     execute,
   );
   let interpolationLoss = false;
+  // The literal model preserves declarations exactly as written. It is the
+  // authoritative source for interpolation detection: --no-env-resolution
+  // still interpolates env_file paths from host environment state (an unset
+  // variable becomes empty), so the primary model alone cannot distinguish
+  // project destinations from host-dependent guesses.
+  let declared = services;
   if (!Object.values(services).some((service) => service.env_file?.length)) {
     // Compose 2.x can discard env_file even with --no-env-resolution. Its
     // model-rendering path preserves declarations; effective values still come
@@ -172,29 +190,46 @@ export function inspectComposeDeclarations(
       { noEnvResolution: true, noInterpolation: true },
       execute,
     );
+    declared = services;
     for (const service of Object.values(services)) {
       if (service.env_file?.some(({ path }) => path.includes("$"))) {
         interpolationLoss = true;
       }
     }
+  } else {
+    try {
+      declared = loadComposeConfig(
+        selection.root,
+        selection.composeFiles,
+        { noEnvResolution: true, noInterpolation: true },
+        execute,
+      );
+    } catch {
+      declared = services;
+    }
   }
   const references = new Map<string, ComposeEnvReference>();
   for (const [name, service] of Object.entries(services)) {
-    for (const declaration of service.env_file ?? []) {
+    const literal = declared[name]?.env_file ?? [];
+    (service.env_file ?? []).forEach((declaration, index) => {
+      const declaredPath = literal[index]?.path ?? declaration.path;
       const path = resolve(selection.root, declaration.path);
       const reference = references.get(path);
       if (reference) {
         if (!reference.services.includes(name)) reference.services.push(name);
         reference.required ||= declaration.required !== false;
+        reference.interpolated ||= declaredPath.includes("$");
       } else {
         references.set(path, {
           path,
           relative: relative(selection.root, path),
           services: [name],
           required: declaration.required !== false,
+          interpolated: declaredPath.includes("$"),
+          declaredPath,
         });
       }
-    }
+    });
   }
   return {
     root: selection.root,
@@ -204,9 +239,13 @@ export function inspectComposeDeclarations(
     services,
     envReferences: [...references.values()],
     interpolationLoss,
-    unresolvedInterpolation: [...references.values()]
-      .filter((reference) => reference.path.includes("$"))
-      .map((reference) => reference.relative),
+    unresolvedInterpolation: [
+      ...new Set(
+        [...references.values()]
+          .filter((reference) => reference.interpolated)
+          .map((reference) => reference.declaredPath),
+      ),
+    ],
   };
 }
 
