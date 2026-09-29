@@ -65,6 +65,42 @@ export type EnvironmentDoctorResult = {
   warnings: string[];
 };
 
+/** One planned or applied environment destination during init. */
+export type EnvironmentInitFile = {
+  role: EnvironmentFileRole;
+  relative: string;
+  source: "compose" | "contract";
+  /** Create-only: existing files are preserved and reported. */
+  action: "create" | "preserve";
+  /** Where the file's secret material comes from. */
+  issuance: "none" | "derived" | "new";
+  /** True only after an applied write in this invocation. */
+  created: boolean;
+};
+
+/** Stable init result schema; never contains file contents or secret values. */
+export type EnvironmentInitResult = {
+  schemaVersion: 1;
+  ok: boolean;
+  command: "env";
+  subcommand: "init";
+  mode: "dry-run" | "write";
+  root: string;
+  composeFiles: string[];
+  selection: EnvironmentDoctorResult["selection"];
+  files: EnvironmentInitFile[];
+  persistence: {
+    status: "not-required" | "absent" | "detected" | "unknown";
+    /** True when --fresh asserted an unobservable persistence state. */
+    freshAsserted: boolean;
+    detail: string;
+    checked: string[];
+  };
+  changes: { action: "create"; relative: string; sensitive: true }[];
+  blockers: string[];
+  nextActions: string[];
+};
+
 /**
  * Classify a destination by name. Only the fixed Tama file set and the
  * fragment named by the current local contract are supported for automatic
@@ -141,7 +177,7 @@ export type EnvironmentSelection = {
 
 /** Render `tama-kit env <command>` with the caller's exact selection. */
 export function environmentCommand(command: string, selection: EnvironmentSelection): string {
-  const parts = [`tama-kit env ${command}`];
+  const parts = command === "setup" ? ["tama-kit setup"] : [`tama-kit env ${command}`];
   if (selection.targetPath !== undefined) parts.push(selection.targetPath);
   for (const compose of selection.compose ?? []) parts.push("--compose", compose);
   if (selection.service !== undefined) parts.push("--service", selection.service);
@@ -170,9 +206,11 @@ export function missingEnvironmentDiagnosis(
     files.push(reference.relative);
   }
   if (finding.missing.length > 0) {
-    lines.push(`Run ${environmentCommand("doctor", selection)} to inspect the environment.`);
     lines.push(
-      "Restore the missing files from a private backup, or recreate them from the project's public examples (for example, tama/.tama.env.example) before running setup.",
+      `Run ${environmentCommand("doctor", selection)}, then ${environmentCommand("init", selection)} for a fresh local runtime.`,
+    );
+    lines.push(
+      "Restore the missing files from a private backup when the local runtime is not fresh.",
     );
   }
   for (const reference of finding.missingUnsupported) {
@@ -185,7 +223,9 @@ export function missingEnvironmentDiagnosis(
     details: {
       missingEnvironmentFiles: files,
       suggestedCommands:
-        finding.missing.length > 0 ? [environmentCommand("doctor", selection)] : [],
+        finding.missing.length > 0
+          ? [environmentCommand("doctor", selection), environmentCommand("init", selection)]
+          : [],
     },
   };
 }

@@ -45,6 +45,20 @@ export type ComposeDeclarationService = {
 
 export type ComposeServiceModel = Record<string, ComposeDeclarationService>;
 
+export type ComposeVolumeDeclaration = {
+  name?: string;
+  driver?: string;
+  external?: { name?: string } | boolean;
+  labels?: Record<string, string>;
+};
+
+/** Full native Compose model: project name, services and top-level volumes. */
+export type ComposeModel = {
+  name?: string;
+  services: ComposeServiceModel;
+  volumes?: Record<string, ComposeVolumeDeclaration>;
+};
+
 /** A normalized, deduplicated private environment destination. */
 export type ComposeEnvReference = {
   /** Resolved absolute destination. */
@@ -121,12 +135,12 @@ export function resolveComposeSelection(options: {
 }
 
 /** One native `docker compose config` render; stderr and output never escape. */
-export function loadComposeConfig(
+export function loadComposeModel(
   root: string,
   composeFiles: string[],
   options: ComposeLoadOptions = {},
   execute: ComposeExecute = composeExecuter(),
-): ComposeServiceModel {
+): ComposeModel {
   try {
     const output = execute(
       "docker",
@@ -145,15 +159,36 @@ export function loadComposeConfig(
         maxBuffer: 4 * 1024 * 1024,
       },
     );
-    const model = JSON.parse(output) as { services?: unknown };
+    const model = JSON.parse(output) as {
+      name?: unknown;
+      services?: unknown;
+      volumes?: unknown;
+    };
     if (!model.services || typeof model.services !== "object" || Array.isArray(model.services))
       throw new Error();
-    return model.services as ComposeServiceModel;
+    return {
+      name: typeof model.name === "string" ? model.name : undefined,
+      services: model.services as ComposeServiceModel,
+      volumes:
+        model.volumes && typeof model.volumes === "object" && !Array.isArray(model.volumes)
+          ? (model.volumes as Record<string, ComposeVolumeDeclaration>)
+          : undefined,
+    };
   } catch {
     throw ownershipError(
       "Docker Compose configuration could not be resolved; check selected files, required variables and env_file paths. Raw output is suppressed because it may contain secrets.",
     );
   }
+}
+
+/** Service projection of one native Compose render. */
+export function loadComposeConfig(
+  root: string,
+  composeFiles: string[],
+  options: ComposeLoadOptions = {},
+  execute: ComposeExecute = composeExecuter(),
+): ComposeServiceModel {
+  return loadComposeModel(root, composeFiles, options, execute).services;
 }
 
 /**

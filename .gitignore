@@ -17,5 +17,7 @@ __pycache__/
 
 /cli/commands/env.mjs
 
+/cli/bootstrap/persistence.mjs
+
 # Intentionally violating CLI best-practice fixtures (agent skill evals)
 .agents/skills/nodejs-cli-best-practices/evals/

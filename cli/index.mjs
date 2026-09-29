@@ -30,6 +30,7 @@ function usage() {
     "  setup [path]      Start/activate current project configuration",
     "  doctor [path]     Inspect current configuration without writes",
     "  env doctor [path] Inspect private environment files without writes",
+    "  env init [path]   Create missing Tama private environment files (never overwrites)",
     "  init [path]       Alias for bootstrap",
     "  dev setup [path]  Prepare a Tama source checkout for development",
     "  oauth generate-key  Generate a System OAuth private JWK outside bootstrap",

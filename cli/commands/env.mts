@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util";
 import { CLIError, EXIT_CODES, usageError } from "../errors.mjs";
 import type { CommandIO, ExitCode } from "../types.mjs";
-import { runEnvironmentDoctor } from "../workflows/environment.mjs";
+import { runEnvironmentDoctor, runEnvironmentInit } from "../workflows/environment.mjs";
 
 type ParsedEnv = {
   values: {
@@ -13,6 +13,8 @@ type ParsedEnv = {
     json?: boolean;
     "non-interactive"?: boolean;
     "no-color"?: boolean;
+    "dry-run"?: boolean;
+    fresh?: boolean;
     help?: boolean;
   };
   positionals: string[];
@@ -25,6 +27,9 @@ export function envUsage() {
     "Subcommands:",
     "  doctor  Inspect the private environment files the current configuration",
     "          declares; read-only, and it never prompts",
+    "  init    Create missing Tama-owned private environment files without",
+    "          touching existing ones; derived files keep surviving secrets,",
+    "          and new issuance is refused when local runtime data is detected",
     "",
     "Options:",
     "  --compose <path>          Compose root, then overrides (repeatable)",
@@ -32,6 +37,8 @@ export function envUsage() {
     "  --env-file <path>         Select Tama's loaded private environment file",
     "  --contract <path>         Select the project-owned local MCP App contract",
     "  --provider-service <name> Select the provider service",
+    "  --dry-run                 init only: report the plan and blockers without writing",
+    "  --fresh                   init only: assert an unverified persistence state is new",
     "  --json                    Machine-readable output; never prompts",
     "  --non-interactive         Do not prompt",
     "  --no-color                Disable color",
@@ -45,7 +52,7 @@ export async function runEnv(argv: string[], io: CommandIO): Promise<ExitCode> {
     io.stdout(envUsage());
     return EXIT_CODES.SUCCESS;
   }
-  if (subcommand !== "doctor") {
+  if (subcommand !== "doctor" && subcommand !== "init") {
     throw usageError(`unknown env command: ${subcommand}\n\n${envUsage()}`);
   }
   let parsed: ParsedEnv;
@@ -63,6 +70,8 @@ export async function runEnv(argv: string[], io: CommandIO): Promise<ExitCode> {
         json: { type: "boolean" },
         "non-interactive": { type: "boolean" },
         "no-color": { type: "boolean" },
+        "dry-run": { type: "boolean" },
+        fresh: { type: "boolean" },
         help: { type: "boolean", short: "h" },
       },
     });
@@ -77,7 +86,7 @@ export async function runEnv(argv: string[], io: CommandIO): Promise<ExitCode> {
   const targetPath = typeof parsed.positionals[0] === "string" ? parsed.positionals[0] : undefined;
   const json = Boolean(parsed.values.json);
   try {
-    const result = await runEnvironmentDoctor({
+    const selection = {
       cwd: io.cwd,
       targetPath,
       composeFiles: parsed.values.compose,
@@ -85,20 +94,46 @@ export async function runEnv(argv: string[], io: CommandIO): Promise<ExitCode> {
       environmentFile: parsed.values["env-file"],
       contractPath: parsed.values.contract,
       providerService: parsed.values["provider-service"],
+    };
+    if (subcommand === "doctor") {
+      const result = await runEnvironmentDoctor(selection);
+      if (json) {
+        io.stdout(JSON.stringify(result, null, 2));
+      } else {
+        io.stdout(
+          `env doctor: ${result.files.length} private environment file(s) inspected; ${result.ok ? "required files are present" : "required environment files are missing or invalid"}.`,
+        );
+        for (const file of result.files) {
+          io.stdout(
+            `  ${file.status}  ${file.relative}${file.services.length > 0 ? ` (services: ${file.services.join(", ")})` : ""}`,
+          );
+          for (const issue of file.issues) io.stdout(`        ${issue}`);
+        }
+        for (const warning of result.warnings) io.stdout(`warning: ${warning}`);
+        for (const action of result.nextActions) io.stdout(`next: ${action}`);
+      }
+      return result.ok ? EXIT_CODES.SUCCESS : EXIT_CODES.OWNERSHIP;
+    }
+    const result = await runEnvironmentInit({
+      ...selection,
+      dryRun: Boolean(parsed.values["dry-run"]),
+      fresh: Boolean(parsed.values.fresh),
     });
     if (json) {
       io.stdout(JSON.stringify(result, null, 2));
     } else {
       io.stdout(
-        `env doctor: ${result.files.length} private environment file(s) inspected; ${result.ok ? "required files are present" : "required environment files are missing or invalid"}.`,
+        `env init (${result.mode}): ${result.files.filter((file) => file.created).length} file(s) created, ${result.files.filter((file) => !file.created).length} preserved.`,
       );
       for (const file of result.files) {
         io.stdout(
-          `  ${file.status}  ${file.relative}${file.services.length > 0 ? ` (services: ${file.services.join(", ")})` : ""}`,
+          `  ${file.created ? "created" : "preserved"}  ${file.relative}${file.issuance !== "none" ? ` (${file.issuance})` : ""}`,
         );
-        for (const issue of file.issues) io.stdout(`        ${issue}`);
       }
-      for (const warning of result.warnings) io.stdout(`warning: ${warning}`);
+      io.stdout(
+        `  persistence: ${result.persistence.status}${result.persistence.freshAsserted ? " (fresh asserted)" : ""}: ${result.persistence.detail}`,
+      );
+      for (const blocker of result.blockers) io.stdout(`blocked: ${blocker}`);
       for (const action of result.nextActions) io.stdout(`next: ${action}`);
     }
     return result.ok ? EXIT_CODES.SUCCESS : EXIT_CODES.OWNERSHIP;
@@ -106,7 +141,9 @@ export async function runEnv(argv: string[], io: CommandIO): Promise<ExitCode> {
     const failure =
       error instanceof CLIError
         ? error
-        : new CLIError("env doctor could not complete; inspect the selected configuration locally");
+        : new CLIError(
+            `${subcommand} could not complete; inspect the selected configuration locally`,
+          );
     if (json) {
       io.stdout(
         JSON.stringify(

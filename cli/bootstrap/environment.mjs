@@ -323,8 +323,17 @@ function validateEnvironment(values, filename, port, validation = null) {
   }
 }
 
-/** @param {number} port @param {boolean} materializeSecrets */
-function newEnvironment(port, materializeSecrets) {
+/**
+ * Pure core-runtime renderer. Every secret is materialized exactly once per
+ * call; recovery workflows derive dependent assignments (for example the
+ * PostgreSQL companion file) from the returned content instead of re-rolling
+ * credentials.
+ *
+ * @param {number} port
+ * @param {boolean} materializeSecrets
+ * @returns {string}
+ */
+export function newEnvironment(port, materializeSecrets) {
   const postgresPassword = materializeSecrets ? token(24) : PENDING_SECRET_VALUE;
   const oauth = materializeSecrets
     ? generateOAuthPrivateJwk()
@@ -528,8 +537,8 @@ function composeEnvironmentValue(value, name, filename) {
   return JSON.stringify(value).replaceAll("$", () => "$$");
 }
 
-/** @param {Map<string, string>} values @param {string} filename */
-function postgresEnvironment(values, filename) {
+/** @param {Map<string, string>} values @param {string} filename @returns {string} */
+export function postgresEnvironment(values, filename) {
   const required = ["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"];
   for (const name of required) {
     if (!values.get(name)) {
