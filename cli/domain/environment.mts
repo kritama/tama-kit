@@ -276,7 +276,7 @@ const SAFE_PUBLIC_TOKEN = /^[A-Za-z0-9._~-]+$/u;
  */
 export function resolvePublicIdentity(input: {
   exampleValues: Map<string, string> | null;
-  /** Literal inline environment from the selected Tama service. It overrides the example. */
+  /** Native resolved environment from the selected Tama service. It overrides the example. */
   inlineValues?: Map<string, string> | null;
   publishedPort: number | null;
   databaseService: string | null;
@@ -332,7 +332,7 @@ export function resolvePublicIdentity(input: {
   if (example.get("DATABASE_URL") && exampleHost === null) {
     issues.push("the project example DATABASE_URL does not name a database host");
   }
-  if (inline.get("DATABASE_URL") && inlineHost === null) {
+  if (inline.has("DATABASE_URL") && inlineHost === null) {
     issues.push("the selected Compose DATABASE_URL does not name a database host");
   }
   if (inlineHost !== null && exampleHost !== null && inlineHost !== exampleHost) {
@@ -504,7 +504,17 @@ export function coreSemanticIssues(
   };
 }
 
-function databaseUrlIssues(
+/** Serialize credentials as URL components, independently of dotenv quoting. */
+export function serializeDatabaseUrl(credentials: {
+  user: string;
+  password: string;
+  database: string;
+  host: string;
+}): string {
+  return `ecto://${encodeURIComponent(credentials.user)}:${encodeURIComponent(credentials.password)}@${credentials.host}/${encodeURIComponent(credentials.database)}`;
+}
+
+export function databaseUrlIssues(
   values: Map<string, string>,
   databaseHost: string | undefined,
 ): string[] {
@@ -524,13 +534,22 @@ function databaseUrlIssues(
   const user = values.get("POSTGRES_USER");
   const password = values.get("POSTGRES_PASSWORD");
   const database = values.get("POSTGRES_DB");
-  if (user && decodeURIComponent(url.username) !== user) {
+  let decodedUser: string;
+  let decodedPassword: string;
+  let name: string;
+  try {
+    decodedUser = decodeURIComponent(url.username);
+    decodedPassword = decodeURIComponent(url.password);
+    name = decodeURIComponent(url.pathname.replace(/^\//u, ""));
+  } catch {
+    return [...issues, "DATABASE_URL has invalid credential encoding"];
+  }
+  if (user && decodedUser !== user) {
     issues.push("DATABASE_URL user does not match POSTGRES_USER");
   }
-  if (password && decodeURIComponent(url.password) !== password) {
+  if (password && decodedPassword !== password) {
     issues.push("DATABASE_URL password does not match POSTGRES_PASSWORD");
   }
-  const name = decodeURIComponent(url.pathname.replace(/^\//u, ""));
   if (database && name !== database)
     issues.push("DATABASE_URL database does not match POSTGRES_DB");
   return issues;

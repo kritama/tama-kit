@@ -5,6 +5,7 @@ import {
   type ComposeExecute,
   inspectComposeDeclarations,
   loadComposeModel,
+  loadComposeServiceEnvironment,
 } from "../bootstrap/compose-inspection.mjs";
 import { DEFAULTS } from "../bootstrap/constants.mjs";
 import {
@@ -16,8 +17,10 @@ import { readGenerationEvidence } from "../bootstrap/generation-receipt.mjs";
 import { validateMcpAppLocalContract } from "../bootstrap/mcp-app-local-contract.mjs";
 import { associateTamaDatabase, inspectPersistence } from "../bootstrap/persistence.mjs";
 import {
+  CORE_REQUIRED_VARIABLES,
   classifyEnvironmentReference,
   coreSemanticIssues,
+  databaseUrlIssues,
   type EnvironmentDoctorResult,
   type EnvironmentFileReference,
   type EnvironmentFileReport,
@@ -29,6 +32,7 @@ import {
   type PublicRuntimeIdentity,
   publishedHostPort,
   resolvePublicIdentity,
+  serializeDatabaseUrl,
 } from "../domain/environment.mjs";
 import { ownershipError, usageError } from "../errors.mjs";
 import { parseEnvironment } from "../shared/environment.mjs";
@@ -56,7 +60,9 @@ export type EnvironmentCommandSelection = {
   providerService?: string;
 };
 
-export type EnvironmentDoctorOptions = EnvironmentCommandSelection & { cwd: string };
+export type EnvironmentDoctorOptions = EnvironmentCommandSelection & {
+  cwd: string;
+};
 
 export type EnvironmentInitOptions = EnvironmentCommandSelection & {
   cwd: string;
@@ -88,6 +94,7 @@ function assessExistingFile(
   context: {
     providerPairs?: [string, string][];
     identity?: PublicRuntimeIdentity | null;
+    effectiveValues?: Map<string, string> | null;
   } = {},
 ): Assessment {
   const issues: string[] = [];
@@ -154,6 +161,11 @@ function assessExistingFile(
       if (!issues.includes(issue)) issues.push(issue);
     }
     publicConflict = semantic.publicConflict;
+    if (context.effectiveValues) {
+      const effective = coreSemanticIssues(context.effectiveValues, context.identity ?? null);
+      for (const issue of effective.issues) issues.push(`effective Compose environment: ${issue}`);
+      publicConflict ||= effective.publicConflict;
+    }
   }
   const incomplete = issues.some((issue) => issue.startsWith("missing required"));
   const status = incomplete
@@ -262,7 +274,7 @@ export async function runEnvironmentDoctor(
       : []),
   ];
   inspectGenerationHistory(root, warnings);
-  const identity = publicIdentityFor(root, inspection, options, references);
+  const identity = publicIdentityFor(root, inspection, options, references, dependencies);
   const parsed = new Map<EnvironmentFileReference["role"], Map<string, string> | null>();
   const files: EnvironmentFileReport[] = references.map((reference): EnvironmentFileReport => {
     const base = {
@@ -274,7 +286,12 @@ export async function runEnvironmentDoctor(
     };
     if (lstatSyncSafe(reference.path) === null) {
       if (!reference.required) {
-        return { ...base, status: "optional-absent", issues: [], variables: null };
+        return {
+          ...base,
+          status: "optional-absent",
+          issues: [],
+          variables: null,
+        };
       }
       return {
         ...base,
@@ -290,8 +307,12 @@ export async function runEnvironmentDoctor(
     const assessed = assessExistingFile(root, reference, {
       providerPairs: reference.role === "provider" ? providerPairs : undefined,
       identity: reference.role === "core" ? identity.identity : undefined,
+      effectiveValues: reference.role === "core" ? identity.effectiveValues : undefined,
     });
-    parsed.set(reference.role, assessed.values);
+    parsed.set(
+      reference.role,
+      reference.role === "core" ? (identity.effectiveValues ?? assessed.values) : assessed.values,
+    );
     return {
       ...base,
       status: assessed.status,
@@ -431,7 +452,7 @@ export async function runEnvironmentInit(
   }
   const history = generationHistory(root);
   if (history.blocker) blockers.push(history.blocker);
-  const identity = publicIdentityFor(root, inspection, options, references);
+  const identity = publicIdentityFor(root, inspection, options, references, dependencies);
   const assessed = new Map<string, Assessment | null>();
   for (const reference of references) {
     assessed.set(
@@ -441,6 +462,7 @@ export async function runEnvironmentInit(
         : assessExistingFile(root, reference, {
             providerPairs: reference.role === "provider" ? contract.providerPairs : undefined,
             identity: reference.role === "core" ? identity.identity : undefined,
+            effectiveValues: reference.role === "core" ? identity.effectiveValues : undefined,
           }),
     );
   }
@@ -540,11 +562,25 @@ export async function runEnvironmentInit(
     }
   }
 
-  if (missing.length > 0) blockers.push(...recoveryInputIssues(missing, assessed));
+  if (missing.length > 0)
+    blockers.push(
+      ...recoveryInputIssues(missing, assessed, identity.identity, identity.effectiveValues),
+    );
   let operations: FileOperation[] = [];
   let applied = false;
   if (missing.length > 0 && blockers.length === 0 && !options.dryRun) {
     const plan = renderMissingSet(missing, assessed, identity.identity);
+    plan.sourceDigests.push(...identity.sourceDigests);
+    const verifySources = () => {
+      for (const [path, digest] of plan.sourceDigests) {
+        if (!inspectRegularFile(path) || contentDigest(readFileSync(path, "utf8")) !== digest) {
+          throw ownershipError("an environment recovery input changed during the operation", {
+            path,
+          });
+        }
+      }
+    };
+    verifySources();
     for (const operation of plan.operations) {
       if (lstatSyncSafe(operation.path) !== null) {
         throw ownershipError(
@@ -562,11 +598,21 @@ export async function runEnvironmentInit(
           });
         }
       }
-      for (const [path, digest] of plan.sourceDigests) {
-        if (contentDigest(readFileSync(path, "utf8")) !== digest) {
-          throw ownershipError("a surviving environment file changed during the operation", {
-            path,
-          });
+      verifySources();
+      if (missingCore) {
+        const service = tamaServiceName(inspection, options, references);
+        if (!service) throw ownershipError("the selected Tama service is ambiguous");
+        const effective = loadComposeServiceEnvironment(
+          inspection,
+          service,
+          { missingPaths: [], suppliedVariables: [] },
+          dependencies.execute,
+        );
+        const semantic = coreSemanticIssues(effective.values, identity.identity);
+        if (semantic.issues.length > 0) {
+          throw ownershipError(
+            `the recovered effective environment is invalid: ${semantic.issues.join("; ")}`,
+          );
         }
       }
       if (recheckPersistence !== undefined) {
@@ -746,6 +792,8 @@ const SAFE_CORE_VALUE = /^[A-Za-z0-9.+/_-]+$/u;
 function recoveryInputIssues(
   missing: EnvironmentFileReference[],
   assessed: Map<string, Assessment | null>,
+  identity: PublicRuntimeIdentity | null,
+  effectiveValues: Map<string, string> | null,
 ): string[] {
   const issues: string[] = [];
   for (const reference of missing) {
@@ -761,7 +809,37 @@ function recoveryInputIssues(
       surviving = assessment.values;
     }
   }
-  if (surviving === null) return issues;
+  if (surviving === null) {
+    if (
+      ["DATABASE_URL", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"].some((name) =>
+        effectiveValues?.has(name),
+      )
+    ) {
+      issues.push(
+        "the selected Compose database credentials override the missing core but cannot be verified without surviving PostgreSQL credentials; restore them from a private backup",
+      );
+    }
+    if (identity) {
+      const credentials = {
+        user: identity.databaseUser,
+        password: "tama-kit-preview-password",
+        database: identity.databaseName,
+        host: identity.databaseHost,
+      };
+      issues.push(
+        ...databaseUrlIssues(
+          new Map([
+            ["POSTGRES_USER", credentials.user],
+            ["POSTGRES_PASSWORD", credentials.password],
+            ["POSTGRES_DB", credentials.database],
+            ["DATABASE_URL", serializeDatabaseUrl(credentials)],
+          ]),
+          identity.databaseHost,
+        ),
+      );
+    }
+    return issues;
+  }
   const user = surviving.get("POSTGRES_USER") ?? "";
   const password = surviving.get("POSTGRES_PASSWORD") ?? "";
   const database = surviving.get("POSTGRES_DB") ?? "";
@@ -773,6 +851,35 @@ function recoveryInputIssues(
     issues.push(
       "the surviving database credentials cannot be re-emitted safely into the core environment; restore the missing files from a private backup",
     );
+  } else if (identity) {
+    const candidate = new Map(surviving);
+    candidate.set(
+      "DATABASE_URL",
+      serializeDatabaseUrl({
+        user,
+        password,
+        database,
+        host: identity.databaseHost,
+      }),
+    );
+    issues.push(...databaseUrlIssues(candidate, identity.databaseHost));
+    // Later env files and inline settings remain authoritative after recovery.
+    // Validate their credential agreement before preview or any key generation.
+    for (const name of ["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"] as const) {
+      if (effectiveValues?.has(name) && effectiveValues.get(name) !== surviving.get(name)) {
+        issues.push(
+          `the selected Compose ${name} disagrees with the surviving PostgreSQL credentials`,
+        );
+      }
+    }
+    if (effectiveValues?.has("DATABASE_URL")) {
+      candidate.set("DATABASE_URL", effectiveValues.get("DATABASE_URL") ?? "");
+      issues.push(
+        ...databaseUrlIssues(candidate, identity.databaseHost).map(
+          (issue) => `effective Compose environment: ${issue}`,
+        ),
+      );
+    }
   }
   return issues;
 }
@@ -826,9 +933,15 @@ function renderMissingSet(
         .replace(/^POSTGRES_DB=.*/mu, `POSTGRES_DB=${database}`)
         .replace(
           /^DATABASE_URL=.*/mu,
-          `DATABASE_URL=ecto://${user}:${password}@${identity.databaseHost}/${database}`,
+          `DATABASE_URL=${serializeDatabaseUrl({ user, password, database, host: identity.databaseHost })}`,
         );
       coreValues = parseEnvironment(coreContent, "tama/.tama.env");
+    }
+    const semantic = coreSemanticIssues(coreValues, identity);
+    if (semantic.issues.length > 0) {
+      throw ownershipError(
+        `the recovered core environment is invalid: ${semantic.issues.join("; ")}`,
+      );
     }
   }
   if (missing.some((reference) => reference.role === "postgres") && !coreMissing) {
@@ -932,17 +1045,23 @@ function publicIdentityFor(
   inspection: ComposeDeclarationInspection,
   options: EnvironmentCommandSelection,
   references: EnvironmentFileReference[],
+  dependencies: Dependencies,
 ): {
   identity: PublicRuntimeIdentity | null;
   issues: string[];
   effectiveDatabaseHost: string | null;
+  effectiveValues: Map<string, string> | null;
+  sourceDigests: [string, string][];
 } {
   const core = references.find((reference) => reference.role === "core");
   const examplePath = core ? `${core.path}.example` : join(root, "tama/.tama.env.example");
   let exampleValues: Map<string, string> | null = null;
+  const sourceDigests: [string, string][] = [];
   if (inspectRegularFile(examplePath)) {
     try {
-      exampleValues = parseEnvironment(readFileSync(examplePath, "utf8"), examplePath);
+      const content = readFileSync(examplePath, "utf8");
+      exampleValues = parseEnvironment(content, examplePath);
+      sourceDigests.push([examplePath, contentDigest(content)]);
     } catch {
       exampleValues = null;
     }
@@ -965,17 +1084,71 @@ function publicIdentityFor(
         (name) => `the selected Compose ${name} contains unresolved interpolation`,
       ),
       effectiveDatabaseHost: inline.unresolved.includes("DATABASE_URL") ? "unresolved" : null,
+      effectiveValues: null,
+      sourceDigests,
     };
   }
-  return resolvePublicIdentity({
-    exampleValues,
-    inlineValues: inline.values,
-    publishedPort: serviceName
-      ? publishedHostPort(inspection.services[serviceName]?.ports, DEFAULTS.containerPort)
-      : null,
-    databaseService: postgresServices.length === 1 ? postgresServices[0] : null,
-    containerPort: DEFAULTS.containerPort,
-  });
+  if (!serviceName)
+    return {
+      identity: null,
+      issues: ["the selected Tama service is ambiguous"],
+      effectiveDatabaseHost: "unresolved",
+      effectiveValues: null,
+      sourceDigests,
+    };
+  let effective: ReturnType<typeof loadComposeServiceEnvironment>;
+  try {
+    effective = loadComposeServiceEnvironment(
+      inspection,
+      serviceName,
+      {
+        missingPaths: references
+          .filter(
+            (reference) => reference.role === "core" && lstatSyncSafe(reference.path) === null,
+          )
+          .map((reference) => reference.path),
+        suppliedVariables: CORE_REQUIRED_VARIABLES,
+      },
+      dependencies.execute,
+    );
+  } catch (error) {
+    return {
+      identity: null,
+      issues: [
+        error instanceof Error
+          ? error.message
+          : "the effective Compose environment could not be established",
+      ],
+      effectiveDatabaseHost: "unresolved",
+      effectiveValues: null,
+      sourceDigests,
+    };
+  }
+  sourceDigests.push(...effective.sourceDigests);
+  if (effective.unresolved.length > 0)
+    return {
+      identity: null,
+      issues: effective.unresolved.map(
+        (name) =>
+          `the selected Compose ${name} depends on missing core variables; restore the private environment before recovery`,
+      ),
+      effectiveDatabaseHost: "unresolved",
+      effectiveValues: effective.values,
+      sourceDigests,
+    };
+  return {
+    ...resolvePublicIdentity({
+      exampleValues,
+      inlineValues: effective.values,
+      publishedPort: serviceName
+        ? publishedHostPort(inspection.services[serviceName]?.ports, DEFAULTS.containerPort)
+        : null,
+      databaseService: postgresServices.length === 1 ? postgresServices[0] : null,
+      containerPort: DEFAULTS.containerPort,
+    }),
+    effectiveValues: effective.values,
+    sourceDigests,
+  };
 }
 
 function literalServiceEnvironment(environment: Record<string, string | null> | undefined): {
@@ -992,7 +1165,10 @@ function literalServiceEnvironment(environment: Record<string, string | null> | 
   return { values, unresolved };
 }
 
-function generationHistory(root: string): { blocker: string | null; warnings: string[] } {
+function generationHistory(root: string): {
+  blocker: string | null;
+  warnings: string[];
+} {
   const warnings: string[] = [];
   let blocker: string | null = null;
   for (const relativePath of GENERATION_RECEIPTS) {
@@ -1022,7 +1198,11 @@ const UNKNOWN_ISSUANCE_BLOCKER =
   "persistence could not be verified; pass --fresh only when the local runtime is known to be new, and restore from a private backup otherwise";
 
 function authorizeIssuance(
-  observation: { status: "absent" | "detected" | "unknown"; detail: string; checked: string[] },
+  observation: {
+    status: "absent" | "detected" | "unknown";
+    detail: string;
+    checked: string[];
+  },
   fresh: boolean,
 ): { persistence: EnvironmentInitResult["persistence"]; blocker?: string } {
   const base = {
@@ -1038,7 +1218,10 @@ function authorizeIssuance(
   }
   if (observation.status === "unknown") {
     if (!fresh) {
-      return { persistence: { ...base, status: "unknown" }, blocker: UNKNOWN_ISSUANCE_BLOCKER };
+      return {
+        persistence: { ...base, status: "unknown" },
+        blocker: UNKNOWN_ISSUANCE_BLOCKER,
+      };
     }
     return { persistence: { ...base, status: "unknown", freshAsserted: true } };
   }
@@ -1054,7 +1237,7 @@ function applyPublicIdentity(content: string, identity: PublicRuntimeIdentity): 
     .replace(/^POSTGRES_DB=.*/mu, `POSTGRES_DB=${database}`)
     .replace(
       /^DATABASE_URL=.*/mu,
-      `DATABASE_URL=ecto://${user}:${password}@${identity.databaseHost}/${database}`,
+      `DATABASE_URL=${serializeDatabaseUrl({ user, password, database, host: identity.databaseHost })}`,
     )
     .replace(/^PHX_HOST=.*/mu, `PHX_HOST=${identity.phxHost}`)
     .replace(/^TAMA_PORT=.*/mu, `TAMA_PORT=${identity.port}`)

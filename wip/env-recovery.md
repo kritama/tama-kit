@@ -3,6 +3,10 @@
 Status: partial. Standard core/PostgreSQL doctor, preflight, and create-only
 init are implemented on `feature/issue-41-env-recovery`. Review 01 findings
 R1–R8 and review 02 findings F1–F5 are addressed in code with regressions.
+Review 03 findings G1–G2 are also addressed: recovery and doctor resolve all
+effective env-file/inline layers with native Compose, and recovered database
+URLs use validated, encoded credential components. Verification is recorded in
+[review 03](/Users/zacksiri/Development/_kritama/tama-kit/wip/env-recovery/review-03.md).
 MCP App recovery, public docs, installed-package env coverage, and the
 platform matrix are still open. Issue #41 is not ready to close.
 

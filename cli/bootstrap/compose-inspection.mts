@@ -3,10 +3,13 @@ import {
   type ExecFileSyncOptionsWithStringEncoding,
   execFileSync,
 } from "node:child_process";
-import { relative, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative, resolve } from "node:path";
 import { ownershipError, prerequisiteError, usageError } from "../errors.mjs";
 import { composeArguments } from "../shared/compose.mjs";
-import { inspectRegularFile } from "../shared/files.mjs";
+import { contentDigest, inspectRegularFile } from "../shared/files.mjs";
 import type { Framework } from "../types.mjs";
 import { inspectProject } from "./detect-project.mjs";
 import { validateComposePrerequisite } from "./start.mjs";
@@ -29,9 +32,17 @@ export type ComposeDeclarationPort = {
   protocol?: string;
 };
 
-export type ComposeDeclarationVolume = { type: string; source: string; target: string };
+export type ComposeDeclarationVolume = {
+  type: string;
+  source: string;
+  target: string;
+};
 
-export type ComposeDeclarationEnvFile = { path: string; required?: boolean };
+export type ComposeDeclarationEnvFile = {
+  path: string;
+  required?: boolean;
+  format?: string;
+};
 
 export type ComposeDeclarationService = {
   image?: string;
@@ -145,7 +156,10 @@ export function loadComposeModel(
     const output = execute(
       "docker",
       [
-        ...composeArguments({ composeFile: composeFiles[0], runtime: { composeFiles } }),
+        ...composeArguments({
+          composeFile: composeFiles[0],
+          runtime: { composeFiles },
+        }),
         "config",
         "--format",
         "json",
@@ -192,12 +206,111 @@ export function loadComposeConfig(
 }
 
 /**
+ * Resolve one service's environment with Compose's native env-file parser.
+ * Missing core files are represented by non-secret markers for the variables
+ * recovery will supply. This preserves layer order (including duplicates) and
+ * detects overrides that depend on still-unknown generated values. Missing
+ * unrelated files remain the caller's diagnosis; no runtime is started.
+ */
+export function loadComposeServiceEnvironment(
+  inspection: ComposeDeclarationInspection,
+  serviceName: string,
+  recovery: { missingPaths: string[]; suppliedVariables: readonly string[] },
+  execute: ComposeExecute = composeExecuter(),
+): {
+  values: Map<string, string>;
+  unresolved: string[];
+  sourceDigests: [string, string][];
+} {
+  let temporary: string | undefined;
+  try {
+    const service = inspection.services[serviceName];
+    if (!service) throw new Error();
+    const prefix = `tama_kit_unknown_${randomUUID()}_`;
+    const markers = new Map(recovery.suppliedVariables.map((name) => [name, `${prefix}${name}`]));
+    let replacement: string | undefined;
+    if (recovery.missingPaths.length > 0) {
+      temporary = mkdtempSync(join(tmpdir(), "tama-env-inspection-"));
+      replacement = join(temporary, "missing.env");
+      writeFileSync(
+        replacement,
+        [...markers].map(([name, value]) => `${name}=${value}`).join("\n"),
+        { mode: 0o600 },
+      );
+    }
+    const sources = new Set([...inspection.composeFiles, join(inspection.root, ".env")]);
+    const envFiles: ComposeDeclarationEnvFile[] = [];
+    for (const declaration of service.env_file ?? []) {
+      const path = resolve(inspection.root, declaration.path);
+      if (recovery.missingPaths.includes(path) && replacement) {
+        envFiles.push({ path: replacement });
+      } else if (inspectRegularFile(path)) {
+        sources.add(path);
+        envFiles.push({ ...declaration, path });
+      }
+    }
+    const sourceDigests: [string, string][] = [...sources]
+      .filter((path) => inspectRegularFile(path) !== null)
+      .map((path) => [path, contentDigest(readFileSync(path, "utf8"))]);
+    // Inline strings have already been interpolated by declaration inspection.
+    // Escape dollars to prevent a second interpolation in this projection.
+    const environment = Object.fromEntries(
+      Object.entries(service.environment ?? {}).map(([name, value]) => [
+        name,
+        typeof value === "string" ? value.replaceAll("$", () => "$$") : value,
+      ]),
+    );
+    const output = execute(
+      "docker",
+      ["compose", "--project-directory", inspection.root, "-f", "-", "config", "--format", "json"],
+      {
+        cwd: inspection.root,
+        input: JSON.stringify({
+          services: {
+            runtime: { image: "scratch", env_file: envFiles, environment },
+          },
+        }),
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+        maxBuffer: 4 * 1024 * 1024,
+      },
+    );
+    const resolved = (JSON.parse(output) as ComposeModel).services?.runtime;
+    if (!resolved || resolved.env_file?.length) throw new Error();
+    const values = new Map<string, string>();
+    const unresolved: string[] = [];
+    for (const [name, value] of Object.entries(resolved.environment ?? {})) {
+      if (value === markers.get(name)) continue;
+      if (typeof value === "string" && value.includes(prefix)) unresolved.push(name);
+      // `compose config` doubles every dollar in its rendered output so the
+      // configuration can be loaded again. Undo that transport escaping once;
+      // native Compose has already parsed/interpolated the source env files.
+      else values.set(name, value?.replaceAll("$$", () => "$") ?? "");
+    }
+    for (const [path, digest] of sourceDigests) {
+      if (!inspectRegularFile(path) || contentDigest(readFileSync(path, "utf8")) !== digest)
+        throw new Error();
+    }
+    return { values, unresolved, sourceDigests };
+  } catch {
+    throw ownershipError(
+      "the selected Compose service environment could not be resolved safely; check its env_file declarations and inputs. Raw output is suppressed because it may contain secrets.",
+    );
+  } finally {
+    if (temporary) rmSync(temporary, { recursive: true, force: true });
+  }
+}
+
+/**
  * Declaration-stage inspection: normalized services plus deduplicated
  * environment references with their declaring services and required state.
  */
 export function inspectComposeDeclarations(
   options: { cwd: string; targetPath?: string; composeFiles?: string[] },
-  dependencies: { execute?: ComposeExecute; validatePrerequisite?: () => void } = {},
+  dependencies: {
+    execute?: ComposeExecute;
+    validatePrerequisite?: () => void;
+  } = {},
 ): ComposeDeclarationInspection {
   const execute = dependencies.execute ?? composeExecuter();
   (dependencies.validatePrerequisite ?? validateComposePrerequisite)();

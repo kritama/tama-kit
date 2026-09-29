@@ -12,16 +12,23 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import {
+  inspectComposeDeclarations,
+  loadComposeServiceEnvironment,
+} from "../../cli/bootstrap/compose-inspection.mjs";
 import { validateMcpAppContract } from "../../cli/bootstrap/mcp-app-contract.mjs";
 import { createBootstrapPlan } from "../../cli/bootstrap/plan.mjs";
 import {
   classifyEnvironmentReference,
+  databaseUrlIssues,
   environmentCommand,
   environmentPreflight,
   missingEnvironmentDiagnosis,
   resolvePublicIdentity,
+  serializeDatabaseUrl,
 } from "../../cli/domain/environment.mjs";
 import { run } from "../../cli/index.mjs";
+import { parseEnvironment } from "../../cli/shared/environment.mjs";
 import { contentDigest } from "../../cli/shared/files.mjs";
 import { applyOperations } from "../../cli/shared/write.mjs";
 import { memoveeContract, planWithMcp, preparedFor, writeContract } from "../helpers/mcp-app.mjs";
@@ -158,7 +165,10 @@ test("env doctor reports the contract provider fragment and incomplete receipts"
   rmSync(fragment);
   const receipt = join(root, "tama/.tama-kit.json");
   const value = JSON.parse(readFileSync(receipt, "utf8"));
-  value.progress = { status: "incomplete", pendingDestinations: ["tama/.tama.env"] };
+  value.progress = {
+    status: "incomplete",
+    pendingDestinations: ["tama/.tama.env"],
+  };
   writeFileSync(receipt, JSON.stringify(value));
   const result = await command(["env", "doctor", root, "--json"], root);
   const document = JSON.parse(result.stdout);
@@ -340,7 +350,10 @@ test("domain classification and preflight keep supported roles separate from app
   assert.match(diagnosis.message, /tama\/.tama\.env/u);
   assert.match(diagnosis.message, /tama-kit env doctor --service tama/u);
   assert.equal(
-    environmentCommand("doctor", { targetPath: "app", compose: ["a.yaml", "b.yaml"] }),
+    environmentCommand("doctor", {
+      targetPath: "app",
+      compose: ["a.yaml", "b.yaml"],
+    }),
     "tama-kit env doctor app --compose a.yaml --compose b.yaml",
   );
 });
@@ -351,15 +364,18 @@ import {
   findPostgresDataSources,
   inspectPersistence,
 } from "../../cli/bootstrap/persistence.mjs";
-import { runEnvironmentInit } from "../../cli/workflows/environment.mjs";
+import { runEnvironmentDoctor, runEnvironmentInit } from "../../cli/workflows/environment.mjs";
 
 function fakeDocker(options = {}) {
   const calls = [];
-  const execute = (_command, args) => {
+  const execute = (_command, args, executeOptions) => {
     calls.push(args);
     // Compose resolution stays real; only Docker state is faked.
     if (args[0] === "compose") {
-      return execFileSync("docker", args, { encoding: "utf8", cwd: process.cwd() });
+      return execFileSync("docker", args, {
+        ...executeOptions,
+        encoding: "utf8",
+      });
     }
     if (args[0] === "version") {
       if (options.daemonDown) {
@@ -620,7 +636,10 @@ test("findPostgresDataSources probes verbatim and legacy volume names", () => {
     binds: [],
   });
   const external = findPostgresDataSources(
-    { name: "myapp", volumes: { "db-data": { external: { name: "shared-db" } } } },
+    {
+      name: "myapp",
+      volumes: { "db-data": { external: { name: "shared-db" } } },
+    },
     { db: service },
   );
   assert.deepEqual(external?.volumes, [
@@ -630,7 +649,10 @@ test("findPostgresDataSources probes verbatim and legacy volume names", () => {
     findPostgresDataSources(
       { name: "myapp", volumes: {} },
       {
-        app: { name: "app", volumes: [{ type: "volume", source: "cache", target: "/cache" }] },
+        app: {
+          name: "app",
+          volumes: [{ type: "volume", source: "cache", target: "/cache" }],
+        },
       },
     ),
     null,
@@ -674,9 +696,12 @@ test("failed Docker probes and unreadable binds stay unknown instead of absent",
   const denied = await runEnvironmentInit(
     { cwd: process.cwd(), targetPath: root, dryRun: false, fresh: false },
     {
-      execute: (_command, args) => {
+      execute: (_command, args, executeOptions) => {
         if (args[0] === "compose")
-          return execFileSync("docker", args, { encoding: "utf8", cwd: process.cwd() });
+          return execFileSync("docker", args, {
+            ...executeOptions,
+            encoding: "utf8",
+          });
         if (args[0] === "version") return "Docker version 29.4.0";
         const error = new Error("permission denied");
         error.code = "EACCES";
@@ -702,7 +727,11 @@ test("failed Docker probes and unreadable binds stay unknown instead of absent",
   mkdirSync(join(root, "sealed"), { mode: 0o000 });
   const sealed = inspectPersistence({
     root,
-    sources: { service: "db", volumes: [], binds: [join(root, "sealed", "pg")] },
+    sources: {
+      service: "db",
+      volumes: [],
+      binds: [join(root, "sealed", "pg")],
+    },
     execute: docker,
   });
   chmodSync(join(root, "sealed"), 0o700);
@@ -720,9 +749,12 @@ test("a persistence probe that becomes unverifiable rolls the write back", async
       runEnvironmentInit(
         { cwd: process.cwd(), targetPath: root, dryRun: false, fresh: false },
         {
-          execute: (_command, args) => {
+          execute: (_command, args, executeOptions) => {
             if (args[0] === "compose") {
-              return execFileSync("docker", args, { encoding: "utf8", cwd: process.cwd() });
+              return execFileSync("docker", args, {
+                ...executeOptions,
+                encoding: "utf8",
+              });
             }
             if (args[0] === "version") return "Docker version 29.4.0";
             if (args[0] === "volume") {
@@ -778,9 +810,12 @@ test("env init inspects the Tama database, not an earlier unrelated PostgreSQL s
   const result = await runEnvironmentInit(
     { cwd: process.cwd(), targetPath: root, dryRun: false, fresh: true },
     {
-      execute: (_command, args) => {
+      execute: (_command, args, executeOptions) => {
         if (args[0] === "compose")
-          return execFileSync("docker", args, { encoding: "utf8", cwd: process.cwd() });
+          return execFileSync("docker", args, {
+            ...executeOptions,
+            encoding: "utf8",
+          });
         if (args[0] === "version") return "Docker version 29.4.0";
         if (args[0] === "volume" && String(args[2]).includes("tama-postgres-data")) return "[]";
         if (args[0] === "volume") {
@@ -814,7 +849,10 @@ test("associateTamaDatabase ignores declaration order and refuses ambiguity", ()
     services: {
       "app-db": { volumes: mount("app-data") },
       "orders-db": { volumes: mount("orders-data") },
-      tama: { depends_on: { "orders-db": {} }, env_file: [{ path: "tama/.tama.env" }] },
+      tama: {
+        depends_on: { "orders-db": {} },
+        env_file: [{ path: "tama/.tama.env" }],
+      },
     },
     volumes: {},
   };
@@ -908,7 +946,11 @@ test("env doctor rejects an empty core and a stale public issuer", async () => {
   assert.equal(stale.exitCode, 4);
   const staleCore = staleDoc.files.find((file) => file.role === "core");
   assert.equal(staleCore.status, "public-configuration-conflict");
-  assert.match(staleCore.issues.join("\n"), /public identity does not match/u);
+  assert.match(staleCore.issues.join("\n"), /public identity could not be established/u);
+  assert.match(
+    staleDoc.warnings.join("\n"),
+    /TAMA_OAUTH_ISSUER does not match the project example/u,
+  );
 });
 
 test("required interpolated paths block doctor and init; optional ones do not", async () => {
@@ -1010,7 +1052,10 @@ test("env init refuses issuance while a generation receipt is incomplete", async
   rmSync(join(root, "tama/.tama.postgres.env"));
   const receipt = join(root, "tama/.tama-kit.json");
   const value = JSON.parse(readFileSync(receipt, "utf8"));
-  value.progress = { status: "incomplete", pendingDestinations: ["tama/.tama.env"] };
+  value.progress = {
+    status: "incomplete",
+    pendingDestinations: ["tama/.tama.env"],
+  };
   writeFileSync(receipt, JSON.stringify(value));
   const before = snapshot(root);
   const result = await command(["env", "init", root, "--json"], root);
@@ -1034,9 +1079,12 @@ test("available bind data blocks issuance even when Docker is down", async () =>
   const result = await runEnvironmentInit(
     { cwd: process.cwd(), targetPath: root, dryRun: false, fresh: true },
     {
-      execute: (_command, args) => {
+      execute: (_command, args, executeOptions) => {
         if (args[0] === "compose") {
-          return execFileSync("docker", args, { encoding: "utf8", cwd: process.cwd() });
+          return execFileSync("docker", args, {
+            ...executeOptions,
+            encoding: "utf8",
+          });
         }
         const error = new Error("cannot connect to the Docker daemon");
         error.code = "ECONNREFUSED";
@@ -1171,7 +1219,10 @@ test("a malformed receipt does not hide a later incomplete generation", async ()
     JSON.stringify({
       ...first,
       operation: { ...first.operation, kind: "mcp-app", id: "mcp-app-1" },
-      progress: { status: "incomplete", pendingDestinations: ["tama/.tama.env"] },
+      progress: {
+        status: "incomplete",
+        pendingDestinations: ["tama/.tama.env"],
+      },
     }),
   );
   rmSync(join(root, "tama/.tama.postgres.env"));
@@ -1192,4 +1243,297 @@ test("a malformed receipt does not hide a later incomplete generation", async ()
   const allowed = await command(["env", "init", root, "--json"], root);
   assert.equal(allowed.exitCode, 0, allowed.stdout);
   assert.equal(existsSync(join(root, "tama/.tama.postgres.env")), true);
+});
+
+function runtimeLayer(root, content, options = {}) {
+  const path = join(root, "runtime.env");
+  writeFileSync(path, content, { mode: 0o600 });
+  const files = options.beforeCore
+    ? ["./runtime.env", "./tama/.tama.env"]
+    : ["./tama/.tama.env", "./runtime.env"];
+  writeFileSync(
+    join(root, "compose.override.yaml"),
+    `services:\n  tama:\n    env_file: !override\n${files.map((file) => `      - path: ${file}\n${options.raw && file.endsWith("runtime.env") ? "        format: raw\n" : ""}`).join("")}${options.inline ? `    environment:\n      DATABASE_URL: ${JSON.stringify(options.inline)}\n` : ""}`,
+  );
+  return path;
+}
+
+const layeredOptions = (root, dryRun = false, fresh = false) => ({
+  cwd: root,
+  targetPath: root,
+  composeFiles: ["compose.yaml", "compose.override.yaml"],
+  dryRun,
+  fresh,
+});
+
+test("later env-file database overrides block issuance and doctor diagnoses the effective host", async () => {
+  const root = standardRoot();
+  const core = join(root, "tama/.tama.env");
+  const original = readFileSync(core, "utf8");
+  const layer = runtimeLayer(root, 'DATABASE_URL="ecto://app:fixture@external.example/app"\n');
+  const before = snapshot(root);
+  const doctor = await runEnvironmentDoctor(layeredOptions(root));
+  assert.equal(doctor.ok, false);
+  assert.match(doctor.warnings.join("\n"), /DATABASE_URL host does not match/u);
+  assert.equal(
+    doctor.files.find((file) => file.role === "core").status,
+    "public-configuration-conflict",
+  );
+  assert.deepEqual(snapshot(root), before);
+  rmSync(core);
+  for (const fresh of [false, true]) {
+    for (const dryRun of [true, false]) {
+      const result = await runEnvironmentInit(layeredOptions(root, dryRun, fresh), {
+        execute: fakeDocker().execute,
+      });
+      assert.equal(result.ok, false);
+      assert.notEqual(result.persistence.status, "absent");
+      assert.match(result.blockers.join("\n"), /DATABASE_URL host does not match/u);
+      assert.deepEqual(result.changes, []);
+      assert.equal(existsSync(core), false);
+      assert.doesNotMatch(JSON.stringify(result), /ecto:\/\/app:fixture/u);
+    }
+  }
+  assert.equal(
+    readFileSync(layer, "utf8"),
+    'DATABASE_URL="ecto://app:fixture@external.example/app"\n',
+  );
+  writeFileSync(core, original, { mode: 0o600 });
+});
+
+test("an earlier env-file override is superseded by the recovered core", async () => {
+  const root = standardRoot();
+  runtimeLayer(root, "DATABASE_URL=ecto://app:fixture@external.example/app\n", {
+    beforeCore: true,
+  });
+  rmSync(join(root, "tama/.tama.env"));
+  const preview = await runEnvironmentInit(layeredOptions(root, true), {
+    execute: fakeDocker().execute,
+  });
+  assert.equal(preview.ok, true, preview.blockers.join("\n"));
+  assert.equal(existsSync(join(root, "tama/.tama.env")), false);
+  const result = await runEnvironmentInit(layeredOptions(root), {
+    execute: fakeDocker().execute,
+  });
+  assert.equal(result.ok, true, result.blockers.join("\n"));
+  assert.equal(result.persistence.status, "absent");
+  assert.equal((await runEnvironmentDoctor(layeredOptions(root))).ok, true);
+});
+
+test("ordered Compose files and inline environment override env-file database settings", async () => {
+  const root = standardRoot();
+  const values = parseEnvironment(readFileSync(join(root, "tama/.tama.env"), "utf8"), "core");
+  runtimeLayer(root, "DATABASE_URL=ecto://app:fixture@external.example/app\n");
+  writeFileSync(
+    join(root, "compose.inline.yaml"),
+    `services:\n  tama:\n    environment:\n      DATABASE_URL: ${JSON.stringify(values.get("DATABASE_URL"))}\n`,
+  );
+  rmSync(join(root, "tama/.tama.env"));
+  const options = {
+    ...layeredOptions(root),
+    composeFiles: ["compose.yaml", "compose.override.yaml", "compose.inline.yaml"],
+  };
+  const result = await runEnvironmentInit(options, {
+    execute: fakeDocker().execute,
+  });
+  assert.equal(result.ok, true, result.blockers.join("\n"));
+  assert.equal(result.persistence.status, "absent");
+  assert.equal((await runEnvironmentDoctor(options)).ok, true);
+});
+
+test("a matching later local database layer preserves credentials and detects local persistence", async () => {
+  const root = standardRoot();
+  const values = parseEnvironment(readFileSync(join(root, "tama/.tama.env"), "utf8"), "core");
+  runtimeLayer(root, `DATABASE_URL=${values.get("DATABASE_URL")}\n`);
+  rmSync(join(root, "tama/.tama.env"));
+  const blocked = await runEnvironmentInit(layeredOptions(root, false, true), {
+    execute: fakeDocker({
+      volumeExists: true,
+      volumeNames: ["tama-postgres-data"],
+    }).execute,
+  });
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.persistence.status, "detected");
+  assert.equal(existsSync(join(root, "tama/.tama.env")), false);
+  const result = await runEnvironmentInit(layeredOptions(root), {
+    execute: fakeDocker().execute,
+  });
+  assert.equal(result.ok, true, result.blockers.join("\n"));
+  assert.equal((await runEnvironmentDoctor(layeredOptions(root))).ok, true);
+});
+
+test("native env-file parsing preserves raw values and refuses dependencies on missing credentials", async () => {
+  const root = standardRoot();
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: Compose interpolation must remain literal in this fixture.
+  runtimeLayer(root, "DATABASE_URL=ecto://app:${POSTGRES_PASSWORD}@tama-postgres/app\n");
+  rmSync(join(root, "tama/.tama.env"));
+  for (const dryRun of [true, false]) {
+    const result = await runEnvironmentInit(layeredOptions(root, dryRun), {
+      execute: fakeDocker().execute,
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.blockers.join("\n"), /DATABASE_URL depends on missing core variables/u);
+    assert.equal(existsSync(join(root, "tama/.tama.env")), false);
+  }
+  runtimeLayer(
+    root,
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: raw env-file syntax must remain literal in this fixture.
+    "DATABASE_URL=ecto://app:${UNSET_PASSWORD}@external.example/app\nRAW_DOLLARS=a$$b\n",
+    {
+      raw: true,
+    },
+  );
+  writeFileSync(join(root, ".env"), "UNSET_PASSWORD=expanded\n");
+  const inspection = inspectComposeDeclarations(layeredOptions(root));
+  const effective = loadComposeServiceEnvironment(inspection, "tama", {
+    missingPaths: [],
+    suppliedVariables: [],
+  });
+  assert.equal(
+    effective.values.get("DATABASE_URL"),
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: raw Compose parsing must preserve this literal value.
+    "ecto://app:${UNSET_PASSWORD}@external.example/app",
+  );
+  assert.equal(effective.values.get("RAW_DOLLARS"), "a$$b");
+  const result = await runEnvironmentInit(layeredOptions(root), {
+    execute: fakeDocker().execute,
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.blockers.join("\n"), /DATABASE_URL host does not match/u);
+});
+
+test("empty and unset inline database overrides cannot fall back to the example", async () => {
+  for (const override of ['""', "null"]) {
+    const root = standardRoot();
+    writeFileSync(
+      join(root, "compose.override.yaml"),
+      `services:\n  tama:\n    environment:\n      DATABASE_URL: ${override}\n`,
+    );
+    assert.equal((await runEnvironmentDoctor(layeredOptions(root))).ok, false);
+    rmSync(join(root, "tama/.tama.env"));
+    const result = await runEnvironmentInit(layeredOptions(root), {
+      execute: fakeDocker().execute,
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.blockers.join("\n"), /DATABASE_URL does not name a database host/u);
+    assert.equal(existsSync(join(root, "tama/.tama.env")), false);
+  }
+});
+
+test("effective database credential conflicts fail doctor and both recovery modes", async () => {
+  const root = standardRoot();
+  runtimeLayer(root, "DATABASE_URL=ecto://tama:conflicting-password@tama-postgres/tama\n");
+  const doctor = await runEnvironmentDoctor(layeredOptions(root));
+  assert.equal(doctor.ok, false);
+  assert.match(
+    doctor.files.find((file) => file.role === "core").issues.join("\n"),
+    /effective Compose environment: DATABASE_URL password does not match/u,
+  );
+  rmSync(join(root, "tama/.tama.env"));
+  for (const dryRun of [true, false]) {
+    const result = await runEnvironmentInit(layeredOptions(root, dryRun), {
+      execute: fakeDocker().execute,
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.blockers.join("\n"), /DATABASE_URL password does not match/u);
+    assert.equal(existsSync(join(root, "tama/.tama.env")), false);
+  }
+});
+
+test("accepted recovered credentials are encoded, preserved and pass doctor", async () => {
+  const root = standardRoot();
+  const credentials = {
+    user: "app/name+part",
+    password: "abc/def+ghi",
+    database: "app/db+part",
+    host: "tama-postgres",
+  };
+  const postgres = join(root, "tama/.tama.postgres.env");
+  writeFileSync(
+    postgres,
+    postgresEnvironment(
+      new Map([
+        ["POSTGRES_USER", credentials.user],
+        ["POSTGRES_PASSWORD", credentials.password],
+        ["POSTGRES_DB", credentials.database],
+      ]),
+      "postgres",
+    ),
+  );
+  const before = readFileSync(postgres, "utf8");
+  rmSync(join(root, "tama/.tama.env"));
+  const preview = await runEnvironmentInit(
+    { cwd: root, dryRun: true, fresh: false },
+    { execute: fakeDocker().execute },
+  );
+  assert.equal(preview.ok, true, preview.blockers.join("\n"));
+  assert.equal(existsSync(join(root, "tama/.tama.env")), false);
+  const result = await runEnvironmentInit(
+    { cwd: root, dryRun: false, fresh: false },
+    { execute: fakeDocker().execute },
+  );
+  assert.equal(result.ok, true, result.blockers.join("\n"));
+  const values = parseEnvironment(readFileSync(join(root, "tama/.tama.env"), "utf8"), "core");
+  const url = new URL(values.get("DATABASE_URL"));
+  assert.equal(decodeURIComponent(url.username), credentials.user);
+  assert.equal(decodeURIComponent(url.password), credentials.password);
+  assert.equal(decodeURIComponent(url.pathname.slice(1)), credentials.database);
+  assert.equal(values.get("DATABASE_URL"), serializeDatabaseUrl(credentials));
+  assert.equal(readFileSync(postgres, "utf8"), before);
+  assert.equal((await runEnvironmentDoctor({ cwd: root })).ok, true);
+  assert.doesNotMatch(JSON.stringify(result), /abc\/def/u);
+});
+
+test("malformed credential encoding produces a safe diagnosis", () => {
+  const values = new Map([
+    ["DATABASE_URL", "ecto://app:bad%ZZ@tama-postgres/app"],
+    ["POSTGRES_PASSWORD", "fixture"],
+  ]);
+  assert.deepEqual(databaseUrlIssues(values, "tama-postgres"), [
+    "DATABASE_URL has invalid credential encoding",
+  ]);
+});
+
+test("changed env-file inputs abort recovery without creating a core", async () => {
+  const root = standardRoot();
+  const values = parseEnvironment(readFileSync(join(root, "tama/.tama.env"), "utf8"), "core");
+  const layer = runtimeLayer(root, `DATABASE_URL=${values.get("DATABASE_URL")}\n`);
+  rmSync(join(root, "tama/.tama.env"));
+  const docker = fakeDocker();
+  let changed = false;
+  await assert.rejects(
+    runEnvironmentInit(layeredOptions(root), {
+      execute: (command, args, options) => {
+        if (args[0] === "version" && !changed) {
+          changed = true;
+          writeFileSync(layer, "DATABASE_URL=ecto://app:fixture@external.example/app\n");
+        }
+        return docker.execute(command, args, options);
+      },
+    }),
+    /an environment recovery input changed/u,
+  );
+  assert.equal(changed, true);
+  assert.equal(existsSync(join(root, "tama/.tama.env")), false);
+});
+
+test("URL-normalized database names are refused consistently before issuance", async () => {
+  const root = standardRoot();
+  const example = join(root, "tama/.tama.env.example");
+  writeFileSync(
+    example,
+    readFileSync(example, "utf8").replace(/^POSTGRES_DB=.*/mu, "POSTGRES_DB=.."),
+  );
+  rmSync(join(root, "tama/.tama.env"));
+  rmSync(join(root, "tama/.tama.postgres.env"));
+  for (const dryRun of [true, false]) {
+    const result = await runEnvironmentInit(
+      { cwd: root, dryRun, fresh: false },
+      { execute: fakeDocker().execute },
+    );
+    assert.equal(result.ok, false);
+    assert.match(result.blockers.join("\n"), /DATABASE_URL database does not match POSTGRES_DB/u);
+    assert.deepEqual(result.changes, []);
+    assert.equal(existsSync(join(root, "tama/.tama.env")), false);
+  }
 });
