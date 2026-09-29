@@ -12,3 +12,5 @@ __pycache__/
 /cli/bootstrap/current-config.mjs
 
 /cli/commands/generate.mjs
+
+/cli/bootstrap/compose-inspection.mjs
