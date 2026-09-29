@@ -185,6 +185,19 @@ export function inspectCurrentConfiguration(
         ]
       : []),
   ];
+  const unresolvedRequired = selection.envReferences.filter(
+    (reference) => reference.interpolated && reference.required,
+  );
+  if (unresolvedRequired.length > 0 || selection.interpolationLoss) {
+    throw ownershipError(
+      [
+        "Required env_file paths contain unresolved interpolation and were not guessed:",
+        ...unresolvedRequired.map((reference) => `  ${reference.declaredPath}`),
+        "Fix the Compose declarations before setup.",
+      ].join("\n"),
+      { unresolvedEnvironmentPaths: unresolvedRequired.map((reference) => reference.declaredPath) },
+    );
+  }
   const preflight = environmentPreflight(
     preflightReferences,
     (path) => inspectRegularFile(path) !== null,

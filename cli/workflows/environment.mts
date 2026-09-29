@@ -14,18 +14,23 @@ import {
 } from "../bootstrap/environment.mjs";
 import { readGenerationEvidence } from "../bootstrap/generation-receipt.mjs";
 import { validateMcpAppLocalContract } from "../bootstrap/mcp-app-local-contract.mjs";
-import { findPostgresDataSources, inspectPersistence } from "../bootstrap/persistence.mjs";
+import { associateTamaDatabase, inspectPersistence } from "../bootstrap/persistence.mjs";
 import {
   classifyEnvironmentReference,
+  coreSemanticIssues,
   type EnvironmentDoctorResult,
   type EnvironmentFileReference,
   type EnvironmentFileReport,
   type EnvironmentInitFile,
   type EnvironmentInitResult,
+  type EnvironmentSelection,
   environmentCommand,
   isSupportedRole,
+  type PublicRuntimeIdentity,
+  publishedHostPort,
+  resolvePublicIdentity,
 } from "../domain/environment.mjs";
-import { ownershipError } from "../errors.mjs";
+import { ownershipError, usageError } from "../errors.mjs";
 import { parseEnvironment } from "../shared/environment.mjs";
 import { contentDigest, inspectRegularFile } from "../shared/files.mjs";
 import { validateSecretFilesIgnored, validateSecretFilesUntracked } from "../shared/git.mjs";
@@ -80,7 +85,10 @@ const GENERATION_RECEIPTS = ["tama/.tama-kit.json", "tama/.tama-kit-mcp-app.json
 function assessExistingFile(
   root: string,
   reference: EnvironmentFileReference,
-  context: { providerPairs?: [string, string][] } = {},
+  context: {
+    providerPairs?: [string, string][];
+    identity?: PublicRuntimeIdentity | null;
+  } = {},
 ): Assessment {
   const issues: string[] = [];
   let values: Map<string, string> | null = null;
@@ -131,7 +139,31 @@ function assessExistingFile(
       }
     }
   }
-  return { status: issues.length > 0 ? "invalid" : "valid", issues, values };
+  if (reference.role === "postgres") {
+    const missingPostgres = ["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"].filter(
+      (name) => !(values.get(name) ?? ""),
+    );
+    if (missingPostgres.length > 0) {
+      issues.push(`missing required variables: ${missingPostgres.join(", ")}`);
+    }
+  }
+  let publicConflict = false;
+  if (reference.role === "core") {
+    const semantic = coreSemanticIssues(values, context.identity ?? null);
+    for (const issue of semantic.issues) {
+      if (!issues.includes(issue)) issues.push(issue);
+    }
+    publicConflict = semantic.publicConflict;
+  }
+  const incomplete = issues.some((issue) => issue.startsWith("missing required"));
+  const status = incomplete
+    ? "invalid"
+    : publicConflict
+      ? "public-configuration-conflict"
+      : issues.length > 0
+        ? "invalid"
+        : "valid";
+  return { status, issues, values };
 }
 
 function inspectGenerationHistory(root: string, warnings: string[]) {
@@ -160,6 +192,7 @@ export async function runEnvironmentDoctor(
   dependencies: Dependencies = {},
 ): Promise<EnvironmentDoctorResult> {
   const inspection = inspectComposeDeclarations(options, dependencies);
+  validateEnvironmentSelectors(inspection, options);
   const root = inspection.root;
   /** @type {string[]} */ const warnings = [];
   if (inspection.unresolvedInterpolation.length > 0) {
@@ -229,6 +262,7 @@ export async function runEnvironmentDoctor(
       : []),
   ];
   inspectGenerationHistory(root, warnings);
+  const identity = publicIdentityFor(root, inspection, options, references);
   const parsed = new Map<EnvironmentFileReference["role"], Map<string, string> | null>();
   const files: EnvironmentFileReport[] = references.map((reference): EnvironmentFileReport => {
     const base = {
@@ -255,6 +289,7 @@ export async function runEnvironmentDoctor(
     }
     const assessed = assessExistingFile(root, reference, {
       providerPairs: reference.role === "provider" ? providerPairs : undefined,
+      identity: reference.role === "core" ? identity.identity : undefined,
     });
     parsed.set(reference.role, assessed.values);
     return {
@@ -264,6 +299,24 @@ export async function runEnvironmentDoctor(
       variables: assessed.values?.size ?? null,
     };
   });
+  for (const reference of inspection.envReferences.filter((item) => item.interpolated)) {
+    if (!reference.required) continue;
+    files.push({
+      role: "application",
+      relative: reference.declaredPath,
+      services: reference.services,
+      required: true,
+      source: "compose",
+      status: "invalid",
+      issues: [
+        `${reference.declaredPath} contains unresolved interpolation; the destination was not guessed`,
+      ],
+      variables: null,
+    });
+  }
+  if (identity.issues.length > 0) {
+    warnings.push(...identity.issues);
+  }
   // Core/PostgreSQL credential agreement between surviving valid files.
   const core = parsed.get("core");
   const postgres = parsed.get("postgres");
@@ -282,7 +335,9 @@ export async function runEnvironmentDoctor(
   }
   const nextActions = [];
   const requiredFailures = files.filter(
-    (file) => file.required && ["missing", "invalid", "unsupported"].includes(file.status),
+    (file) =>
+      file.required &&
+      ["missing", "invalid", "unsupported", "public-configuration-conflict"].includes(file.status),
   );
   if (requiredFailures.length > 0) {
     for (const file of requiredFailures) {
@@ -319,7 +374,10 @@ export async function runEnvironmentDoctor(
     if (warning.includes("incomplete generation"))
       nextActions.push("Resume the interrupted generation before issuing a new environment set");
   }
-  const ok = requiredFailures.length === 0;
+  const inspectionIncomplete =
+    inspection.interpolationLoss ||
+    inspection.envReferences.some((reference) => reference.interpolated && reference.required);
+  const ok = requiredFailures.length === 0 && !inspectionIncomplete;
   return {
     schemaVersion: 1,
     ok,
@@ -329,6 +387,7 @@ export async function runEnvironmentDoctor(
     root,
     composeFiles: inspection.composeFiles.map((path) => relative(root, path)),
     selection: {
+      ...(options.targetPath !== undefined ? { targetPath: options.targetPath } : {}),
       composeFiles: options.composeFiles ?? [],
       ...(options.service !== undefined ? { service: options.service } : {}),
       ...(options.environmentFile !== undefined ? { envFile: options.environmentFile } : {}),
@@ -359,10 +418,20 @@ export async function runEnvironmentInit(
   dependencies: Dependencies = {},
 ): Promise<EnvironmentInitResult> {
   const inspection = inspectComposeDeclarations(options, dependencies);
+  validateEnvironmentSelectors(inspection, options);
   const root = inspection.root;
   const blockers: string[] = [];
   const contract = await readCurrentContract(root, options);
   const references = environmentReferences(inspection, contract.providerFragment);
+  for (const reference of inspection.envReferences) {
+    if (!reference.interpolated || !reference.required) continue;
+    blockers.push(
+      `${reference.declaredPath} contains unresolved interpolation; fix the Compose declaration before env init recovers it`,
+    );
+  }
+  const incomplete = incompleteGenerationBlocker(root);
+  if (incomplete) blockers.push(incomplete);
+  const identity = publicIdentityFor(root, inspection, options, references);
   const assessed = new Map<string, Assessment | null>();
   for (const reference of references) {
     assessed.set(
@@ -371,6 +440,7 @@ export async function runEnvironmentInit(
         ? null
         : assessExistingFile(root, reference, {
             providerPairs: reference.role === "provider" ? contract.providerPairs : undefined,
+            identity: reference.role === "core" ? identity.identity : undefined,
           }),
     );
   }
@@ -405,6 +475,9 @@ export async function runEnvironmentInit(
   }
 
   const issuance = missingCore ? "new" : missing.length > 0 ? "derived" : "none";
+  if (missingCore && identity.identity === null) {
+    for (const issue of identity.issues) blockers.push(issue);
+  }
   let persistence: EnvironmentInitResult["persistence"] = {
     status: "not-required",
     freshAsserted: false,
@@ -421,53 +494,56 @@ export async function runEnvironmentInit(
       { noEnvResolution: true },
       dependencies.execute,
     );
-    const dataSources = findPostgresDataSources(model, model.services);
-    if (dataSources === null) {
+    const association = associateTamaDatabase({
+      model,
+      tamaService: tamaServiceName(inspection, options, references),
+      postgresServices: [
+        ...new Set(
+          references
+            .filter((reference) => reference.role === "postgres")
+            .flatMap((reference) => reference.services),
+        ),
+      ],
+      ...(identity.identity ? { databaseHost: identity.identity.databaseHost } : {}),
+    });
+    if (association.kind === "ambiguous") {
       persistence = {
         status: "unknown",
         freshAsserted: false,
-        detail:
-          "the selected configuration has no local PostgreSQL data mount; the database may be external and was not inspected",
+        detail: association.detail,
         checked: [],
       };
+      blockers.push(`${association.detail}; new secret issuance is refused`);
+    } else if (association.kind === "none") {
+      const decision = authorizeIssuance(
+        { status: "unknown", detail: association.detail, checked: [] },
+        options.fresh,
+      );
+      persistence = decision.persistence;
+      if (decision.blocker) blockers.push(decision.blocker);
     } else {
+      const sources = association.sources;
       const observe = () =>
         inspectPersistence({
           root,
           project: model.name,
-          sources: dataSources,
+          sources,
           execute: dependencies.execute,
         });
       recheckPersistence = () => {
         const observation = observe();
         return { status: observation.status, detail: observation.detail };
       };
-      const observation = observe();
-      persistence = {
-        status: observation.status,
-        freshAsserted: false,
-        detail: observation.detail,
-        checked: observation.checked,
-      };
-      if (persistence.status === "detected") {
-        blockers.push(
-          "local runtime data was detected, so new secret issuance is refused: changed PostgreSQL credentials would stop the application from connecting, a new TAMA_VAULT_KEY would make stored encrypted material unreadable, and new JWT or System OAuth keys would invalidate stored credentials and issued tokens. Restore the missing files from a private backup, or use a separately authorized runtime-reset process",
-        );
-      } else if (persistence.status === "unknown" && !options.fresh) {
-        blockers.push(
-          "persistence could not be verified; pass --fresh only when the local runtime is known to be new, and restore from a private backup otherwise",
-        );
-      }
-      if (persistence.status === "unknown" && options.fresh) {
-        persistence = { ...persistence, freshAsserted: true };
-      }
+      const decision = authorizeIssuance(observe(), options.fresh);
+      persistence = decision.persistence;
+      if (decision.blocker) blockers.push(decision.blocker);
     }
   }
 
   let operations: FileOperation[] = [];
   let applied = false;
   if (missing.length > 0 && blockers.length === 0 && !options.dryRun) {
-    const plan = renderMissingSet(references, assessed);
+    const plan = renderMissingSet(missing, assessed, identity.identity);
     for (const operation of plan.operations) {
       if (lstatSyncSafe(operation.path) !== null) {
         throw ownershipError(
@@ -494,8 +570,12 @@ export async function runEnvironmentInit(
       }
       if (recheckPersistence !== undefined) {
         const recheck = recheckPersistence();
-        if (recheck.status === "detected") {
-          throw ownershipError(`persistence appeared during the operation: ${recheck.detail}`);
+        if (recheck.status === "detected" || (recheck.status === "unknown" && !options.fresh)) {
+          throw ownershipError(
+            recheck.status === "detected"
+              ? `persistence appeared during the operation: ${recheck.detail}`
+              : `persistence became unverifiable during the operation: ${recheck.detail}`,
+          );
         }
       }
     });
@@ -544,7 +624,7 @@ export async function runEnvironmentInit(
     mode: options.dryRun ? "dry-run" : "write",
     root,
     composeFiles: inspection.composeFiles.map((path) => relative(root, path)),
-    selection: selectionFromOptions(options),
+    selection: recordedSelection(options),
     files,
     persistence,
     changes: plansCreate
@@ -573,9 +653,10 @@ export async function runEnvironmentInit(
 }
 
 /** @param {EnvironmentCommandSelection} options */
-function selectionFromOptions(options: EnvironmentCommandSelection) {
+function selectionFromOptions(options: EnvironmentCommandSelection): EnvironmentSelection {
   return {
-    composeFiles: options.composeFiles ?? [],
+    ...(options.targetPath !== undefined ? { targetPath: options.targetPath } : {}),
+    compose: options.composeFiles ?? [],
     ...(options.service !== undefined ? { service: options.service } : {}),
     ...(options.environmentFile !== undefined ? { envFile: options.environmentFile } : {}),
     ...(options.contractPath !== undefined ? { contract: options.contractPath } : {}),
@@ -661,10 +742,10 @@ function environmentReferences(
 const SAFE_CORE_VALUE = /^[A-Za-z0-9+/_-]+$/u;
 
 function renderMissingSet(
-  references: EnvironmentFileReference[],
+  missing: EnvironmentFileReference[],
   assessed: Map<string, Assessment | null>,
+  identity: PublicRuntimeIdentity | null,
 ): { operations: FileOperation[]; sourceDigests: [string, string][] } {
-  const missing = references.filter((reference) => assessed.get(reference.path) === null);
   const coreMissing = missing.some((reference) => reference.role === "core");
   const survivingPath = (role: string): string | null => {
     for (const [path, assessment] of assessed) {
@@ -677,7 +758,12 @@ function renderMissingSet(
   let coreValues = new Map<string, string>();
   let coreContent: string | null = null;
   if (coreMissing) {
-    coreContent = newEnvironment(DEFAULTS.port, true);
+    if (identity === null) {
+      throw ownershipError(
+        "public runtime identity is incomplete; refusing to generate secrets from bootstrap defaults",
+      );
+    }
+    coreContent = applyPublicIdentity(newEnvironment(identity.port, true), identity);
     coreValues = parseEnvironment(coreContent, "tama/.tama.env");
     const postgresPath = survivingPath("postgres");
     if (postgresPath !== null) {
@@ -704,7 +790,7 @@ function renderMissingSet(
         .replace(/^POSTGRES_DB=.*/mu, `POSTGRES_DB=${database}`)
         .replace(
           /^DATABASE_URL=.*/mu,
-          `DATABASE_URL=ecto://${user}:${password}@tama-postgres/${database}`,
+          `DATABASE_URL=ecto://${user}:${password}@${identity.databaseHost}/${database}`,
         );
       coreValues = parseEnvironment(coreContent, "tama/.tama.env");
     }
@@ -752,6 +838,157 @@ function renderMissingSet(
   }
   return { operations, sourceDigests };
 }
+function recordedSelection(
+  options: EnvironmentCommandSelection,
+): EnvironmentDoctorResult["selection"] {
+  return {
+    ...(options.targetPath !== undefined ? { targetPath: options.targetPath } : {}),
+    composeFiles: options.composeFiles ?? [],
+    ...(options.service !== undefined ? { service: options.service } : {}),
+    ...(options.environmentFile !== undefined ? { envFile: options.environmentFile } : {}),
+    ...(options.contractPath !== undefined ? { contract: options.contractPath } : {}),
+    ...(options.providerService !== undefined ? { providerService: options.providerService } : {}),
+  };
+}
+
+function validateEnvironmentSelectors(
+  inspection: ComposeDeclarationInspection,
+  options: EnvironmentCommandSelection,
+) {
+  if (options.service !== undefined && !inspection.services[options.service]) {
+    throw usageError("selected --service does not exist in the effective Compose configuration");
+  }
+  if (options.providerService !== undefined && !inspection.services[options.providerService]) {
+    throw usageError(
+      "selected --provider-service does not exist in the effective Compose configuration",
+    );
+  }
+  if (options.environmentFile === undefined) return;
+  const selected = resolve(inspection.root, options.environmentFile);
+  const matches = inspection.envReferences.filter(
+    (reference) => !reference.interpolated && reference.path === selected,
+  );
+  const loaded =
+    options.service === undefined
+      ? matches.length > 0
+      : matches.some((reference) => reference.services.includes(options.service ?? ""));
+  if (!loaded) throw ownershipError("--env-file is not loaded by the selected Tama service");
+}
+
+function tamaServiceName(
+  inspection: ComposeDeclarationInspection,
+  options: EnvironmentCommandSelection,
+  references: EnvironmentFileReference[],
+): string | undefined {
+  if (options.service !== undefined && inspection.services[options.service]) return options.service;
+  const loaders = [
+    ...new Set(
+      references
+        .filter((reference) => reference.role === "core")
+        .flatMap((reference) => reference.services),
+    ),
+  ];
+  return loaders.length === 1 ? loaders[0] : undefined;
+}
+
+function publicIdentityFor(
+  root: string,
+  inspection: ComposeDeclarationInspection,
+  options: EnvironmentCommandSelection,
+  references: EnvironmentFileReference[],
+): { identity: PublicRuntimeIdentity | null; issues: string[] } {
+  const core = references.find((reference) => reference.role === "core");
+  const examplePath = core ? `${core.path}.example` : join(root, "tama/.tama.env.example");
+  let exampleValues: Map<string, string> | null = null;
+  if (inspectRegularFile(examplePath)) {
+    try {
+      exampleValues = parseEnvironment(readFileSync(examplePath, "utf8"), examplePath);
+    } catch {
+      exampleValues = null;
+    }
+  }
+  const serviceName = tamaServiceName(inspection, options, references);
+  const postgresServices = [
+    ...new Set(
+      references
+        .filter((reference) => reference.role === "postgres")
+        .flatMap((reference) => reference.services),
+    ),
+  ];
+  return resolvePublicIdentity({
+    exampleValues,
+    publishedPort: serviceName
+      ? publishedHostPort(inspection.services[serviceName]?.ports, DEFAULTS.containerPort)
+      : null,
+    databaseService: postgresServices.length === 1 ? postgresServices[0] : null,
+    containerPort: DEFAULTS.containerPort,
+  });
+}
+
+function incompleteGenerationBlocker(root: string): string | null {
+  for (const relativePath of GENERATION_RECEIPTS) {
+    const path = join(root, relativePath);
+    if (!existsSync(path)) continue;
+    try {
+      const evidence = readGenerationEvidence(path);
+      if (evidence.kind === "receipt" && evidence.receipt.progress.status === "incomplete") {
+        return `${relativePath} records an incomplete generation; resume it with tama-kit bootstrap --resume <operation-id> before env init issues environment files`;
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+const DETECTED_ISSUANCE_BLOCKER =
+  "local runtime data was detected, so new secret issuance is refused: changed PostgreSQL credentials would stop the application from connecting, a new TAMA_VAULT_KEY would make stored encrypted material unreadable, and new JWT or System OAuth keys would invalidate stored credentials and issued tokens. Restore the missing files from a private backup, or use a separately authorized runtime-reset process";
+const UNKNOWN_ISSUANCE_BLOCKER =
+  "persistence could not be verified; pass --fresh only when the local runtime is known to be new, and restore from a private backup otherwise";
+
+function authorizeIssuance(
+  observation: { status: "absent" | "detected" | "unknown"; detail: string; checked: string[] },
+  fresh: boolean,
+): { persistence: EnvironmentInitResult["persistence"]; blocker?: string } {
+  const base = {
+    detail: observation.detail,
+    checked: observation.checked,
+    freshAsserted: false,
+  };
+  if (observation.status === "detected") {
+    return {
+      persistence: { ...base, status: "detected" },
+      blocker: DETECTED_ISSUANCE_BLOCKER,
+    };
+  }
+  if (observation.status === "unknown") {
+    if (!fresh) {
+      return { persistence: { ...base, status: "unknown" }, blocker: UNKNOWN_ISSUANCE_BLOCKER };
+    }
+    return { persistence: { ...base, status: "unknown", freshAsserted: true } };
+  }
+  return { persistence: { ...base, status: "absent" } };
+}
+
+function applyPublicIdentity(content: string, identity: PublicRuntimeIdentity): string {
+  const password = content.match(/^POSTGRES_PASSWORD=(.*)$/mu)?.[1] ?? "";
+  const user = identity.databaseUser;
+  const database = identity.databaseName;
+  return content
+    .replace(/^POSTGRES_USER=.*/mu, `POSTGRES_USER=${user}`)
+    .replace(/^POSTGRES_DB=.*/mu, `POSTGRES_DB=${database}`)
+    .replace(
+      /^DATABASE_URL=.*/mu,
+      `DATABASE_URL=ecto://${user}:${password}@${identity.databaseHost}/${database}`,
+    )
+    .replace(/^PHX_HOST=.*/mu, `PHX_HOST=${identity.phxHost}`)
+    .replace(/^TAMA_PORT=.*/mu, `TAMA_PORT=${identity.port}`)
+    .replace(/^TAMA_OAUTH_ISSUER=.*/mu, `TAMA_OAUTH_ISSUER=${identity.issuer}`)
+    .replace(/^TAMA_MCP_RESOURCE=.*/mu, `TAMA_MCP_RESOURCE=${identity.resource}`)
+    .replace(/^TAMA_MCP_ALLOWED_ORIGINS=.*/mu, `TAMA_MCP_ALLOWED_ORIGINS=${identity.allowedOrigin}`)
+    .replace(/^TAMA_BASE_URL=.*/mu, `TAMA_BASE_URL=${identity.baseUrl}`);
+}
+
 function lstatSyncSafe(path: string): import("node:fs").Stats | null {
   try {
     return lstatSync(path);

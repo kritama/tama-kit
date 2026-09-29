@@ -1,7 +1,7 @@
 // @ts-check
 
 /** @param {string} value */
-function shellQuote(value) {
+export function shellQuote(value) {
   const characters = Array.from(value);
   const hasControlCharacter = characters.some((character) => {
     const codePoint = character.codePointAt(0) ?? 0;

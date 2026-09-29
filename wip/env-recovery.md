@@ -1,15 +1,14 @@
 # Private environment recovery for issue #41
 
-Status: planned; implementation has not started.
+Status: partial. Standard core/PostgreSQL doctor, preflight, and create-only
+init are implemented on `feature/issue-41-env-recovery`. Review 01 findings
+R1–R8 are addressed in code with regressions. MCP App recovery, public docs,
+installed-package env coverage, and the platform matrix are still open.
+Issue #41 is not ready to close.
 
 Inspected `kritama/tama-kit` develop at
 `a3f3008722be7fc4e962f002ef4606ab467f849c` on 2026-09-29, and
-[issue #41](https://github.com/kritama/tama-kit/issues/41). No implementation or
-runtime changes were made.
-
-The local `_kritama/tama-kit` checkout was verified on `develop` at the same
-commit. Source paths below refer to this repository; recheck the implementation
-baseline before starting changes.
+[issue #41](https://github.com/kritama/tama-kit/issues/41).
 
 1. **Keep the proposed commands, and use current project configuration.**
 
@@ -291,18 +290,26 @@ Acceptance checklist:
 
 - [x] `env doctor` reports missing required private environment files from current
   Compose declarations and the selected MCP App contract, with actionable details.
+  Empty, semantically invalid, and stale public identities fail. Required
+  unresolved interpolation prevents a healthy result.
 - [x] `env init` creates only missing supported files, preserving every existing
   file and keeping database credentials consistent across generated companions
   (standard core/Postgres; MCP App recovery is refused with a diagnostic until
-  the MCP recovery renderer ships).
-- [x] Secret issuance is refused when relevant persisted data is detected;
-  unknown persistence requires an explicit fresh-runtime assertion. `--fresh`
-  never overrides detected data.
-- [ ] Output includes the remaining private setup and provisioner-credential steps
-  without exposing secrets or claiming runtime readiness.
-- [ ] `doctor` and `setup` identify missing files and suggest the appropriate env
-  recovery command while retaining the caller's configuration selection.
+  the MCP recovery renderer ships). Public port, origin, and database host come
+  from the project example and effective Compose configuration, or issuance stops.
+- [x] Secret issuance is refused when relevant persisted data is detected, when
+  the Tama database cannot be associated, or when a probe fails. Unknown
+  persistence, including no local mount, requires `--fresh`. `--fresh` never
+  overrides detected data or an ambiguous database association. An unverifiable
+  recheck rolls the write back.
+- [x] Output includes the remaining private setup and provisioner-credential steps
+  without exposing secrets or claiming runtime readiness. Follow-up commands keep
+  the target path and ordered Compose/service/env-file selection.
+- [x] `doctor` and `setup` identify missing files and suggest the appropriate env
+  recovery command while retaining the caller's configuration selection. Required
+  unresolved interpolation is named instead of guessed.
 - [ ] Standard, combined and additive MCP App layouts pass recovery regressions,
   including partial loss, repeat invocations, dry-run and transactional failure.
+  Current behavior is an explicit refusal, not recovery.
 - [ ] Public examples, CLI help, skills, package validation and isolated runtime
   checks are updated and pass the repository's supported platform matrix.
