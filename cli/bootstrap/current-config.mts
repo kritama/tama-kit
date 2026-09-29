@@ -3,30 +3,24 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parseEnv } from "node:util";
 import type { InspectOptions, RuntimePlan } from "../domain/runtime.mjs";
-import { ambiguityError, ownershipError, prerequisiteError, usageError } from "../errors.mjs";
-import { composeArguments } from "../shared/compose.mjs";
+import { ambiguityError, ownershipError, usageError } from "../errors.mjs";
 import { isValidVaultKey, parseEnvironment } from "../shared/environment.mjs";
 import { contentDigest, inspectRegularFile } from "../shared/files.mjs";
 import { validateSecretFilesIgnored, validateSecretFilesUntracked } from "../shared/git.mjs";
 import { validateOAuthPrivateJwk, validatePublicJwkSet } from "../shared/oauth-key.mjs";
 import type { LocalHttpsTopology, McpAppMode } from "../types.mjs";
+import {
+  composeExecuter,
+  inspectComposeDeclarations,
+  loadComposeConfig,
+  requireInspectableDeclarations,
+  type ComposeDeclarationService,
+  type ComposeExecute,
+} from "./compose-inspection.mjs";
 import { verifyEnvironmentLoadingEvidence } from "./contracts/environment-loading.mjs";
-import { inspectProject } from "./detect-project.mjs";
 import { isLoopbackAddress } from "./local-https.mjs";
 import { allowedOrigin } from "./mcp-app.mjs";
 import { validateMcpAppLocalContract } from "./mcp-app-local-contract.mjs";
-import { validateComposePrerequisite } from "./start.mjs";
-
-type Service = {
-  image?: string;
-  depends_on?: Record<string, unknown>;
-  build?: { context?: string };
-  environment?: Record<string, string | null>;
-  env_file?: { path: string; required?: boolean }[];
-  ports?: { target: number; published?: string; host_ip?: string; protocol?: string }[];
-  volumes?: { type: string; source: string; target: string }[];
-};
-type Model = { services: Record<string, Service> };
 
 function readPrivateEnvironment(path: string) {
   const stat = inspectRegularFile(path);
@@ -50,7 +44,7 @@ function readPrivateEnvironment(path: string) {
   );
 }
 
-function environment(service: Service) {
+function environment(service: ComposeDeclarationService) {
   return new Map(
     Object.entries(service.environment ?? {}).filter(
       (entry): entry is [string, string] => typeof entry[1] === "string",
@@ -100,7 +94,7 @@ function effectivePort(value: string | undefined, variable: string) {
   return port;
 }
 function selectService(
-  services: Record<string, Service>,
+  services: Record<string, ComposeDeclarationService>,
   candidates: string[],
   explicit: string | undefined,
   flag: string,
@@ -116,66 +110,14 @@ function selectService(
 /** Native Compose parsing is read-only, daemon-independent and never emits environment values. */
 export function inspectCurrentConfiguration(
   options: InspectOptions,
-  execute = execFileSync,
+  execute: ComposeExecute = composeExecuter(),
 ): RuntimePlan {
-  const inspection = inspectProject({
-    cwd: options.cwd,
-    targetPath: options.targetPath,
-    composePath: options.composeFiles?.[0],
-  });
-  const root = inspection.root;
-  const composeFiles = (options.composeFiles ?? [inspection.selectedCompose]).map((path) =>
-    resolve(root, path),
-  );
-  for (const path of composeFiles)
-    if (!inspectRegularFile(path)) throw usageError("selected Compose file is missing");
-  const selection = { composeFile: composeFiles[0], runtime: { composeFiles } };
-  validateComposePrerequisite();
-  function load(noEnvironment: boolean, noInterpolation = false): Model {
-    try {
-      const output = execute(
-        "docker",
-        [
-          ...composeArguments(selection),
-          "config",
-          "--format",
-          "json",
-          ...(noEnvironment ? ["--no-env-resolution"] : []),
-          ...(noInterpolation ? ["--no-interpolate"] : []),
-        ],
-        {
-          cwd: root,
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "pipe"],
-          maxBuffer: 4 * 1024 * 1024,
-        },
-      );
-      const model = JSON.parse(output);
-      if (!model.services || typeof model.services !== "object" || Array.isArray(model.services))
-        throw new Error();
-      return model;
-    } catch {
-      throw ownershipError(
-        "Docker Compose configuration could not be resolved; check selected files, required variables and env_file paths. Raw output is suppressed because it may contain secrets.",
-      );
-    }
-  }
-  let declarations = load(true);
-  if (!Object.values(declarations.services).some((service) => service.env_file?.length)) {
-    // Compose 2.x can discard env_file even with --no-env-resolution. Its
-    // model-rendering path preserves declarations; effective values still come
-    // from the separate, fully resolved native configuration below.
-    declarations = load(true, true);
-    for (const service of Object.values(declarations.services)) {
-      if (service.env_file?.some(({ path }) => path.includes("$"))) {
-        throw prerequisiteError(
-          "this Docker Compose version cannot preserve interpolated env_file paths during inspection; upgrade Compose to a version that supports --no-env-resolution without discarding declarations",
-        );
-      }
-    }
-  }
-  const model = load(false);
-  const services = model.services;
+  const selection = inspectComposeDeclarations(options, { execute });
+  const root = selection.root;
+  const composeFiles = selection.composeFiles;
+  const declarations = selection.services;
+  requireInspectableDeclarations(selection);
+  const services = loadComposeConfig(root, composeFiles, {}, execute);
   const serviceName = selectService(
     services,
     Object.keys(services).filter((name) => Boolean(services[name].environment?.TAMA_OAUTH_ISSUER)),
@@ -209,7 +151,7 @@ export function inspectCurrentConfiguration(
       throw ownershipError("invalid effective MCP App resource URL");
     }
   }
-  const files = (declarations.services[serviceName]?.env_file ?? []).flatMap(
+  const files = (declarations[serviceName]?.env_file ?? []).flatMap(
     ({ path, required }) => {
       const filename = resolve(root, path);
       // Compose skips missing optional declarations. Existing files still pass
@@ -234,7 +176,7 @@ export function inspectCurrentConfiguration(
       ? provisionerFiles[0][0]
       : undefined;
   const modeFiles = [...envFiles].filter(([, env]) => env.has("TAMA_MCP_APP_MODE"));
-  const inline = declarations.services[serviceName]?.environment ?? {};
+  const inline = declarations[serviceName]?.environment ?? {};
   // Private-environment selection does not select the activation assignment.
   const modeFile = modeFiles.length === 1 ? modeFiles[0][0] : undefined;
   // Only an unshadowed, single declared source is eligible for automatic activation edits.
@@ -256,8 +198,8 @@ export function inspectCurrentConfiguration(
   const plan: RuntimePlan = {
     schemaVersion: 1,
     root,
-    framework: inspection.framework,
-    frameworkEvidence: inspection.frameworkEvidence,
+    framework: selection.framework,
+    frameworkEvidence: selection.frameworkEvidence,
     composeFile: composeFiles[0],
     port: Number(new URL(tamaOrigin).port || (tamaOrigin.startsWith("https:") ? 443 : 80)),
     tamaImage: service.image ?? "",
@@ -298,8 +240,8 @@ export function inspectCurrentConfiguration(
   const providerPath = resolve(root, contract.provider.environment_file);
   const providerValues = readPrivateEnvironment(providerPath);
   const roles = contract.bindings;
-  const candidates = Object.keys(declarations.services).filter((name) =>
-    (declarations.services[name].env_file ?? []).some(
+  const candidates = Object.keys(declarations).filter((name) =>
+    (declarations[name].env_file ?? []).some(
       ({ path }) => resolve(root, path) === providerPath,
     ),
   );
@@ -415,9 +357,9 @@ export function inspectCurrentConfiguration(
       JSON.stringify([...allowedOrigins].sort())
     )
       throw ownershipError("contract and Tama allowed origins disagree");
-    const isTcpPublication = (port: NonNullable<Service["ports"]>[number]) =>
+    const isTcpPublication = (port: NonNullable<ComposeDeclarationService["ports"]>[number]) =>
       (port.protocol ?? "tcp") === "tcp";
-    const isHttpsPublication = (port: NonNullable<Service["ports"]>[number]) =>
+    const isHttpsPublication = (port: NonNullable<ComposeDeclarationService["ports"]>[number]) =>
       Number(port.published) === topology.https_port && isTcpPublication(port);
     const proxy = selectService(
       services,
