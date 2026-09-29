@@ -2,9 +2,9 @@
 
 Status: partial. Standard core/PostgreSQL doctor, preflight, and create-only
 init are implemented on `feature/issue-41-env-recovery`. Review 01 findings
-R1–R8 are addressed in code with regressions. MCP App recovery, public docs,
-installed-package env coverage, and the platform matrix are still open.
-Issue #41 is not ready to close.
+R1–R8 and review 02 findings F1–F5 are addressed in code with regressions.
+MCP App recovery, public docs, installed-package env coverage, and the
+platform matrix are still open. Issue #41 is not ready to close.
 
 Inspected `kritama/tama-kit` develop at
 `a3f3008722be7fc4e962f002ef4606ab467f849c` on 2026-09-29, and

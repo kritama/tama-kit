@@ -429,8 +429,8 @@ export async function runEnvironmentInit(
       `${reference.declaredPath} contains unresolved interpolation; fix the Compose declaration before env init recovers it`,
     );
   }
-  const incomplete = incompleteGenerationBlocker(root);
-  if (incomplete) blockers.push(incomplete);
+  const history = generationHistory(root);
+  if (history.blocker) blockers.push(history.blocker);
   const identity = publicIdentityFor(root, inspection, options, references);
   const assessed = new Map<string, Assessment | null>();
   for (const reference of references) {
@@ -504,7 +504,7 @@ export async function runEnvironmentInit(
             .flatMap((reference) => reference.services),
         ),
       ],
-      ...(identity.identity ? { databaseHost: identity.identity.databaseHost } : {}),
+      ...(identity.effectiveDatabaseHost ? { databaseHost: identity.effectiveDatabaseHost } : {}),
     });
     if (association.kind === "ambiguous") {
       persistence = {
@@ -540,6 +540,7 @@ export async function runEnvironmentInit(
     }
   }
 
+  if (missing.length > 0) blockers.push(...recoveryInputIssues(missing, assessed));
   let operations: FileOperation[] = [];
   let applied = false;
   if (missing.length > 0 && blockers.length === 0 && !options.dryRun) {
@@ -648,6 +649,7 @@ export async function runEnvironmentInit(
         }))
       : [],
     blockers,
+    warnings: history.warnings,
     nextActions,
   };
 }
@@ -738,8 +740,42 @@ function environmentReferences(
   ];
 }
 
-/** Credential characters the bootstrap core renderer emits unquoted. */
-const SAFE_CORE_VALUE = /^[A-Za-z0-9+/_-]+$/u;
+/** Credential characters the core renderer can emit unquoted. */
+const SAFE_CORE_VALUE = /^[A-Za-z0-9.+/_-]+$/u;
+
+function recoveryInputIssues(
+  missing: EnvironmentFileReference[],
+  assessed: Map<string, Assessment | null>,
+): string[] {
+  const issues: string[] = [];
+  for (const reference of missing) {
+    if (reference.role === "core" || reference.role === "postgres") continue;
+    issues.push(
+      `${reference.relative} requires newly issued signing material that env init does not currently reissue; restore it from a private backup`,
+    );
+  }
+  if (!missing.some((reference) => reference.role === "core")) return issues;
+  let surviving: Map<string, string> | null = null;
+  for (const [path, assessment] of assessed) {
+    if (assessment?.values && classifyEnvironmentReference(basename(path)) === "postgres") {
+      surviving = assessment.values;
+    }
+  }
+  if (surviving === null) return issues;
+  const user = surviving.get("POSTGRES_USER") ?? "";
+  const password = surviving.get("POSTGRES_PASSWORD") ?? "";
+  const database = surviving.get("POSTGRES_DB") ?? "";
+  if (!user || !password || !database) {
+    issues.push(
+      "the surviving PostgreSQL environment is incomplete; restore the missing files from a private backup",
+    );
+  } else if (![user, password, database].every((value) => SAFE_CORE_VALUE.test(value))) {
+    issues.push(
+      "the surviving database credentials cannot be re-emitted safely into the core environment; restore the missing files from a private backup",
+    );
+  }
+  return issues;
+}
 
 function renderMissingSet(
   missing: EnvironmentFileReference[],
@@ -896,7 +932,11 @@ function publicIdentityFor(
   inspection: ComposeDeclarationInspection,
   options: EnvironmentCommandSelection,
   references: EnvironmentFileReference[],
-): { identity: PublicRuntimeIdentity | null; issues: string[] } {
+): {
+  identity: PublicRuntimeIdentity | null;
+  issues: string[];
+  effectiveDatabaseHost: string | null;
+} {
   const core = references.find((reference) => reference.role === "core");
   const examplePath = core ? `${core.path}.example` : join(root, "tama/.tama.env.example");
   let exampleValues: Map<string, string> | null = null;
@@ -915,8 +955,21 @@ function publicIdentityFor(
         .flatMap((reference) => reference.services),
     ),
   ];
+  const inline = literalServiceEnvironment(
+    serviceName ? inspection.services[serviceName]?.environment : undefined,
+  );
+  if (inline.unresolved.length > 0) {
+    return {
+      identity: null,
+      issues: inline.unresolved.map(
+        (name) => `the selected Compose ${name} contains unresolved interpolation`,
+      ),
+      effectiveDatabaseHost: inline.unresolved.includes("DATABASE_URL") ? "unresolved" : null,
+    };
+  }
   return resolvePublicIdentity({
     exampleValues,
+    inlineValues: inline.values,
     publishedPort: serviceName
       ? publishedHostPort(inspection.services[serviceName]?.ports, DEFAULTS.containerPort)
       : null,
@@ -925,20 +978,42 @@ function publicIdentityFor(
   });
 }
 
-function incompleteGenerationBlocker(root: string): string | null {
+function literalServiceEnvironment(environment: Record<string, string | null> | undefined): {
+  values: Map<string, string>;
+  unresolved: string[];
+} {
+  const values = new Map<string, string>();
+  const unresolved: string[] = [];
+  for (const [name, value] of Object.entries(environment ?? {})) {
+    if (typeof value !== "string") continue;
+    if (value.includes("$")) unresolved.push(name);
+    else values.set(name, value);
+  }
+  return { values, unresolved };
+}
+
+function generationHistory(root: string): { blocker: string | null; warnings: string[] } {
+  const warnings: string[] = [];
+  let blocker: string | null = null;
   for (const relativePath of GENERATION_RECEIPTS) {
     const path = join(root, relativePath);
     if (!existsSync(path)) continue;
     try {
       const evidence = readGenerationEvidence(path);
-      if (evidence.kind === "receipt" && evidence.receipt.progress.status === "incomplete") {
-        return `${relativePath} records an incomplete generation; resume it with tama-kit bootstrap --resume <operation-id> before env init issues environment files`;
+      if (
+        blocker === null &&
+        evidence.kind === "receipt" &&
+        evidence.receipt.progress.status === "incomplete"
+      ) {
+        blocker = `${relativePath} records an incomplete generation; resume it with tama-kit bootstrap --resume <operation-id> before env init issues environment files`;
       }
     } catch {
-      return null;
+      warnings.push(
+        `${relativePath} could not be read; remaining generation history was still inspected`,
+      );
     }
   }
-  return null;
+  return { blocker, warnings };
 }
 
 const DETECTED_ISSUANCE_BLOCKER =

@@ -126,8 +126,24 @@ export function associateTamaDatabase(input: {
       add(dependency, "Tama service dependency");
     }
   }
-  if (input.databaseHost !== undefined && input.model.services[input.databaseHost]) {
-    add(input.databaseHost, "DATABASE_URL host");
+  if (input.databaseHost !== undefined) {
+    const effective = withData.get(input.databaseHost);
+    if (!effective) {
+      // An explicit external or non-mounted host is the selected database.
+      // Stale companion volumes must not be reported as verified-absent.
+      return {
+        kind: "none",
+        detail: `the effective database host is not a local PostgreSQL data service; local volumes were not treated as its persistence`,
+      };
+    }
+    const disagreeing = [...evidenced.keys()].filter((name) => name !== input.databaseHost);
+    if (disagreeing.length > 0) {
+      return {
+        kind: "ambiguous",
+        detail: `the effective database host ${input.databaseHost} disagrees with other associated databases (${disagreeing.join(", ")}); refusing to guess`,
+      };
+    }
+    return { kind: "local", sources: effective };
   }
   const names = [...evidenced.keys()];
   if (names.length === 1) {
@@ -218,74 +234,80 @@ export function inspectPersistence(options: {
       return { status: "unavailable", detail: "a Docker persistence probe failed" };
     }
   };
-  const unknown = (detail: string): PersistenceObservation => ({
-    status: "unknown",
-    detail,
-    checked,
-  });
-  if (probe(["version"]).status !== "ok") {
-    return unknown("the Docker daemon is unavailable, so local persistence was not verified");
-  }
-  let volumeUnverified = false;
-  for (const volume of options.sources.volumes) {
-    // Existing volumes are conservatively treated as potentially used.
-    // Every candidate name must be confirmed missing before continuing.
-    for (const name of volume.names) {
-      const result = probe(["volume", "inspect", name]);
-      if (result.status === "ok") {
-        return {
-          status: "detected",
-          detail: `local volume ${name} exists; it may hold database state`,
-          checked,
-        };
-      }
-      if (result.status === "unavailable") volumeUnverified = true;
-    }
-  }
-  if (volumeUnverified) {
-    return unknown("a volume probe failed, so absence of local database state was not verified");
-  }
-  const containers = probe([
-    "ps",
-    "-a",
-    "--filter",
-    `label=com.docker.compose.project=${options.project ?? ""}`,
-    "--filter",
-    `label=com.docker.compose.service=${options.sources.service}`,
-    "--format",
-    "{{.Names}}",
-  ]);
-  if (containers.status === "unavailable") {
-    return unknown("a container probe failed, so absence of local database state was not verified");
-  }
-  if (
-    containers.status === "ok" &&
-    containers.output
-      .trim()
-      .split(/\r?\n/u)
-      .some((line) => line.trim())
-  ) {
-    return {
-      status: "detected",
-      detail: `a container for the ${options.sources.service} service exists (running or stopped); its writable layer may hold database state`,
-      checked,
-    };
-  }
+  // Filesystem binds are independent of the daemon. Collect every
+  // observation before choosing a status so one failed probe cannot hide
+  // data that was successfully observed elsewhere.
+  const observations: { status: "detected" | "unknown"; detail: string }[] = [];
   for (const bind of options.sources.binds) {
     const path = isAbsolute(bind) ? bind : resolve(options.root, bind);
     checked.push(path);
     const state = bindState(path);
-    if (state === "unreadable") {
-      return unknown(`bind-mounted database directory ${path} could not be read`);
-    }
     if (state === "data") {
-      return {
+      observations.push({
         status: "detected",
         detail: `bind-mounted database directory ${path} contains data`,
-        checked,
-      };
+      });
+    } else if (state === "unreadable") {
+      observations.push({
+        status: "unknown",
+        detail: `bind-mounted database directory ${path} could not be read`,
+      });
     }
   }
+  if (probe(["version"]).status !== "ok") {
+    observations.push({
+      status: "unknown",
+      detail: "the Docker daemon is unavailable, so named volumes and containers were not verified",
+    });
+  } else {
+    for (const volume of options.sources.volumes) {
+      for (const name of volume.names) {
+        const result = probe(["volume", "inspect", name]);
+        if (result.status === "ok") {
+          observations.push({
+            status: "detected",
+            detail: `local volume ${name} exists; it may hold database state`,
+          });
+        } else if (result.status === "unavailable") {
+          observations.push({
+            status: "unknown",
+            detail: `a volume probe failed for ${name}, so its absence was not verified`,
+          });
+        }
+      }
+    }
+    const containers = probe([
+      "ps",
+      "-a",
+      "--filter",
+      `label=com.docker.compose.project=${options.project ?? ""}`,
+      "--filter",
+      `label=com.docker.compose.service=${options.sources.service}`,
+      "--format",
+      "{{.Names}}",
+    ]);
+    if (containers.status === "unavailable") {
+      observations.push({
+        status: "unknown",
+        detail: "a container probe failed, so absence of local database state was not verified",
+      });
+    } else if (
+      containers.status === "ok" &&
+      containers.output
+        .trim()
+        .split(/\r?\n/u)
+        .some((line) => line.trim())
+    ) {
+      observations.push({
+        status: "detected",
+        detail: `a container for the ${options.sources.service} service exists (running or stopped); its writable layer may hold database state`,
+      });
+    }
+  }
+  const detected = observations.find((observation) => observation.status === "detected");
+  if (detected) return { status: "detected", detail: detected.detail, checked };
+  const unknown = observations.find((observation) => observation.status === "unknown");
+  if (unknown) return { status: "unknown", detail: unknown.detail, checked };
   return {
     status: "absent",
     detail: "no local PostgreSQL volume, container, or bind data was found",

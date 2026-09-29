@@ -103,6 +103,8 @@ export type EnvironmentInitResult = {
   };
   changes: { action: "create"; relative: string; sensitive: true }[];
   blockers: string[];
+  /** Malformed optional history that did not hide another receipt. */
+  warnings: string[];
   nextActions: string[];
 };
 
@@ -274,37 +276,71 @@ const SAFE_PUBLIC_TOKEN = /^[A-Za-z0-9._~-]+$/u;
  */
 export function resolvePublicIdentity(input: {
   exampleValues: Map<string, string> | null;
+  /** Literal inline environment from the selected Tama service. It overrides the example. */
+  inlineValues?: Map<string, string> | null;
   publishedPort: number | null;
   databaseService: string | null;
   containerPort: number;
-}): { identity: PublicRuntimeIdentity | null; issues: string[] } {
+}): {
+  identity: PublicRuntimeIdentity | null;
+  issues: string[];
+  effectiveDatabaseHost: string | null;
+} {
   const issues: string[] = [];
   const example = input.exampleValues;
+  const inline = input.inlineValues ?? new Map<string, string>();
   if (example === null) {
     issues.push(
       "the project example is missing or unreadable, so public port, origin, and database host cannot be preserved",
     );
-    return { identity: null, issues };
+    return {
+      identity: null,
+      issues,
+      effectiveDatabaseHost: databaseHostOf(inline.get("DATABASE_URL")),
+    };
   }
   const examplePort = tcpPort(example.get("TAMA_PORT"));
+  const inlinePort = tcpPort(inline.get("TAMA_PORT"));
   if (example.get("TAMA_PORT") !== undefined && examplePort === null) {
     issues.push("the project example has an invalid TAMA_PORT");
+  }
+  if (inline.get("TAMA_PORT") !== undefined && inlinePort === null) {
+    issues.push("the selected Compose configuration has an invalid TAMA_PORT");
+  }
+  if (inlinePort !== null && examplePort !== null && inlinePort !== examplePort) {
+    issues.push("the selected Compose TAMA_PORT does not match the project example");
   }
   if (examplePort !== null && input.publishedPort !== null && examplePort !== input.publishedPort) {
     issues.push("the project example TAMA_PORT does not match the published Compose port");
   }
-  const port = examplePort ?? input.publishedPort;
+  if (inlinePort !== null && input.publishedPort !== null && inlinePort !== input.publishedPort) {
+    issues.push("the selected Compose TAMA_PORT does not match the published Compose port");
+  }
+  const port = inlinePort ?? examplePort ?? input.publishedPort;
   if (port === null)
     issues.push("the public port is not declared by the project example or Compose");
-  const phxHost = example.get("PHX_HOST") ?? "";
+  const exampleHostName = example.get("PHX_HOST") ?? "";
+  const inlineHostName = inline.get("PHX_HOST");
+  if (inlineHostName !== undefined && inlineHostName !== exampleHostName) {
+    issues.push("the selected Compose PHX_HOST does not match the project example");
+  }
+  const phxHost = inlineHostName || exampleHostName;
   if (!SAFE_PUBLIC_TOKEN.test(phxHost))
     issues.push("the project example PHX_HOST is missing or unsafe to preserve");
   const exampleHost = databaseHostOf(example.get("DATABASE_URL"));
+  const inlineHost = databaseHostOf(inline.get("DATABASE_URL"));
   if (example.get("DATABASE_URL") && exampleHost === null) {
     issues.push("the project example DATABASE_URL does not name a database host");
   }
+  if (inline.get("DATABASE_URL") && inlineHost === null) {
+    issues.push("the selected Compose DATABASE_URL does not name a database host");
+  }
+  if (inlineHost !== null && exampleHost !== null && inlineHost !== exampleHost) {
+    issues.push("the selected Compose DATABASE_URL host does not match the project example");
+  }
   if (
     exampleHost !== null &&
+    inlineHost === null &&
     input.databaseService !== null &&
     exampleHost !== input.databaseService
   ) {
@@ -312,7 +348,7 @@ export function resolvePublicIdentity(input: {
       "the project example DATABASE_URL host does not match the associated Compose database service",
     );
   }
-  const databaseHost = exampleHost ?? input.databaseService;
+  const databaseHost = inlineHost ?? exampleHost ?? input.databaseService;
   if (databaseHost === null) {
     issues.push("the current database host is not declared by the project example or Compose");
   } else if (!SAFE_PUBLIC_TOKEN.test(databaseHost)) {
@@ -328,10 +364,27 @@ export function resolvePublicIdentity(input: {
     issues.push("the project example does not declare a preservable POSTGRES_DB");
   }
   const origin = phxHost && port !== null ? `http://${phxHost}:${port}` : "";
-  const issuer = example.get("TAMA_OAUTH_ISSUER") ?? "";
-  const baseUrl = example.get("TAMA_BASE_URL") ?? "";
-  const resource = example.get("TAMA_MCP_RESOURCE") ?? "";
-  const allowedOrigin = example.get("TAMA_MCP_ALLOWED_ORIGINS") ?? "";
+  const issuer = inline.get("TAMA_OAUTH_ISSUER") || example.get("TAMA_OAUTH_ISSUER") || "";
+  const baseUrl = inline.get("TAMA_BASE_URL") || example.get("TAMA_BASE_URL") || "";
+  const resource = inline.get("TAMA_MCP_RESOURCE") || example.get("TAMA_MCP_RESOURCE") || "";
+  const allowedOrigin =
+    inline.get("TAMA_MCP_ALLOWED_ORIGINS") || example.get("TAMA_MCP_ALLOWED_ORIGINS") || "";
+  for (const name of [
+    "TAMA_OAUTH_ISSUER",
+    "TAMA_BASE_URL",
+    "TAMA_MCP_RESOURCE",
+    "TAMA_MCP_ALLOWED_ORIGINS",
+  ] as const) {
+    const inlineValue = inline.get(name);
+    const exampleValue = example.get(name);
+    if (
+      inlineValue !== undefined &&
+      exampleValue !== undefined &&
+      !samePublicValue(name, inlineValue, exampleValue)
+    ) {
+      issues.push(`the selected Compose ${name} does not match the project example`);
+    }
+  }
   if (origin && issuer && issuer !== origin) {
     issues.push("the project example TAMA_OAUTH_ISSUER does not match its PHX_HOST and TAMA_PORT");
   }
@@ -344,7 +397,9 @@ export function resolvePublicIdentity(input: {
   if (!issuer || !baseUrl || !resource || !allowedOrigin) {
     issues.push("the project example is missing public origin settings");
   }
-  if (issues.length > 0 || port === null || !databaseHost) return { identity: null, issues };
+  if (issues.length > 0 || port === null || !databaseHost) {
+    return { identity: null, issues, effectiveDatabaseHost: databaseHost };
+  }
   return {
     identity: {
       port,
@@ -359,7 +414,27 @@ export function resolvePublicIdentity(input: {
       allowedOrigin: allowedOrigin || origin,
     },
     issues,
+    effectiveDatabaseHost: databaseHost,
   };
+}
+
+function samePublicValue(name: string, left: string, right: string): boolean {
+  if (name === "TAMA_MCP_ALLOWED_ORIGINS") return sameOriginList(left, right);
+  return left === right;
+}
+
+function originList(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0)
+    .sort();
+}
+
+function sameOriginList(left: string | undefined, right: string | undefined): boolean {
+  const a = originList(left);
+  const b = originList(right);
+  return a.length === b.length && a.every((origin, index) => origin === b[index]);
 }
 
 /**
@@ -473,11 +548,7 @@ function publicSettingsDisagree(
     ["TAMA_MCP_RESOURCE", identity.resource],
   ];
   if (comparisons.some(([name, expected]) => values.get(name) !== expected)) return true;
-  const origins = values
-    .get("TAMA_MCP_ALLOWED_ORIGINS")
-    ?.split(",")
-    .map((origin) => origin.trim());
-  return !origins?.includes(identity.allowedOrigin);
+  return !sameOriginList(values.get("TAMA_MCP_ALLOWED_ORIGINS"), identity.allowedOrigin);
 }
 
 /** Published host port for the container's Tama listen port, if declared. */
