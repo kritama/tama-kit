@@ -301,6 +301,40 @@ test("env help and unknown subcommands are usage errors without writes", async (
   assert.deepEqual(snapshot(root), before);
 });
 
+test("env usage failures honor the JSON envelope before inspecting or writing a project", async () => {
+  const root = temporaryDirectory("tama-env-usage-");
+  const before = snapshot(root);
+  const cases = [
+    { args: ["rotate"], message: /unknown env command/u },
+    { args: ["init", "--bogus"], message: /Unknown option/u },
+    { args: ["doctor", "--bogus"], message: /Unknown option/u },
+    { args: ["init", "--service"], message: /argument/u },
+    { args: ["init", "first", "second"], message: /expected at most one project path/u },
+    { args: ["doctor", "first", "second"], message: /expected at most one project path/u },
+  ];
+  for (const { args, message } of cases) {
+    const human = await command(["env", ...args], root);
+    assert.equal(human.exitCode, 2);
+    assert.equal(human.stdout, "");
+    assert.match(human.stderr, message);
+    const [subcommand, ...options] = args;
+    for (const argv of [
+      [subcommand, "--json", ...options],
+      [subcommand, ...options, "--json"],
+    ]) {
+      const result = await command(["env", ...argv], root);
+      assert.equal(result.exitCode, 2);
+      assert.equal(result.stderr, "");
+      const document = JSON.parse(result.stdout);
+      assert.equal(document.ok, false);
+      assert.equal(document.error.category, "usage");
+      assert.equal(document.error.exitCode, 2);
+      assert.match(document.error.message, message);
+    }
+  }
+  assert.deepEqual(snapshot(root), before);
+});
+
 test("domain classification and preflight keep supported roles separate from application files", () => {
   assert.equal(classifyEnvironmentReference(".tama.env"), "core");
   assert.equal(classifyEnvironmentReference(".tama.postgres.env"), "postgres");

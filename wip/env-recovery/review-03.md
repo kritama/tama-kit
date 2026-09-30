@@ -4,14 +4,14 @@ Date: 2026-09-29
 
 Status: review 02 reproductions and review 03 findings G1–G2 resolved in the current worktree
 
-Original review target: `/Users/zacksiri/Development/_kritama/tama-kit`, branch
+Original review target: `kritama/tama-kit`, branch
 `feature/issue-41-env-recovery`, at
 `61d890c4326b282560e082a28102d3822ed67fcc`.
 
 Compared against
-[review 02](/Users/zacksiri/Development/_kritama/tama-kit/wip/env-recovery/review-02.md)
+[review 02](review-02.md)
 at `ad92a55716f4f645e7d30e98c070b5c03634dc3b` and the
-[implementation plan](/Users/zacksiri/Development/_kritama/tama-kit/wip/env-recovery.md).
+[implementation plan](../env-recovery.md).
 
 ## Outcome
 

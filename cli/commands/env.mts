@@ -48,44 +48,48 @@ export function envUsage() {
 
 export async function runEnv(argv: string[], io: CommandIO): Promise<ExitCode> {
   const [subcommand, ...args] = argv;
+  let json = args.includes("--json");
   if (!subcommand || subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
     io.stdout(envUsage());
     return EXIT_CODES.SUCCESS;
   }
-  if (subcommand !== "doctor" && subcommand !== "init") {
-    throw usageError(`unknown env command: ${subcommand}\n\n${envUsage()}`);
-  }
-  let parsed: ParsedEnv;
   try {
-    parsed = parseArgs({
-      args,
-      allowPositionals: true,
-      strict: true,
-      options: {
-        compose: { type: "string", multiple: true },
-        service: { type: "string" },
-        "env-file": { type: "string" },
-        contract: { type: "string" },
-        "provider-service": { type: "string" },
-        json: { type: "boolean" },
-        "non-interactive": { type: "boolean" },
-        "no-color": { type: "boolean" },
-        "dry-run": { type: "boolean" },
-        fresh: { type: "boolean" },
-        help: { type: "boolean", short: "h" },
-      },
-    });
-  } catch (error) {
-    throw usageError(`${error instanceof Error ? error.message : String(error)}\n\n${envUsage()}`);
-  }
-  if (parsed.values.help) {
-    io.stdout(envUsage());
-    return EXIT_CODES.SUCCESS;
-  }
-  if (parsed.positionals.length > 1) throw usageError("expected at most one project path");
-  const targetPath = typeof parsed.positionals[0] === "string" ? parsed.positionals[0] : undefined;
-  const json = Boolean(parsed.values.json);
-  try {
+    if (subcommand !== "doctor" && subcommand !== "init") {
+      throw usageError(`unknown env command: ${subcommand}\n\n${envUsage()}`);
+    }
+    let parsed: ParsedEnv;
+    try {
+      parsed = parseArgs({
+        args,
+        allowPositionals: true,
+        strict: true,
+        options: {
+          compose: { type: "string", multiple: true },
+          service: { type: "string" },
+          "env-file": { type: "string" },
+          contract: { type: "string" },
+          "provider-service": { type: "string" },
+          json: { type: "boolean" },
+          "non-interactive": { type: "boolean" },
+          "no-color": { type: "boolean" },
+          "dry-run": { type: "boolean" },
+          fresh: { type: "boolean" },
+          help: { type: "boolean", short: "h" },
+        },
+      });
+    } catch (error) {
+      throw usageError(
+        `${error instanceof Error ? error.message : String(error)}\n\n${envUsage()}`,
+      );
+    }
+    json = Boolean(parsed.values.json);
+    if (parsed.values.help) {
+      io.stdout(envUsage());
+      return EXIT_CODES.SUCCESS;
+    }
+    if (parsed.positionals.length > 1) throw usageError("expected at most one project path");
+    const targetPath =
+      typeof parsed.positionals[0] === "string" ? parsed.positionals[0] : undefined;
     const selection = {
       cwd: io.cwd,
       targetPath,

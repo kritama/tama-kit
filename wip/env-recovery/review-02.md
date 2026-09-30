@@ -4,16 +4,16 @@ Date: 2026-09-29
 
 Status: original reproductions corrected; two P1 and three P2 follow-ups remain
 
-Review target: `/Users/zacksiri/Development/_kritama/tama-kit`, branch
+Review target: `kritama/tama-kit`, branch
 `feature/issue-41-env-recovery`, at
 `ad92a55716f4f645e7d30e98c070b5c03634dc3b`.
 
 Reviewed fix commit: `ad92a55 Fix unsafe issuance and inaccurate environment recovery`.
 
 Compared against
-[review 01](/Users/zacksiri/Development/_kritama/tama-kit/wip/env-recovery/review-01.md)
+[review 01](review-01.md)
 at `67fdd4900b33fe40aea292dabe92cd76be21a0cb` and the
-[implementation plan](/Users/zacksiri/Development/_kritama/tama-kit/wip/env-recovery.md).
+[implementation plan](../env-recovery.md).
 
 ## Outcome
 
@@ -49,7 +49,7 @@ partial implementation and the remaining MCP App/docs/package/platform scope.
 
 ### F1 — P1: `--fresh` can bypass existing bind-mounted data during a Docker failure
 
-Source: [early unknown returns in persistence inspection](/Users/zacksiri/Development/_kritama/tama-kit/cli/bootstrap/persistence.mts:226).
+Source: [early unknown returns in persistence inspection](https://github.com/kritama/tama-kit/blob/ad92a55716f4f645e7d30e98c070b5c03634dc3b/cli/bootstrap/persistence.mts#L226).
 
 `inspectPersistence()` returns unknown immediately when Docker is unavailable,
 or when a volume/container probe fails. Bind paths are checked only afterward.
@@ -73,8 +73,8 @@ Every available positive observation must block issuance, including with `--fres
 
 ### F2 — P1: Effective inline database settings are ignored by issuance authorization
 
-Sources: [public identity inputs](/Users/zacksiri/Development/_kritama/tama-kit/cli/workflows/environment.mts:918)
-and [database association](/Users/zacksiri/Development/_kritama/tama-kit/cli/bootstrap/persistence.mts:121).
+Sources: [public identity inputs](https://github.com/kritama/tama-kit/blob/ad92a55716f4f645e7d30e98c070b5c03634dc3b/cli/workflows/environment.mts#L918)
+and [database association](https://github.com/kritama/tama-kit/blob/ad92a55716f4f645e7d30e98c070b5c03634dc3b/cli/bootstrap/persistence.mts#L121).
 
 Public identity comes from the example, port publication, and services loading
 the PostgreSQL companion. It does not incorporate the selected Tama service's
@@ -104,7 +104,7 @@ control the persistence decision; unresolved conflicts block writes.
 
 ### F3 — P2: Identical multi-origin settings are rejected by doctor
 
-Source: [allowed-origin comparison](/Users/zacksiri/Development/_kritama/tama-kit/cli/domain/environment.mts:476).
+Source: [allowed-origin comparison](https://github.com/kritama/tama-kit/blob/ad92a55716f4f645e7d30e98c070b5c03634dc3b/cli/domain/environment.mts#L476).
 
 The core origin setting is split into individual origins, but the example's
 whole comma-separated string is used as a single expected origin. `includes()`
@@ -124,8 +124,8 @@ missing required origins still produce an actionable failure.
 
 ### F4 — P2: Dry-run still skips validation performed only by the renderer
 
-Sources: [write-only rendering](/Users/zacksiri/Development/_kritama/tama-kit/cli/workflows/environment.mts:546)
-and [surviving credential validation](/Users/zacksiri/Development/_kritama/tama-kit/cli/workflows/environment.mts:782).
+Sources: [write-only rendering](https://github.com/kritama/tama-kit/blob/ad92a55716f4f645e7d30e98c070b5c03634dc3b/cli/workflows/environment.mts#L546)
+and [surviving credential validation](https://github.com/kritama/tama-kit/blob/ad92a55716f4f645e7d30e98c070b5c03634dc3b/cli/workflows/environment.mts#L782).
 
 Optional eligibility is corrected, but renderer validation still runs only during
 the write invocation. A successful preview therefore does not guarantee that the
@@ -145,7 +145,7 @@ Include surviving credential formats and missing supported-but-unrenderable role
 
 ### F5 — P2: A malformed first receipt suppresses a later incomplete-generation gate
 
-Source: [receipt error branch](/Users/zacksiri/Development/_kritama/tama-kit/cli/workflows/environment.mts:937).
+Source: [receipt error branch](https://github.com/kritama/tama-kit/blob/ad92a55716f4f645e7d30e98c070b5c03634dc3b/cli/workflows/environment.mts#L937).
 
 The receipt loop returns null when the first receipt cannot be parsed. It does
 not continue checking the second receipt slot. A malformed bootstrap receipt

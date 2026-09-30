@@ -6,14 +6,14 @@ Status: partial implementation; blocking safety defects and remaining acceptance
 
 Issue: [kritama/tama-kit #41](https://github.com/kritama/tama-kit/issues/41)
 
-Review target: `/Users/zacksiri/Development/_kritama/tama-kit`, branch
+Review target: `kritama/tama-kit`, branch
 `feature/issue-41-env-recovery`, at
 `67fdd4900b33fe40aea292dabe92cd76be21a0cb`.
 
 Baseline: `a3f3008722be7fc4e962f002ef4606ab467f849c`.
 
 Reviewed against the implementation plan in
-[env-recovery.md](/Users/zacksiri/Development/_kritama/tama-kit/wip/env-recovery.md).
+[env-recovery.md](../env-recovery.md).
 The findings below describe this snapshot; subsequent changes need verification
 before any finding is marked resolved.
 
@@ -48,7 +48,7 @@ inspection extraction, emitted-module ignores, env doctor/preflight, and env ini
 
 ### R1 — P1: Unknown persistence bypasses the fresh-runtime assertion
 
-Source: [no-local-data-source branch](/Users/zacksiri/Development/_kritama/tama-kit/cli/workflows/environment.mts:425).
+Source: [no-local-data-source branch](https://github.com/kritama/tama-kit/blob/67fdd4900b33fe40aea292dabe92cd76be21a0cb/cli/workflows/environment.mts#L425).
 
 When `findPostgresDataSources()` returns null, init sets persistence to `unknown`
 but never applies the `--fresh` requirement. That requirement exists only in the
@@ -73,9 +73,9 @@ even with `--fresh`.
 
 ### R2 — P1: Failed persistence probes can be reported as absent
 
-Sources: [Docker error handling](/Users/zacksiri/Development/_kritama/tama-kit/cli/bootstrap/persistence.mts:104),
-[bind inspection](/Users/zacksiri/Development/_kritama/tama-kit/cli/bootstrap/persistence.mts:79),
-and [transaction recheck](/Users/zacksiri/Development/_kritama/tama-kit/cli/workflows/environment.mts:495).
+Sources: [Docker error handling](https://github.com/kritama/tama-kit/blob/67fdd4900b33fe40aea292dabe92cd76be21a0cb/cli/bootstrap/persistence.mts#L104),
+[bind inspection](https://github.com/kritama/tama-kit/blob/67fdd4900b33fe40aea292dabe92cd76be21a0cb/cli/bootstrap/persistence.mts#L79),
+and [transaction recheck](https://github.com/kritama/tama-kit/blob/67fdd4900b33fe40aea292dabe92cd76be21a0cb/cli/workflows/environment.mts#L495).
 
 Except for a missing executable, the Docker helper converts failures to null.
 Volume probes interpret null as a missing volume, while a failed container probe
@@ -101,7 +101,7 @@ authorize issuance as verified-absent state.
 
 ### R3 — P1: Persistence inspection can select an unrelated database
 
-Source: [PostgreSQL data-source selection](/Users/zacksiri/Development/_kritama/tama-kit/cli/bootstrap/persistence.mts:47).
+Source: [PostgreSQL data-source selection](https://github.com/kritama/tama-kit/blob/67fdd4900b33fe40aea292dabe92cd76be21a0cb/cli/bootstrap/persistence.mts#L47).
 
 Discovery iterates every service and returns the first service with a PostgreSQL
 data mount. It does not establish which database belongs to the selected Tama
@@ -121,7 +121,7 @@ Tama database. Relevant existing state must block issuance regardless of orderin
 
 ### R4 — P2: Core recovery resets current public configuration
 
-Source: [default core rendering](/Users/zacksiri/Development/_kritama/tama-kit/cli/workflows/environment.mts:680).
+Source: [default core rendering](https://github.com/kritama/tama-kit/blob/67fdd4900b33fe40aea292dabe92cd76be21a0cb/cli/workflows/environment.mts#L680).
 
 The missing-core renderer always calls `newEnvironment(DEFAULTS.port, true)`.
 It does not read the project's public env example or reconstruct current public
@@ -142,7 +142,7 @@ files, and ordered overrides. Recovery must preserve their effective identities.
 
 ### R5 — P2: Doctor accepts empty and stale core env files as valid
 
-Source: [existing-file assessment](/Users/zacksiri/Development/_kritama/tama-kit/cli/workflows/environment.mts:121).
+Source: [existing-file assessment](https://github.com/kritama/tama-kit/blob/67fdd4900b33fe40aea292dabe92cd76be21a0cb/cli/workflows/environment.mts#L121).
 
 Assessment validates syntax and any present JWK pair, but does not require the
 core variables or validate all runtime secret formats, database URL consistency,
@@ -164,8 +164,8 @@ manual onboarding work rather than a recovery failure.
 
 ### R6 — P2: Required interpolated paths disappear from the success decision
 
-Sources: [init reference filtering](/Users/zacksiri/Development/_kritama/tama-kit/cli/workflows/environment.mts:630)
-and [doctor success calculation](/Users/zacksiri/Development/_kritama/tama-kit/cli/workflows/environment.mts:322).
+Sources: [init reference filtering](https://github.com/kritama/tama-kit/blob/67fdd4900b33fe40aea292dabe92cd76be21a0cb/cli/workflows/environment.mts#L630)
+and [doctor success calculation](https://github.com/kritama/tama-kit/blob/67fdd4900b33fe40aea292dabe92cd76be21a0cb/cli/workflows/environment.mts#L322).
 
 Both workflows filter out interpolated declarations. Doctor warns about them
 but does not include incomplete inspection in its success calculation. Init
@@ -185,7 +185,7 @@ Keep optional references informational, and cover native/fallback Compose behavi
 
 ### R7 — P2: Optional missing files make write behavior disagree with dry-run
 
-Source: [renderer missing-file selection](/Users/zacksiri/Development/_kritama/tama-kit/cli/workflows/environment.mts:667).
+Source: [renderer missing-file selection](https://github.com/kritama/tama-kit/blob/67fdd4900b33fe40aea292dabe92cd76be21a0cb/cli/workflows/environment.mts#L667).
 
 The workflow initially selects only missing required supported files, but the
 renderer recomputes its input from every missing reference. Optional application
@@ -206,9 +206,9 @@ while required recovery succeeds. Dry-run and write agree on eligibility/blocker
 
 ### R8 — P2: Selectors are not validated and subsequent commands lose selection
 
-Sources: [init selection handling](/Users/zacksiri/Development/_kritama/tama-kit/cli/workflows/environment.mts:363),
-[selection serialization](/Users/zacksiri/Development/_kritama/tama-kit/cli/workflows/environment.mts:575),
-and [command construction](/Users/zacksiri/Development/_kritama/tama-kit/cli/domain/environment.mts:179).
+Sources: [init selection handling](https://github.com/kritama/tama-kit/blob/67fdd4900b33fe40aea292dabe92cd76be21a0cb/cli/workflows/environment.mts#L363),
+[selection serialization](https://github.com/kritama/tama-kit/blob/67fdd4900b33fe40aea292dabe92cd76be21a0cb/cli/workflows/environment.mts#L575),
+and [command construction](https://github.com/kritama/tama-kit/blob/67fdd4900b33fe40aea292dabe92cd76be21a0cb/cli/domain/environment.mts#L179).
 
 The env workflows accept and echo service/env-file selectors without validating
 that the selected service exists or loads the selected file. Reproduced with
