@@ -6,16 +6,19 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import { parse, stringify } from "yaml";
 import {
   inspectComposeDeclarations,
   loadComposeServiceEnvironment,
 } from "../../cli/bootstrap/compose-inspection.mjs";
+import { inspectCurrentConfiguration } from "../../cli/bootstrap/current-config.mjs";
 import { validateMcpAppContract } from "../../cli/bootstrap/mcp-app-contract.mjs";
 import { createBootstrapPlan } from "../../cli/bootstrap/plan.mjs";
 import {
@@ -30,7 +33,9 @@ import {
 import { run } from "../../cli/index.mjs";
 import { parseEnvironment } from "../../cli/shared/environment.mjs";
 import { contentDigest } from "../../cli/shared/files.mjs";
+import { validateOAuthPrivateJwk } from "../../cli/shared/oauth-key.mjs";
 import { applyOperations } from "../../cli/shared/write.mjs";
+import { planMcpAppAddition } from "../../cli/workflows/generate-mcp-app.mjs";
 import { memoveeContract, planWithMcp, preparedFor, writeContract } from "../helpers/mcp-app.mjs";
 import { temporaryDirectory } from "../helpers/temporary.mjs";
 
@@ -603,7 +608,7 @@ test("env init blocks on unsupported or unrepairable required files without writ
   assert.match(invalidDoc.blockers.join("\n"), /repair tama\/.tama\.postgres\.env/u);
 });
 
-test("env init refuses MCP App recovery until the MCP recovery renderer exists", async () => {
+test("env init requires a fresh assertion for an unobservable host provider", async () => {
   const { root } = mcpFixture();
   rmSync(join(root, "tama/.memovee.integration.env"));
   const before = snapshot(root);
@@ -611,11 +616,8 @@ test("env init refuses MCP App recovery until the MCP recovery renderer exists",
   const document = JSON.parse(result.stdout);
   assert.equal(result.exitCode, 4);
   assert.equal(document.ok, false);
-  assert.match(
-    document.blockers.join("\n"),
-    /requires reissued provider and introspection signing material/u,
-  );
-  assert.match(document.blockers.join("\n"), /generate mcp-app/u);
+  assert.match(document.blockers.join("\n"), /persistence could not be verified/u);
+  assert.match(document.blockers.join("\n"), /--fresh/u);
   assert.deepEqual(snapshot(root), before);
   const provider = document.files.find((file) => file.source === "contract");
   assert.equal(provider.relative, "tama/.memovee.integration.env");
@@ -1655,4 +1657,617 @@ test("URL-normalized database names are refused consistently before issuance", a
     assert.deepEqual(result.changes, []);
     assert.equal(existsSync(join(root, "tama/.tama.env")), false);
   }
+});
+
+function envValues(root, path) {
+  return parseEnvironment(readFileSync(join(root, path), "utf8"), path);
+}
+
+function assertSigning(values, key, kid) {
+  assert.doesNotThrow(() => validateOAuthPrivateJwk(values.get(key), values.get(kid), key, kid));
+  return JSON.parse(values.get(key)).n;
+}
+
+function recovery(root, options = {}, execute = fakeDocker().execute) {
+  return runEnvironmentInit({ cwd: root, dryRun: false, fresh: true, ...options }, { execute });
+}
+
+function additionFixture(https = false) {
+  const root = standardRoot();
+  const selection = { cwd: root };
+  const current = inspectCurrentConfiguration(selection);
+  const prepared = preparedFor(root);
+  if (https) prepared.allowedOrigins = ["https://app.localhost"];
+  const addition = planMcpAppAddition(
+    current,
+    {
+      cwd: root,
+      image: "ghcr.io/upmaru/tama:0.13.2-server",
+      selection,
+      ...(https
+        ? { localDomain: "app.localhost" }
+        : { providerOrigin: "http://host.docker.internal:4100" }),
+    },
+    prepared,
+    { id: "env-recovery-test" },
+    true,
+  );
+  // Environment recovery does not create or inspect CA/certificates.
+  applyOperations(
+    addition.plan.operations.filter((operation) => !operation.path.includes("/mcp-app-tls/")),
+  );
+  return { root, composeFiles: ["compose.yaml", "tama/compose.mcp-app.yaml"] };
+}
+
+function composeProvider(root, { external = false, binds = false } = {}) {
+  const path = join(root, "compose.yaml");
+  const model = parse(readFileSync(path, "utf8"));
+  model.services ??= {};
+  model.volumes ??= {};
+  model.services.provider = {
+    image: "example/provider:dev",
+    env_file: ["./tama/.memovee.integration.env"],
+    environment: {
+      DATABASE_URL: `ecto://provider:local@${external ? "external.example" : "provider-db"}/provider`,
+    },
+    depends_on: { "provider-db": { condition: "service_started" } },
+    ...(binds ? { volumes: ["./provider-data:/data"] } : {}),
+  };
+  model.services["provider-db"] = {
+    image: "postgres:16",
+    volumes: ["provider-data:/var/lib/postgresql/data"],
+  };
+  model.volumes["provider-data"] = {};
+  writeFileSync(path, stringify(model));
+}
+
+test("MCP recovery restores only a host provider fragment, preserves keys and reports prepared activation", async () => {
+  const { root } = mcpFixture();
+  const oldProvider = envValues(root, "tama/.memovee.integration.env");
+  rmSync(join(root, "tama/.memovee.integration.env"));
+  const before = snapshot(root);
+  const preview = await recovery(root, { dryRun: true });
+  assert.equal(preview.ok, true, preview.blockers.join("\n"));
+  assert.deepEqual(snapshot(root), before);
+  const result = await recovery(root);
+  assert.equal(result.ok, true, result.blockers.join("\n"));
+  assert.deepEqual(
+    result.changes.map((change) => change.relative),
+    ["tama/.memovee.integration.env"],
+  );
+  assert.equal(result.persistence.freshAsserted, true);
+  for (const entry of before)
+    assert.deepEqual(
+      snapshot(root).find((current) => current[0] === entry[0]),
+      entry,
+    );
+  const provider = envValues(root, "tama/.memovee.integration.env");
+  assert.equal(provider.get("MEMOVEE_TAMA_MCP_APP_MODE"), "prepared");
+  assert.notEqual(
+    provider.get("MEMOVEE_OAUTH_PRIVATE_SIGNING_KEY"),
+    oldProvider.get("MEMOVEE_OAUTH_PRIVATE_SIGNING_KEY"),
+  );
+  assertSigning(provider, "MEMOVEE_OAUTH_PRIVATE_SIGNING_KEY", "MEMOVEE_OAUTH_SIGNING_KEY_ID");
+  assert.equal(statSync(join(root, "tama/.memovee.integration.env")).mode & 0o777, 0o600);
+  assert.match(result.nextActions.join("\n"), /activate/u);
+  assert.ok(!JSON.stringify(result).includes(provider.get("MEMOVEE_OAUTH_PRIVATE_SIGNING_KEY")));
+  assert.equal(
+    (await runEnvironmentDoctor({ cwd: root }, { execute: fakeDocker().execute })).ok,
+    true,
+  );
+  const again = await recovery(root, { fresh: false });
+  assert.equal(again.ok, true, again.blockers.join("\n"));
+  assert.deepEqual(again.changes, []);
+});
+
+for (const https of [false, true]) {
+  test(`MCP recovery restores combined ${https ? "HTTPS" : "HTTP"} private files with independent signing keys`, async () => {
+    const fixture = https
+      ? (() => {
+          const root = temporaryDirectory("tama-env-https-");
+          const prepared = preparedFor(root);
+          prepared.allowedOrigins = ["https://app.localhost"];
+          applyOperations(planWithMcp(root, prepared, { localDomain: "app.localhost" }).operations);
+          return { root };
+        })()
+      : mcpFixture();
+    const { root } = fixture;
+    for (const path of [
+      "tama/.tama.env",
+      "tama/.tama.postgres.env",
+      "tama/.memovee.integration.env",
+    ])
+      rmSync(join(root, path));
+    const before = snapshot(root);
+    const result = await recovery(root);
+    assert.equal(result.ok, true, result.blockers.join("\n"));
+    assert.equal(result.changes.length, 3);
+    for (const entry of before)
+      assert.deepEqual(
+        snapshot(root).find((current) => current[0] === entry[0]),
+        entry,
+      );
+    const tama = envValues(root, "tama/.tama.env");
+    const provider = envValues(root, "tama/.memovee.integration.env");
+    const moduli = [
+      assertSigning(tama, "TAMA_OAUTH_PRIVATE_JWK", "TAMA_OAUTH_PRIVATE_JWK_ID"),
+      assertSigning(
+        tama,
+        "TAMA_MCP_APP_INTROSPECTION_PRIVATE_KEY",
+        "TAMA_MCP_APP_INTROSPECTION_SIGNING_KEY_ID",
+      ),
+      assertSigning(provider, "MEMOVEE_OAUTH_PRIVATE_SIGNING_KEY", "MEMOVEE_OAUTH_SIGNING_KEY_ID"),
+    ];
+    assert.equal(new Set(moduli).size, 3);
+    assert.equal(tama.get("TAMA_MCP_APP_MODE"), "prepared");
+    assert.equal(tama.get("TAMA_MCP_APP_INTROSPECTION_PUBLIC_KEYS"), "[]");
+    assert.equal(provider.get("MEMOVEE_OAUTH_PUBLIC_SIGNING_KEYS"), "[]");
+    assert.equal(
+      tama.get("POSTGRES_PASSWORD"),
+      envValues(root, "tama/.tama.postgres.env").get("POSTGRES_PASSWORD"),
+    );
+    for (const change of result.changes)
+      assert.equal(statSync(join(root, change.relative)).mode & 0o777, 0o600);
+    if (https) assert.equal(tama.get("TAMA_BASE_URL"), "https://tama.app.localhost");
+    const doctor = await runEnvironmentDoctor({ cwd: root }, { execute: fakeDocker().execute });
+    assert.equal(doctor.ok, true, JSON.stringify(doctor));
+  });
+
+  test(`MCP recovery restores additive ${https ? "HTTPS" : "HTTP"} fragments without touching base core or TLS`, async () => {
+    const { root, composeFiles } = additionFixture(https);
+    for (const path of ["tama/.mcp-app.env", "tama/.memovee.integration.env"])
+      rmSync(join(root, path));
+    const before = snapshot(root);
+    const result = await recovery(root, { composeFiles });
+    assert.equal(result.ok, true, result.blockers.join("\n"));
+    assert.equal(result.changes.length, 2);
+    for (const entry of before)
+      assert.deepEqual(
+        snapshot(root).find((current) => current[0] === entry[0]),
+        entry,
+      );
+    assert.equal(existsSync(join(root, "tama/mcp-app-tls")), false);
+    const fragment = envValues(root, "tama/.mcp-app.env");
+    assert.equal(fragment.get("TAMA_MCP_APP_MODE"), "prepared");
+    if (https) {
+      assert.equal(fragment.get("TAMA_BASE_URL"), "https://tama.app.localhost");
+      assert.equal(fragment.get("TAMA_PORT"), "4000");
+      assert.match(result.nextActions.join("\n"), /mkcert/u);
+    }
+    const doctor = await runEnvironmentDoctor(
+      { cwd: root, composeFiles },
+      { execute: fakeDocker().execute },
+    );
+    assert.equal(doctor.ok, true, JSON.stringify(doctor));
+  });
+}
+
+test("MCP recovery refuses an older additive HTTP project when both fragments lack public examples", async () => {
+  const { root, composeFiles } = additionFixture();
+  for (const path of [
+    "tama/.mcp-app.env",
+    "tama/.memovee.integration.env",
+    "tama/.mcp-app.env.example",
+    "tama/.memovee.integration.env.example",
+  ])
+    rmSync(join(root, path));
+  const before = snapshot(root);
+  const result = await recovery(root, { composeFiles });
+  assert.equal(result.ok, false);
+  assert.match(result.blockers.join("\n"), /public MCP App .* is missing/u);
+  assert.deepEqual(snapshot(root), before);
+});
+
+for (const mode of ["enabled", "disabled"]) {
+  for (const lost of ["tama/.tama.env", "tama/.memovee.integration.env"]) {
+    test(`MCP recovery preserves and refuses a surviving ${mode} peer when ${lost} is lost`, async () => {
+      const { root } = mcpFixture();
+      const peer = lost === "tama/.tama.env" ? "tama/.memovee.integration.env" : "tama/.tama.env";
+      const path = join(root, peer);
+      writeFileSync(
+        path,
+        readFileSync(path, "utf8").replace(/(TAMA_MCP_APP_MODE=)prepared/u, `$1${mode}`),
+      );
+      rmSync(join(root, lost));
+      const before = snapshot(root);
+      const result = await recovery(root);
+      assert.equal(result.ok, false);
+      assert.match(result.blockers.join("\n"), /mode.*prepared/u);
+      assert.deepEqual(snapshot(root), before);
+    });
+  }
+}
+
+test("MCP recovery rejects effective mode and signing overrides before issuing keys", async () => {
+  for (const variables of [
+    { TAMA_MCP_APP_MODE: "enabled" },
+    { MEMOVEE_OAUTH_PRIVATE_SIGNING_KEY: "surviving-key" },
+  ]) {
+    const { root } = mcpFixture();
+    composeProvider(root);
+    const path = join(root, "compose.yaml");
+    const model = parse(readFileSync(path, "utf8"));
+    const basePath = join(root, "tama/compose.yaml");
+    const base = parse(readFileSync(basePath, "utf8"));
+    const service = Object.keys(variables)[0].startsWith("TAMA_") ? "tama" : "provider";
+    const target = service === "tama" ? base : model;
+    target.services[service].environment = {
+      ...target.services[service].environment,
+      ...variables,
+    };
+    writeFileSync(service === "tama" ? basePath : path, stringify(target));
+    rmSync(join(root, "tama/.memovee.integration.env"));
+    const before = snapshot(root);
+    const result = await recovery(root);
+    assert.equal(result.ok, false);
+    assert.match(result.blockers.join("\n"), /mode|shadow/u);
+    assert.deepEqual(snapshot(root), before);
+  }
+});
+
+test("MCP recovery verifies absence of both Compose databases without a fresh assertion", async () => {
+  const { root } = mcpFixture();
+  composeProvider(root);
+  rmSync(join(root, "tama/.memovee.integration.env"));
+  const result = await recovery(root, { fresh: false });
+  assert.equal(result.ok, true, result.blockers.join("\n"));
+  assert.equal(result.persistence.status, "absent");
+  assert.ok(result.persistence.checked.some((name) => name.includes("provider-data")));
+  assert.equal(
+    result.files.filter((file) => file.relative === "tama/.memovee.integration.env").length,
+    1,
+  );
+});
+
+for (const evidence of ["database-volume", "provider-bind", "stopped-container"]) {
+  test(`MCP recovery refuses ${evidence} even with fresh and an external provider database`, async () => {
+    const { root } = mcpFixture();
+    composeProvider(root, { external: true, binds: evidence === "provider-bind" });
+    rmSync(join(root, "tama/.memovee.integration.env"));
+    if (evidence === "provider-bind") {
+      mkdirSync(join(root, "provider-data"));
+      writeFileSync(join(root, "provider-data/state"), "persisted");
+    }
+    const docker = fakeDocker({
+      volumeExists: evidence === "database-volume",
+      volumeNames: ["provider-data"],
+    });
+    const execute = (command, args, options) => {
+      if (
+        evidence === "stopped-container" &&
+        args[0] === "ps" &&
+        args.includes("label=com.docker.compose.service=provider")
+      )
+        return "stopped-provider";
+      return docker.execute(command, args, options);
+    };
+    const before = snapshot(root);
+    const result = await recovery(root, {}, execute);
+    assert.equal(result.ok, false);
+    assert.equal(result.persistence.status, "detected");
+    assert.deepEqual(snapshot(root), before);
+  });
+}
+
+test("MCP recovery rolls back when provider persistence appears during the write", async () => {
+  const { root } = mcpFixture();
+  composeProvider(root);
+  const fragment = join(root, "tama/.memovee.integration.env");
+  rmSync(fragment);
+  const before = snapshot(root);
+  const docker = fakeDocker();
+  const execute = (command, args, options) => {
+    if (existsSync(fragment) && args[0] === "volume" && args[2] === "provider-data")
+      return '[{"Name":"provider-data"}]';
+    return docker.execute(command, args, options);
+  };
+  await assert.rejects(recovery(root, {}, execute), /persistence appeared/u);
+  assert.deepEqual(snapshot(root), before);
+});
+
+test("MCP recovery examples never publish private signing material or key ids", () => {
+  const { root } = mcpFixture();
+  const example = envValues(root, "tama/.memovee.integration.env.example");
+  assert.equal(example.get("MEMOVEE_OAUTH_PRIVATE_SIGNING_KEY"), "replace-me");
+  assert.equal(example.get("MEMOVEE_OAUTH_SIGNING_KEY_ID"), "replace-me");
+  assert.equal(
+    example.get("MEMOVEE_OAUTH_ISSUER"),
+    envValues(root, "tama/.memovee.integration.env").get("MEMOVEE_OAUTH_ISSUER"),
+  );
+  assert.ok(
+    !readFileSync(join(root, "tama/.memovee.integration.env.example"), "utf8").includes('"d":'),
+  );
+});
+
+test("MCP recovery follows current custom bindings, relocated provider files and renamed services", async () => {
+  const root = temporaryDirectory("tama-env-custom-");
+  const document = memoveeContract();
+  const bindings = Object.fromEntries(
+    Object.entries(document.bindings).map(([role, name]) => [
+      role,
+      name.replace("MEMOVEE_", "CUSTOM_"),
+    ]),
+  );
+  document.provider.environment_prefix = "CUSTOM";
+  document.provider.environment_file = "tama/private/.custom.integration.env";
+  document.bindings = bindings;
+  document.variables = Object.fromEntries(
+    Object.entries(document.variables).map(([name, descriptor]) => [
+      name.replace("MEMOVEE_", "CUSTOM_"),
+      {
+        ...descriptor,
+        ...(descriptor.same_origin_as ? { same_origin_as: bindings.resource } : {}),
+      },
+    ]),
+  );
+  document.environment_loading.loads = document.provider.environment_file;
+  const prepared = preparedFor(root, {
+    identity: {
+      name: "memovee",
+      environmentPrefix: "CUSTOM",
+      environmentFile: document.provider.environment_file,
+      source: "contract",
+    },
+    contractPath: writeContract(root, document),
+    contractDocument: validateMcpAppContract(document),
+  });
+  applyOperations(planWithMcp(root, prepared).operations);
+  const composePath = join(root, "tama/compose.yaml");
+  const model = parse(readFileSync(composePath, "utf8"));
+  model.services.runtime = model.services.tama;
+  delete model.services.tama;
+  model.services.database = model.services["tama-postgres"];
+  delete model.services["tama-postgres"];
+  model.services.runtime.depends_on.database = model.services.runtime.depends_on["tama-postgres"];
+  delete model.services.runtime.depends_on["tama-postgres"];
+  writeFileSync(composePath, stringify(model));
+  for (const path of ["tama/.tama.env", "tama/.tama.env.example"])
+    writeFileSync(
+      join(root, path),
+      readFileSync(join(root, path), "utf8").replaceAll("@tama-postgres/", "@database/"),
+    );
+  const contractPath = "tama/contracts/current.json";
+  renameSync(join(root, "tama/contracts/mcp-app-provider-v1.json"), join(root, contractPath));
+  rmSync(join(root, document.provider.environment_file));
+  const before = snapshot(root);
+  const result = await recovery(root, { service: "runtime", contractPath });
+  assert.equal(result.ok, true, result.blockers.join("\n"));
+  assert.deepEqual(
+    result.changes.map((change) => change.relative),
+    [document.provider.environment_file],
+  );
+  for (const entry of before)
+    assert.deepEqual(
+      snapshot(root).find((current) => current[0] === entry[0]),
+      entry,
+    );
+  const provider = envValues(root, document.provider.environment_file);
+  assert.equal(provider.get(bindings.mode), "prepared");
+  assertSigning(
+    provider,
+    bindings.access_token_private_signing_key,
+    bindings.access_token_signing_key_id,
+  );
+});
+
+for (const lost of ["tama/.mcp-app.env", "tama/.memovee.integration.env"]) {
+  test(`MCP recovery can use surviving additive HTTP public inputs when ${lost} is missing`, async () => {
+    const { root, composeFiles } = additionFixture();
+    for (const path of [lost, "tama/.mcp-app.env.example", "tama/.memovee.integration.env.example"])
+      rmSync(join(root, path));
+    // Provider fragments do not declare browser origins. Older projects must
+    // still supply that input when their Tama fragment is lost.
+    if (lost === "tama/.mcp-app.env")
+      writeFileSync(
+        join(root, "tama/.mcp-app.env.example"),
+        "TAMA_MCP_APP_ALLOWED_ORIGINS='http://127.0.0.1:3000'\n",
+      );
+    const result = await recovery(root, { composeFiles });
+    assert.equal(result.ok, true, result.blockers.join("\n"));
+    assert.deepEqual(
+      result.changes.map((change) => change.relative),
+      [lost],
+    );
+  });
+}
+
+test("MCP recovery refuses a missing contract rather than issuing standard-only keys", async () => {
+  const { root } = mcpFixture();
+  for (const path of ["tama/contracts/mcp-app-provider-v1.json", "tama/.tama.env"])
+    rmSync(join(root, path));
+  const before = snapshot(root);
+  const result = await recovery(root);
+  assert.equal(result.ok, false);
+  assert.match(result.blockers.join("\n"), /restore the contract/u);
+  assert.deepEqual(snapshot(root), before);
+});
+
+test("MCP recovery diagnoses missing public fields in surviving private files without repairing them", async () => {
+  const { root } = mcpFixture();
+  const path = join(root, "tama/.memovee.integration.env");
+  writeFileSync(
+    path,
+    readFileSync(path, "utf8").replace(/^MEMOVEE_OAUTH_SIGNING_ALGORITHM=.*\n/mu, ""),
+  );
+  const before = snapshot(root);
+  const doctor = await runEnvironmentDoctor({ cwd: root }, { execute: fakeDocker().execute });
+  assert.equal(doctor.ok, false);
+  const result = await recovery(root);
+  assert.equal(result.ok, false);
+  assert.match(result.blockers.join("\n"), /MEMOVEE_OAUTH_SIGNING_ALGORITHM is missing/u);
+  assert.deepEqual(snapshot(root), before);
+});
+
+test("MCP recovery rejects stale public examples and rolls back a late effective signing shadow", async () => {
+  const { root } = mcpFixture();
+  const providerPath = join(root, "tama/.memovee.integration.env");
+  rmSync(providerPath);
+  const examplePath = `${providerPath}.example`;
+  const original = readFileSync(examplePath, "utf8");
+  writeFileSync(
+    examplePath,
+    original.replace(/(MEMOVEE_OAUTH_ISSUER=).*$/mu, "$1'https://stale.example'"),
+  );
+  const before = snapshot(root);
+  const preview = await recovery(root, { dryRun: true });
+  assert.equal(preview.ok, false);
+  assert.match(preview.blockers.join("\n"), /inputs disagree/u);
+  assert.deepEqual(snapshot(root), before);
+  writeFileSync(examplePath, original);
+  // A native effective environment that changes after creation cannot retain the new fragment.
+  composeProvider(root);
+  const expected = snapshot(root);
+  const docker = fakeDocker();
+  const execute = (command, args, options) => {
+    const output = docker.execute(command, args, options);
+    if (existsSync(providerPath) && args[0] === "compose" && args.includes("-")) {
+      const model = JSON.parse(output);
+      if (model.services.runtime.environment.MEMOVEE_OAUTH_PRIVATE_SIGNING_KEY) {
+        model.services.runtime.environment.MEMOVEE_OAUTH_PRIVATE_SIGNING_KEY = "late-shadow";
+        return JSON.stringify(model);
+      }
+    }
+    return output;
+  };
+  await assert.rejects(recovery(root, {}, execute), /shadowed or inconsistent/u);
+  assert.deepEqual(snapshot(root), expected);
+});
+
+test("MCP public examples omit unrelated application secrets from an older surviving provider file", () => {
+  const { root, plan } = mcpFixture();
+  const fragment = join(root, "tama/.memovee.integration.env");
+  writeFileSync(
+    fragment,
+    `${readFileSync(fragment, "utf8")}APPLICATION_TOKEN=private-application-value\n`,
+  );
+  rmSync(`${fragment}.example`);
+  const prepared = preparedFor(root, {
+    contractPath: plan.mcpApp.contractPath,
+    contractDocument: validateMcpAppContract(memoveeContract()),
+  });
+  const next = planWithMcp(root, prepared);
+  const example = next.operations.find((operation) => operation.path === `${fragment}.example`);
+  assert.equal(example.action, "create");
+  assert.doesNotMatch(example.content, /APPLICATION_TOKEN|private-application-value|"d":/u);
+});
+
+test("older interrupted combined and additive generation can resume without unrecorded examples", () => {
+  const { root, plan } = mcpFixture();
+  rmSync(join(root, "tama/.memovee.integration.env.example"));
+  rmSync(join(root, "tama/README.md"));
+  const pending = ["tama/README.md"];
+  const resumed = createBootstrapPlan({
+    cwd: root,
+    targetPath: root,
+    image: "ghcr.io/upmaru/tama:0.13.2-server",
+    resumePending: pending,
+    mcpApp: { requested: true, activate: false, allowedOrigins: ["http://127.0.0.1:3000"] },
+    mcpAppPrepared: preparedFor(root, {
+      contractPath: plan.mcpApp.contractPath,
+      contractDocument: validateMcpAppContract(memoveeContract()),
+    }),
+  });
+  assert.ok(
+    !resumed.operations.some((operation) => operation.path.endsWith(".integration.env.example")),
+  );
+
+  const additiveRoot = standardRoot();
+  const selection = { cwd: additiveRoot };
+  const current = inspectCurrentConfiguration(selection);
+  const options = {
+    cwd: additiveRoot,
+    image: "ghcr.io/upmaru/tama:0.13.2-server",
+    selection,
+    providerOrigin: "http://host.docker.internal:4100",
+  };
+  const first = planMcpAppAddition(
+    current,
+    options,
+    preparedFor(additiveRoot),
+    { id: "old-generation" },
+    true,
+  );
+  const older = first.plan.operations.filter(
+    (operation) => !operation.path.endsWith(".env.example"),
+  );
+  applyOperations(older.filter((operation) => !operation.path.endsWith("MCP_APP.md")));
+  const again = planMcpAppAddition(
+    current,
+    options,
+    preparedFor(additiveRoot),
+    { id: "old-generation", pending: ["tama/MCP_APP.md"] },
+    true,
+  );
+  assert.ok(!again.plan.operations.some((operation) => operation.path.endsWith(".env.example")));
+  assert.deepEqual(
+    again.plan.operations
+      .filter((operation) => operation.action === "create")
+      .map((operation) => operation.path),
+    [join(additiveRoot, "tama/MCP_APP.md")],
+  );
+});
+
+test("MCP recovery refuses a changed included Compose declaration and rolls back new files", async () => {
+  const { root } = mcpFixture();
+  const fragment = join(root, "tama/.memovee.integration.env");
+  rmSync(fragment);
+  const compose = join(root, "tama/compose.yaml");
+  const original = readFileSync(compose, "utf8");
+  const docker = fakeDocker();
+  let changed = false;
+  const execute = (command, args, options) => {
+    if (!changed && existsSync(fragment) && args[0] === "compose") {
+      const model = parse(original);
+      model.services.tama.environment = { TAMA_MCP_APP_MODE: "enabled" };
+      writeFileSync(compose, stringify(model));
+      changed = true;
+    }
+    return docker.execute(command, args, options);
+  };
+  await assert.rejects(recovery(root, {}, execute), /Compose declarations changed/u);
+  assert.equal(existsSync(fragment), false);
+  assert.equal(changed, true);
+  assert.match(readFileSync(compose, "utf8"), /TAMA_MCP_APP_MODE: enabled/u);
+});
+
+test("MCP recovery still requires its contract when public examples use export assignments", async () => {
+  const { root } = mcpFixture();
+  const example = join(root, "tama/.tama.env.example");
+  writeFileSync(
+    example,
+    readFileSync(example, "utf8").replace(/^TAMA_MCP_APP_MODE=/mu, "export TAMA_MCP_APP_MODE="),
+  );
+  for (const path of ["tama/.tama.env", "tama/contracts/mcp-app-provider-v1.json"])
+    rmSync(join(root, path));
+  const before = snapshot(root);
+  const result = await recovery(root);
+  assert.equal(result.ok, false);
+  assert.match(result.blockers.join("\n"), /restore the contract/u);
+  assert.deepEqual(snapshot(root), before);
+});
+
+test("MCP derived-only recovery preserves enabled modes and succeeds with persisted data", async () => {
+  const { root } = mcpFixture();
+  for (const relative of ["tama/.tama.env", "tama/.memovee.integration.env"]) {
+    const path = join(root, relative);
+    writeFileSync(
+      path,
+      readFileSync(path, "utf8").replace(/(TAMA_MCP_APP_MODE=)prepared/u, "$1enabled"),
+    );
+  }
+  rmSync(join(root, "tama/.tama.postgres.env"));
+  const before = snapshot(root);
+  const result = await recovery(
+    root,
+    { fresh: false },
+    fakeDocker({ volumeExists: true, volumeNames: ["tama-postgres-data"] }).execute,
+  );
+  assert.equal(result.ok, true, result.blockers.join("\n"));
+  assert.equal(result.persistence.status, "not-required");
+  assert.equal(result.files.find((file) => file.created).issuance, "derived");
+  for (const entry of before)
+    assert.deepEqual(
+      snapshot(root).find((current) => current[0] === entry[0]),
+      entry,
+    );
 });

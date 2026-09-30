@@ -281,6 +281,7 @@ export function resolvePublicIdentity(input: {
   publishedPort: number | null;
   databaseService: string | null;
   containerPort: number;
+  publicOrigin?: string;
 }): {
   identity: PublicRuntimeIdentity | null;
   issues: string[];
@@ -363,8 +364,13 @@ export function resolvePublicIdentity(input: {
   if (!SAFE_PUBLIC_TOKEN.test(databaseName) || databaseName === "replace-me") {
     issues.push("the project example does not declare a preservable POSTGRES_DB");
   }
-  const origin = phxHost && port !== null ? `http://${phxHost}:${port}` : "";
   const issuer = inline.get("TAMA_OAUTH_ISSUER") || example.get("TAMA_OAUTH_ISSUER") || "";
+  const https = issuer.startsWith("https://");
+  const origin =
+    input.publicOrigin ??
+    (phxHost && port !== null
+      ? `${https ? "https" : "http"}://${phxHost}${https && port === 443 ? "" : `:${port}`}`
+      : "");
   const baseUrl = inline.get("TAMA_BASE_URL") || example.get("TAMA_BASE_URL") || "";
   const resource = inline.get("TAMA_MCP_RESOURCE") || example.get("TAMA_MCP_RESOURCE") || "";
   const allowedOrigin =

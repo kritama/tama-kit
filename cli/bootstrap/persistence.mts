@@ -79,6 +79,23 @@ export function postgresDataSources(
   return { service: serviceName, volumes, binds };
 }
 
+/** Known provider data mounts; code and TLS/configuration mounts are excluded. */
+export function providerDataSources(
+  model: ComposeModel,
+  serviceName: string,
+): PostgresDataSources | null {
+  const service = model.services[serviceName];
+  if (!service) return null;
+  return postgresDataSources(model, serviceName, {
+    ...service,
+    volumes: service.volumes
+      ?.filter((mount) =>
+        /^\/(?:var\/lib\/(?:postgres|mysql|mariadb)|data(?:\/|$))/u.test(mount.target),
+      )
+      .map((mount) => ({ ...mount, target: "/var/lib/postgresql/data" })),
+  });
+}
+
 /**
  * Locate PostgreSQL data mounts. Prefer {@link associateTamaDatabase}; this
  * returns the first match and must not authorize issuance by itself.

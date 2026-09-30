@@ -1,5 +1,6 @@
 // @ts-check
 
+import { existsSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { ownershipError, usageError } from "../errors.mjs";
 import { planRootCompose } from "./compose.mjs";
@@ -200,6 +201,10 @@ export function createBootstrapPlan(options) {
       manageFile: ownedFiles.plan,
       materializeKeys: options.materializeSecrets ?? true,
       localContractOperation: /** @type {FileOperation} */ (localContractOperation),
+      includeRecoveryExample:
+        !options.resumePending ||
+        options.resumePending.includes(`${mcpAppPrepared.identity.environmentFile}.example`) ||
+        existsSync(join(inspection.root, `${mcpAppPrepared.identity.environmentFile}.example`)),
     });
     mcpApp = result.plan;
     mcpAppEnvironment = result.environmentInput;

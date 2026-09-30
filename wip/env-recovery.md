@@ -1,14 +1,13 @@
 # Private environment recovery for issue #41
 
-Status: partial. Standard core/PostgreSQL doctor, preflight, and create-only
-init are implemented on `feature/issue-41-env-recovery`. Review 01 findings
-R1–R8 and review 02 findings F1–F5 are addressed in code with regressions.
-Review 03 findings G1–G2 are also addressed: recovery and doctor resolve all
-effective env-file/inline layers with native Compose, and recovered database
-URLs use validated, encoded credential components. Verification is recorded in
-[review 03](env-recovery/review-03.md).
-MCP App recovery, public docs, installed-package env coverage, and the
-platform matrix are still open. Issue #41 is not ready to close.
+Status: partial. Standard core/PostgreSQL recovery was merged in
+[PR #42](https://github.com/kritama/tama-kit/pull/42). Combined and additive
+MCP App HTTP/HTTPS environment recovery is implemented on
+`codex/issue-41-mcp-app-env-recovery`, including both-sided persistence checks,
+prepared-only new signing material, and public integration examples. See the
+[MCP App increment](env-recovery/mcp-app-increment.md) for scope and verification.
+Public recovery documentation, installed-package env acceptance coverage, and
+isolated runtime/platform fixtures remain open. Issue #41 is not ready to close.
 
 Inspected `kritama/tama-kit` develop at
 `a3f3008722be7fc4e962f002ef4606ab467f849c` on 2026-09-29, and
@@ -298,8 +297,8 @@ Acceptance checklist:
   unresolved interpolation prevents a healthy result.
 - [x] `env init` creates only missing supported files, preserving every existing
   file and keeping database credentials consistent across generated companions
-  (standard core/Postgres; MCP App recovery is refused with a diagnostic until
-  the MCP recovery renderer ships). Public port, origin, and database host come
+  across standard core/Postgres and combined/additive MCP App HTTP/HTTPS layouts.
+  Public port, origin, and database host come
   from the project example and effective Compose configuration, or issuance stops.
 - [x] Secret issuance is refused when relevant persisted data is detected, when
   the Tama database cannot be associated, or when a probe fails. Unknown
@@ -312,8 +311,9 @@ Acceptance checklist:
 - [x] `doctor` and `setup` identify missing files and suggest the appropriate env
   recovery command while retaining the caller's configuration selection. Required
   unresolved interpolation is named instead of guessed.
-- [ ] Standard, combined and additive MCP App layouts pass recovery regressions,
+- [x] Standard, combined and additive MCP App layouts pass recovery regressions,
   including partial loss, repeat invocations, dry-run and transactional failure.
-  Current behavior is an explicit refusal, not recovery.
+  New integration signing material requires prepared peers and safe persistence;
+  older layouts without enough public inputs get actionable blockers.
 - [ ] Public examples, CLI help, skills, package validation and isolated runtime
   checks are updated and pass the repository's supported platform matrix.
