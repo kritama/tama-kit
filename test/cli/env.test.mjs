@@ -399,6 +399,91 @@ function fakeDocker(options = {}) {
   return { execute, calls };
 }
 
+test("missing env files use native literal declarations when Compose 2.38 rejects the resolved render", async () => {
+  const root = standardRoot();
+  rmSync(join(root, "tama/.tama.env"));
+  rmSync(join(root, "tama/.tama.postgres.env"));
+  const docker = fakeDocker();
+  let fallbacks = 0;
+  const execute = (command, args, options) => {
+    if (
+      args[0] === "compose" &&
+      args.includes("--no-env-resolution") &&
+      !args.includes("--no-interpolate")
+    ) {
+      fallbacks += 1;
+      const error = new Error("Compose rejected a missing required env file");
+      error.stderr = `env file ${join(root, "tama/.tama.env")} not found: stat failed`;
+      throw error;
+    }
+    return docker.execute(command, args, options);
+  };
+  const doctor = await runEnvironmentDoctor({ cwd: root }, { execute });
+  assert.equal(doctor.ok, false);
+  assert.equal(doctor.files.find((file) => file.role === "core")?.status, "missing");
+  assert.equal(doctor.files.find((file) => file.role === "postgres")?.status, "missing");
+  const preview = await runEnvironmentInit({ cwd: root, dryRun: true, fresh: false }, { execute });
+  assert.equal(preview.ok, true, preview.blockers.join("\n"));
+  assert.equal(preview.persistence.status, "absent");
+  assert.ok(fallbacks >= 2);
+  assert.equal(existsSync(join(root, "tama/.tama.env")), false);
+});
+
+test("unrelated Compose failures cannot authorize a missing-file fallback", () => {
+  const root = standardRoot();
+  rmSync(join(root, "tama/.tama.env"));
+  let renders = 0;
+  assert.throws(
+    () =>
+      inspectComposeDeclarations(
+        { cwd: root },
+        {
+          validatePrerequisite: () => {},
+          execute: () => {
+            renders += 1;
+            const error = new Error("invalid Compose configuration");
+            error.stderr = "service tama has an invalid declaration";
+            throw error;
+          },
+        },
+      ),
+    /Docker Compose configuration could not be resolved/u,
+  );
+  assert.equal(renders, 1);
+});
+
+test("missing-file fallback rejects unresolved non-env Compose declarations", () => {
+  const root = standardRoot();
+  rmSync(join(root, "tama/.tama.env"));
+  const docker = fakeDocker();
+  assert.throws(
+    () =>
+      inspectComposeDeclarations(
+        { cwd: root },
+        {
+          validatePrerequisite: () => {},
+          execute: (command, args, options) => {
+            if (args.includes("--no-env-resolution") && !args.includes("--no-interpolate")) {
+              const error = new Error("missing required env file");
+              error.stderr = `env file ${join(root, "tama/.tama.env")} not found: stat failed`;
+              throw error;
+            }
+            const model = JSON.parse(docker.execute(command, args, options));
+            model.services.tama.volumes = [
+              {
+                type: "bind",
+                source: ["$", "{DATA_PATH}"].join(""),
+                target: "/var/lib/postgresql/data",
+              },
+            ];
+            return JSON.stringify(model);
+          },
+        },
+      ),
+    /Docker Compose configuration could not be resolved/u,
+  );
+});
+
 test("env init restores a missing derived Postgres file while preserving the core", async () => {
   const root = standardRoot();
   const coreDigest = contentDigest(readFileSync(join(root, "tama/.tama.env"), "utf8"));

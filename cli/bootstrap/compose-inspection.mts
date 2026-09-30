@@ -98,7 +98,7 @@ export type ComposeDeclarationInspection = {
   /** Declaration-stage service model; effective values require the resolved configuration. */
   services: ComposeServiceModel;
   envReferences: ComposeEnvReference[];
-  /** The fallback was required and Compose still lost interpolated env_file paths. */
+  /** The fallback was required and a required env_file path remains interpolated. */
   interpolationLoss: boolean;
   /** Literal env_file declarations containing interpolation; reported, never resolved. */
   unresolvedInterpolation: string[];
@@ -153,26 +153,73 @@ export function loadComposeModel(
   execute: ComposeExecute = composeExecuter(),
 ): ComposeModel {
   try {
-    const output = execute(
-      "docker",
-      [
-        ...composeArguments({
-          composeFile: composeFiles[0],
-          runtime: { composeFiles },
-        }),
-        "config",
-        "--format",
-        "json",
-        ...(options.noEnvResolution ? ["--no-env-resolution"] : []),
-        ...(options.noInterpolation ? ["--no-interpolate"] : []),
-      ],
-      {
-        cwd: root,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-        maxBuffer: 4 * 1024 * 1024,
-      },
-    );
+    let output: string;
+    try {
+      output = execute(
+        "docker",
+        [
+          ...composeArguments({
+            composeFile: composeFiles[0],
+            runtime: { composeFiles },
+          }),
+          "config",
+          "--format",
+          "json",
+          ...(options.noEnvResolution ? ["--no-env-resolution"] : []),
+          ...(options.noInterpolation ? ["--no-interpolate"] : []),
+        ],
+        {
+          cwd: root,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          maxBuffer: 4 * 1024 * 1024,
+        },
+      );
+    } catch (error) {
+      // Compose 2.38 checks required env_file paths even with
+      // --no-env-resolution. Its --no-interpolate render preserves the same
+      // native merged declarations without requiring those private files.
+      // Only fall back for that exact missing-file failure; other native
+      // configuration errors must remain fatal and secret-free.
+      const stderr =
+        error !== null && typeof error === "object" && "stderr" in error ? error.stderr : null;
+      if (
+        !options.noEnvResolution ||
+        options.noInterpolation ||
+        typeof stderr !== "string" ||
+        !/^env file [^\r\n]+ not found:/mu.test(stderr)
+      ) {
+        throw error;
+      }
+      const literal = loadComposeModel(
+        root,
+        composeFiles,
+        { ...options, noInterpolation: true },
+        execute,
+      );
+      const hasMissingRequired = Object.values(literal.services).some((service) =>
+        service.env_file?.some(
+          (reference) =>
+            reference.required !== false &&
+            inspectRegularFile(resolve(root, reference.path)) === null,
+        ),
+      );
+      if (!hasMissingRequired) throw error;
+      // The literal render also leaves other Compose variables unresolved.
+      // Ports, volume sources and service settings must not be mistaken for
+      // concrete declarations when deciding whether recovery is safe.
+      const unresolvedOutsideEnvFiles = [
+        literal.name,
+        literal.volumes,
+        ...Object.values(literal.services).flatMap((service) =>
+          Object.entries(service)
+            .filter(([key]) => key !== "env_file")
+            .map(([, value]) => value),
+        ),
+      ].some((value) => /(?<!\$)\$(?:\{|[A-Za-z_])/u.test(JSON.stringify(value) ?? ""));
+      if (unresolvedOutsideEnvFiles) throw error;
+      return literal;
+    }
     const model = JSON.parse(output) as {
       name?: unknown;
       services?: unknown;
@@ -340,7 +387,9 @@ export function inspectComposeDeclarations(
     );
     declared = services;
     for (const service of Object.values(services)) {
-      if (service.env_file?.some(({ path }) => path.includes("$"))) {
+      if (
+        service.env_file?.some(({ path, required }) => required !== false && path.includes("$"))
+      ) {
         interpolationLoss = true;
       }
     }
