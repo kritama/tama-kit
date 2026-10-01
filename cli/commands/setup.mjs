@@ -39,6 +39,10 @@ export function setupUsage(command = "setup") {
     "  --non-interactive        Do not prompt",
     "  --no-color               Disable color",
     "  -h, --help               Show help",
+    "",
+    "Missing ignored environment files after cloning? Run tama-kit env doctor,",
+    "then preview tama-kit env init --dry-run with the same environment selection.",
+    "Keep proxy/CA/Terraform options on setup/doctor; env commands do not accept them.",
   ].join("\n");
 }
 

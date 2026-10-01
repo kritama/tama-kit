@@ -59,6 +59,9 @@ jobs:
       - name: Run Node test suite
         run: npm test
 
+      - name: Validate installed env recovery and persisted-data refusal
+        run: npm run validate:env:runtime
+
       - name: Validate packaged bootstrap, Compose, Terraform, and runtime
         run: npm run validate:bootstrap:runtime
 

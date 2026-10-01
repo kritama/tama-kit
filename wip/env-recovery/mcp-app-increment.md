@@ -2,6 +2,9 @@
 
 Branch: `feature/issue-41-mcp-app-env-recovery`, based on the merge of
 [PR #42](https://github.com/kritama/tama-kit/pull/42) into `develop`.
+Merged into `develop` in [PR #43](https://github.com/kritama/tama-kit/pull/43)
+at `747165148da19ed361b68d025e9bfa5aa727baa7`; all six CI jobs passed for its
+reviewed implementation head `db88d12`.
 Related issue: [#41](https://github.com/kritama/tama-kit/issues/41).
 
 ## Implemented scope
@@ -115,13 +118,63 @@ Validation of the PR #43 CodeRabbit follow-up on 2026-10-01 passed:
   no-op layouts, missing-file ambiguity, sanitized inspection failures, and
   invalid surviving public inputs during actual recovery.
 
+## Documentation increment on 2026-10-01
+
+Branch: `feature/issue-41-env-recovery-docs`, based on the merged PR #43.
+
+The [README](../../README.md#recover-private-environment-files-after-cloning)
+links to a complete [environment recovery guide](../../docs/environment-recovery.md).
+The guide covers supported/optional/application files, current selection and
+Compose precedence, public inputs and older layouts, persistence refusal and
+explicit `--fresh`, derived recovery, prepared MCP App keys, local HTTPS, private
+onboarding, JSON/exit codes, and setup/activation/Terraform follow-up boundaries.
+
+The public MCP App guide, packaged CLI skill/reference and discovery metadata,
+env/setup/doctor help, generated README/agent instructions, copy-ready setup
+prompt and additive `MCP_APP.md` now describe the same recovery workflow.
+Generated recovery commands preserve the selected Compose files and services
+and quote paths. Existing project-owned documentation is not refreshed by reruns.
+
+Validation on 2026-10-01 passed: build/typecheck, Biome, the full suite (441
+passed, one intentional skip, zero failures), submission validation (22 positive,
+three negative cases), and existing installed-package checks. Eleven local
+Markdown links and three generated commands with a quoted Compose filename
+were checked; the actual CLI accepted every generated command via help.
+Manual review compared the guidance and supported
+flags with current CLI and recovery policy. An optional CodeRabbit CLI review
+was rejected by automatic approval because it would transmit the staged diff to
+an external service without specific authorization; no diff was submitted.
+
+## Final acceptance increment on 2026-10-01
+
+`validate:package` now exercises the installed executable's `env doctor` and
+`env init` against disposable standard and additive MCP App projects. It covers
+missing-file diagnosis, dry-run without changes, unknown-persistence refusal and
+explicit `--fresh`, derived database companions, complete private-file recovery,
+repeat no-op, mode 0600, unchanged surviving files, prepared integration modes,
+independent signing keys, and secret-free JSON. Recovery assets are required in
+the tarball and no development dependencies are installed in the consumer.
+
+`validate:env:runtime` runs these checks with real Docker persistence probes,
+then starts uniquely named disposable PostgreSQL fixtures, writes a test row,
+and verifies derived companion recovery preserves authentication/data. Missing
+core or integration secrets are refused with and without `--fresh`; the row
+survives and volume-only refusal is checked after removing the containers.
+Cleanup addresses only each fixture's UUID-scoped resources.
+
+CI adds Docker acceptance on Ubuntu and macOS Intel with Node 20.12 and 24.
+The existing macOS matrix also retains installed-package checks. Intel runners
+allow Colima to run the Docker daemon; the standard macOS ARM runners keep native
+Compose and non-daemon package coverage. Publication reruns Docker acceptance
+before npm publish.
+
+Local real-Docker installed-package acceptance passed on 2026-10-01. CI platform
+results must be green before the remaining checkbox and issue are completed.
+
 ## Remaining issue #41 work
 
-- Public README, generated setup guidance, CLI skill/reference, and help updates
-  for the complete recovery workflow.
-- Explicit installed-package acceptance tests for `env doctor` and `env init`.
-- Isolated Docker runtime recovery and persisted-volume refusal fixtures in CI,
-  across the supported Node and macOS/Linux matrix.
+- Verify the new isolated Docker runtime recovery and persisted-volume refusal
+  CI jobs across the supported Node and macOS/Linux matrix.
 
 This increment does not close issue #41. Recovery is environment completion,
 not live runtime, OAuth, or Terraform verification.

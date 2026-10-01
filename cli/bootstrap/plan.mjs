@@ -2,6 +2,7 @@
 
 import { existsSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { environmentCommand } from "../domain/environment.mjs";
 import { ownershipError, usageError } from "../errors.mjs";
 import { planRootCompose } from "./compose.mjs";
 import { formatComposePsCommand, formatComposeUpCommand } from "./compose-command.mjs";
@@ -330,6 +331,13 @@ export function createBootstrapPlan(options) {
   );
   operations.push(...terraform.operations);
   const projectComposePath = relative(inspection.root, inspection.selectedCompose);
+  const environmentSelection = {
+    compose: [projectComposePath],
+    service: "tama",
+    ...(mcpAppDoc?.localHttps?.providerService
+      ? { providerService: mcpAppDoc.localHttps.providerService }
+      : {}),
+  };
   operations.push(
     generatedTemplate(
       ownedFiles.documentation,
@@ -345,6 +353,8 @@ export function createBootstrapPlan(options) {
           Boolean(mcpAppDoc?.localHttps),
         ),
         COMPOSE_PS_COMMAND: formatComposePsCommand(projectComposePath),
+        ENV_DOCTOR_COMMAND: environmentCommand("doctor", environmentSelection),
+        ENV_INIT_COMMAND: environmentCommand("init", environmentSelection),
         MCP_APP_GUIDANCE: mcpAppReadmeGuidance(mcpAppDoc),
         SETUP_CHECKLIST,
       },

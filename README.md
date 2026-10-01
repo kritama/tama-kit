@@ -103,6 +103,40 @@ Generate and start the local services:
 npx @kritama/tama-kit bootstrap --start
 ```
 
+### Recover private environment files after cloning
+
+If Compose, Terraform and public examples already exist but ignored private
+environment files are missing, use the environment workflow from the project
+root:
+
+```bash
+npx @kritama/tama-kit env doctor --json
+npx @kritama/tama-kit env init --dry-run --json
+npx @kritama/tama-kit env init --json
+```
+
+Review the preview's blockers before writing. Init creates only missing supported
+required files with mode 0600 and preserves existing files and keys. It uses the
+current Compose selection, local MCP App contract, public examples and surviving
+private files, including combined and additive HTTP/local HTTPS MCP App fragments.
+Optional files are never auto-created; unsupported application files need manual
+restoration. Rerunning bootstrap does not recreate deleted output.
+
+New secret issuance is refused when relevant persisted data is detected. An
+unknown state requires `--fresh` only after confirming the selected runtime is
+fresh; that flag cannot bypass detected data or ambiguous associations. A missing
+PostgreSQL companion can use surviving core credentials with data present. New
+MCP App signing material requires prepared peers.
+
+Carry the project path, ordered `--compose` files and service/env-file/contract/
+provider-service selection through recovery and setup. Follow the printed setup
+command, provider loading and activation handoff, local HTTPS trust instructions,
+private onboarding and Terraform plan steps. Environment completion does not
+establish runtime readiness.
+
+See [environment recovery](docs/environment-recovery.md) for custom selections,
+public inputs, persistence refusal, `--fresh`, JSON output and troubleshooting.
+
 ### Add MCP App to an existing standard project
 
 Use the dedicated capability generator:
@@ -424,6 +458,11 @@ Generated counterparts are ignored by Git; edit the `.mts` source files.
 
 `npm test`, `npm pack`, and the runtime validation commands build automatically.
 Run `npm run validate:package` to verify the tarball in an isolated consumer.
+This includes `env doctor` and `env init` acceptance for standard and additive
+MCP App projects without development dependencies. Run
+`npm run validate:env:runtime` with a working Docker daemon to verify fresh
+recovery, derived database-file recovery, and refusal to issue secrets against
+disposable PostgreSQL data, including volumes whose containers were removed.
 The published package contains ready-to-run ESM and its templates, contracts,
 and skills; installed users need neither TypeScript nor a build step.
 
