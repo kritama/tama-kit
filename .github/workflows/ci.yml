@@ -137,7 +137,8 @@ jobs:
           test -n "$fixture_docker_host"
           fixture_docker_config="$RUNNER_TEMP/tama-env-docker"
           mkdir -p "$fixture_docker_config/cli-plugins"
-          printf '{"auths": {}}\n' > "$fixture_docker_config/config.json"
+          # An explicit anonymous entry also prevents native credential-helper autodetection.
+          printf '{"auths": {"https://index.docker.io/v1/": {}}}\n' > "$fixture_docker_config/config.json"
           ln -sf "$(brew --prefix)/bin/docker-compose" "$fixture_docker_config/cli-plugins/docker-compose"
           echo "DOCKER_HOST=$fixture_docker_host" >> "$GITHUB_ENV"
           echo "DOCKER_CONFIG=$fixture_docker_config" >> "$GITHUB_ENV"
