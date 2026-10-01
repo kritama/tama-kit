@@ -1,6 +1,6 @@
 # MCP App environment recovery increment
 
-Branch: `codex/issue-41-mcp-app-env-recovery`, based on the merge of
+Branch: `feature/issue-41-mcp-app-env-recovery`, based on the merge of
 [PR #42](https://github.com/kritama/tama-kit/pull/42) into `develop`.
 Related issue: [#41](https://github.com/kritama/tama-kit/issues/41).
 

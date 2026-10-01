@@ -3,7 +3,7 @@
 Status: partial. Standard core/PostgreSQL recovery was merged in
 [PR #42](https://github.com/kritama/tama-kit/pull/42). Combined and additive
 MCP App HTTP/HTTPS environment recovery is implemented on
-`codex/issue-41-mcp-app-env-recovery`, including both-sided persistence checks,
+`feature/issue-41-mcp-app-env-recovery`, including both-sided persistence checks,
 prepared-only new signing material, and public integration examples. See the
 [MCP App increment](env-recovery/mcp-app-increment.md) for scope and verification.
 Public recovery documentation, installed-package env acceptance coverage, and
