@@ -34,6 +34,7 @@ import {
   verifyEnvironmentLoadingEvidence,
 } from "./mcp-app-contract.mjs";
 import { renderMcpAppLocalContract } from "./mcp-app-local-contract.mjs";
+import { mcpAppRecoveryExample } from "./mcp-app-recovery.mjs";
 import {
   environmentFileForName,
   normalizeProviderName,
@@ -390,6 +391,7 @@ export function resolveMcpAppState({
  *   generation for deterministic tests.
  * @property {boolean} [materializeKeys]
  * @property {string} [tamaEnvironmentFile] Selected fragment for additive generation.
+ * @property {boolean} [includeRecoveryExample] Existing unfinished generations may predate examples.
  */
 
 /**
@@ -771,6 +773,22 @@ export function planMcpApp(input) {
       );
     },
   });
+  const examplePath = `${fragmentPath}.example`;
+  const exampleOperations =
+    input.includeRecoveryExample === false
+      ? []
+      : [
+          manageFile(
+            examplePath,
+            existsSync(examplePath)
+              ? readFileSync(examplePath, "utf8")
+              : mcpAppRecoveryExample(
+                  fragmentContent,
+                  [roles.access_token_private_signing_key, roles.access_token_signing_key_id],
+                  Object.values(roles),
+                ),
+          ),
+        ];
   // The Tama overlap set is rotation state owned by the persisted file: a
   // fresh file starts empty, a persisted set is validated, and a valid set is
   // left untouched by the environment update so it survives byte-for-byte.
@@ -836,7 +854,7 @@ export function planMcpApp(input) {
     providerSigningKeyId,
     introspectionSigningKeyId,
     localHttps,
-    operations: [input.localContractOperation, fragmentOperation],
+    operations: [input.localContractOperation, fragmentOperation, ...exampleOperations],
   };
 
   return {

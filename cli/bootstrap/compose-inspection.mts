@@ -262,7 +262,12 @@ export function loadComposeConfig(
 export function loadComposeServiceEnvironment(
   inspection: ComposeDeclarationInspection,
   serviceName: string,
-  recovery: { missingPaths: string[]; suppliedVariables: readonly string[] },
+  recovery: {
+    missingPaths: string[];
+    suppliedVariables: readonly string[];
+    suppliedVariablesByPath?: Map<string, readonly string[]>;
+    publicValuesByPath?: Map<string, Map<string, string>>;
+  },
   execute: ComposeExecute = composeExecuter(),
 ): {
   values: Map<string, string>;
@@ -275,21 +280,33 @@ export function loadComposeServiceEnvironment(
     if (!service) throw new Error();
     const prefix = `tama_kit_unknown_${randomUUID()}_`;
     const markers = new Map(recovery.suppliedVariables.map((name) => [name, `${prefix}${name}`]));
-    let replacement: string | undefined;
+    const replacements = new Map<string, string>();
     if (recovery.missingPaths.length > 0) {
       temporary = mkdtempSync(join(tmpdir(), "tama-env-inspection-"));
-      replacement = join(temporary, "missing.env");
-      writeFileSync(
-        replacement,
-        [...markers].map(([name, value]) => `${name}=${value}`).join("\n"),
-        { mode: 0o600 },
-      );
+      for (const path of recovery.missingPaths) {
+        const names = recovery.suppliedVariablesByPath?.get(path) ?? recovery.suppliedVariables;
+        const values = new Map(
+          names.map((name) => [name, markers.get(name) ?? `${prefix}${name}`]),
+        );
+        for (const [name, value] of recovery.publicValuesByPath?.get(path) ?? [])
+          values.set(name, value);
+        for (const [name, value] of values)
+          if (!/^[A-Z][A-Z0-9_]*$/u.test(name) || /['\r\n\0]/u.test(value)) throw new Error();
+        const replacement = join(temporary, `${replacements.size}.env`);
+        writeFileSync(
+          replacement,
+          [...values].map(([name, value]) => `${name}='${value}'`).join("\n"),
+          { mode: 0o600 },
+        );
+        replacements.set(path, replacement);
+      }
     }
     const sources = new Set([...inspection.composeFiles, join(inspection.root, ".env")]);
     const envFiles: ComposeDeclarationEnvFile[] = [];
     for (const declaration of service.env_file ?? []) {
       const path = resolve(inspection.root, declaration.path);
-      if (recovery.missingPaths.includes(path) && replacement) {
+      const replacement = replacements.get(path);
+      if (replacement) {
         envFiles.push({ path: replacement });
       } else if (inspectRegularFile(path)) {
         sources.add(path);

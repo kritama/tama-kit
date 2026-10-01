@@ -15,7 +15,20 @@ import {
 } from "../bootstrap/environment.mjs";
 import { readGenerationEvidence } from "../bootstrap/generation-receipt.mjs";
 import { validateMcpAppLocalContract } from "../bootstrap/mcp-app-local-contract.mjs";
-import { associateTamaDatabase, inspectPersistence } from "../bootstrap/persistence.mjs";
+import {
+  inspectMcpAppRecovery,
+  type McpAppRecovery,
+  renderMcpAppRecovery,
+  topologyRuntimeValues,
+  validateRecoveredMcpApp,
+} from "../bootstrap/mcp-app-recovery.mjs";
+import {
+  associateTamaDatabase,
+  inspectPersistence,
+  type PersistenceObservation,
+  postgresDataSources,
+  providerDataSources,
+} from "../bootstrap/persistence.mjs";
 import {
   CORE_REQUIRED_VARIABLES,
   classifyEnvironmentReference,
@@ -40,7 +53,7 @@ import { contentDigest, inspectRegularFile } from "../shared/files.mjs";
 import { validateSecretFilesIgnored, validateSecretFilesUntracked } from "../shared/git.mjs";
 import { validateOAuthPrivateJwk } from "../shared/oauth-key.mjs";
 import { applyOperationsTransactionally } from "../shared/write.mjs";
-import type { FileOperation } from "../types.mjs";
+import type { FileOperation, McpAppLocalContract } from "../types.mjs";
 
 /**
  * Read-only private environment inspection.
@@ -95,6 +108,7 @@ function assessExistingFile(
     providerPairs?: [string, string][];
     identity?: PublicRuntimeIdentity | null;
     effectiveValues?: Map<string, string> | null;
+    allowPublicOverlay?: boolean;
   } = {},
 ): Assessment {
   const issues: string[] = [];
@@ -158,9 +172,15 @@ function assessExistingFile(
   if (reference.role === "core") {
     const semantic = coreSemanticIssues(values, context.identity ?? null);
     for (const issue of semantic.issues) {
+      if (
+        context.allowPublicOverlay &&
+        issue ===
+          "public identity does not match the selected Compose configuration and project example"
+      )
+        continue;
       if (!issues.includes(issue)) issues.push(issue);
     }
-    publicConflict = semantic.publicConflict;
+    publicConflict = context.allowPublicOverlay ? false : semantic.publicConflict;
     if (context.effectiveValues) {
       const effective = coreSemanticIssues(context.effectiveValues, context.identity ?? null);
       for (const issue of effective.issues) issues.push(`effective Compose environment: ${issue}`);
@@ -219,6 +239,7 @@ export async function runEnvironmentDoctor(
   const contractReferenced = options.contractPath !== undefined || existsSync(contractPath);
   let providerFragment: string | undefined;
   let providerPairs: [string, string][] = [];
+  let mcpContract: McpAppLocalContract | undefined;
   if (contractReferenced) {
     if (!inspectRegularFile(contractPath)) {
       warnings.push(
@@ -230,6 +251,7 @@ export async function runEnvironmentDoctor(
           JSON.parse(readFileSync(contractPath, "utf8")),
           { currentConfiguration: true },
         );
+        mcpContract = contract;
         providerFragment = resolve(root, contract.provider.environment_file);
         providerPairs = [
           [
@@ -244,37 +266,16 @@ export async function runEnvironmentDoctor(
       }
     }
   }
-  const references = [
-    ...inspection.envReferences
-      .filter((reference) => !reference.interpolated)
-      .map(
-        (reference): EnvironmentFileReference => ({
-          role: classifyEnvironmentReference(
-            basename(reference.path),
-            providerFragment ? basename(providerFragment) : undefined,
-          ),
-          path: reference.path,
-          relative: relative(root, reference.path),
-          services: reference.services,
-          required: reference.required,
-          source: "compose",
-        }),
-      ),
-    ...(providerFragment
-      ? [
-          {
-            role: "provider" as const,
-            path: providerFragment,
-            relative: relative(root, providerFragment),
-            services: [] as string[],
-            required: true,
-            source: "contract" as const,
-          },
-        ]
-      : []),
-  ];
+  const references = environmentReferences(inspection, providerFragment);
   inspectGenerationHistory(root, warnings);
-  const identity = publicIdentityFor(root, inspection, options, references, dependencies);
+  const identity = publicIdentityFor(
+    root,
+    inspection,
+    options,
+    references,
+    dependencies,
+    mcpContract ? topologyRuntimeValues(mcpContract) : undefined,
+  );
   const parsed = new Map<EnvironmentFileReference["role"], Map<string, string> | null>();
   const files: EnvironmentFileReport[] = references.map((reference): EnvironmentFileReport => {
     const base = {
@@ -308,6 +309,9 @@ export async function runEnvironmentDoctor(
       providerPairs: reference.role === "provider" ? providerPairs : undefined,
       identity: reference.role === "core" ? identity.identity : undefined,
       effectiveValues: reference.role === "core" ? identity.effectiveValues : undefined,
+      allowPublicOverlay: Boolean(
+        mcpContract?.topology && references.some((item) => item.role === "mcp-app"),
+      ),
     });
     parsed.set(
       reference.role,
@@ -355,6 +359,48 @@ export async function runEnvironmentDoctor(
     }
   }
   const nextActions = [];
+  if (mcpContract) {
+    const service = tamaServiceName(inspection, options, references);
+    const coreReference = references.find((reference) => reference.role === "core");
+    const fragment = references.find(
+      (reference) => reference.role === "mcp-app" && reference.services.includes(service ?? ""),
+    );
+    if (service && coreReference) {
+      try {
+        const recovery = inspectMcpAppRecovery({
+          inspection,
+          contract: mcpContract,
+          contractPath,
+          tamaService: service,
+          corePath: coreReference.path,
+          tamaPath: fragment?.path ?? coreReference.path,
+          providerService: options.providerService,
+          missingPaths: references
+            .filter((reference) => !lstatSyncSafe(reference.path))
+            .map((reference) => reference.path),
+          reissuing: false,
+          execute: dependencies.execute,
+        });
+        if (recovery.issues.length) {
+          warnings.push(...recovery.issues);
+          const report = files.find((file) => file.role === "mcp-app" || file.role === "provider");
+          if (report && report.status === "valid") {
+            report.status = "invalid";
+            report.issues.push(...recovery.issues);
+          }
+        }
+      } catch {
+        warnings.push(
+          "the MCP App effective environment could not be inspected safely; restore its configuration before setup",
+        );
+        const report = files.find((file) => file.role === "provider");
+        if (report && report.status === "valid") {
+          report.status = "invalid";
+          report.issues.push("MCP App effective environment inspection failed");
+        }
+      }
+    }
+  }
   const requiredFailures = files.filter(
     (file) =>
       file.required &&
@@ -452,7 +498,14 @@ export async function runEnvironmentInit(
   }
   const history = generationHistory(root);
   if (history.blocker) blockers.push(history.blocker);
-  const identity = publicIdentityFor(root, inspection, options, references, dependencies);
+  const identity = publicIdentityFor(
+    root,
+    inspection,
+    options,
+    references,
+    dependencies,
+    contract.document ? topologyRuntimeValues(contract.document) : undefined,
+  );
   const assessed = new Map<string, Assessment | null>();
   for (const reference of references) {
     assessed.set(
@@ -463,6 +516,9 @@ export async function runEnvironmentInit(
             providerPairs: reference.role === "provider" ? contract.providerPairs : undefined,
             identity: reference.role === "core" ? identity.identity : undefined,
             effectiveValues: reference.role === "core" ? identity.effectiveValues : undefined,
+            allowPublicOverlay: Boolean(
+              contract.document?.topology && references.some((item) => item.role === "mcp-app"),
+            ),
           }),
     );
   }
@@ -490,13 +546,62 @@ export async function runEnvironmentInit(
     }
   }
   const missingCore = missing.some((reference) => reference.role === "core");
-  if (contract.valid && missing.some((reference) => reference.role !== "postgres")) {
-    blockers.push(
-      "the selected MCP App configuration requires reissued provider and introspection signing material; env init currently recovers the standard runtime only, so restore the missing MCP App files from a private backup or re-provision the integration with tama-kit generate mcp-app",
-    );
+  const newSecrets = missing.some((reference) => reference.role !== "postgres");
+  if (!contract.document) {
+    const mcpDeclared =
+      references.some((reference) => reference.role === "mcp-app") ||
+      identity.effectiveValues?.has("TAMA_MCP_APP_MODE") ||
+      references
+        .filter((reference) => reference.role === "core")
+        .some((reference) => {
+          for (const path of [reference.path, `${reference.path}.example`]) {
+            if (
+              inspectRegularFile(path) &&
+              /^\s*(?:export\s+)?TAMA_MCP_APP_MODE\s*=/mu.test(readFileSync(path, "utf8"))
+            )
+              return true;
+          }
+          return false;
+        });
+    if (mcpDeclared)
+      blockers.push(
+        "the current MCP App configuration has no valid selected local contract; restore the contract or select --contract before environment recovery",
+      );
   }
-
-  const issuance = missingCore ? "new" : missing.length > 0 ? "derived" : "none";
+  let mcpRecovery: McpAppRecovery | undefined;
+  if (contract.document && missing.length > 0) {
+    const service = tamaServiceName(inspection, options, references);
+    const core = references.find((reference) => reference.role === "core");
+    const fragments = references.filter(
+      (reference) => reference.role === "mcp-app" && reference.services.includes(service ?? ""),
+    );
+    if (!service || !core || fragments.length > 1)
+      blockers.push(
+        "the current MCP App destinations are ambiguous; select one Tama service and integration fragment",
+      );
+    else {
+      try {
+        mcpRecovery = inspectMcpAppRecovery({
+          inspection,
+          contract: contract.document,
+          contractPath: contract.path ?? "",
+          tamaService: service,
+          corePath: core.path,
+          tamaPath: fragments[0]?.path ?? core.path,
+          providerService: options.providerService,
+          missingPaths: missing.map((reference) => reference.path),
+          reissuing: newSecrets,
+          execute: dependencies.execute,
+        });
+        blockers.push(...mcpRecovery.issues);
+      } catch {
+        blockers.push(
+          "the MCP App effective environment could not be inspected safely; check its env_file declarations and inputs before environment recovery",
+        );
+      }
+    }
+  }
+  const issuance = newSecrets ? "new" : missing.length > 0 ? "derived" : "none";
   if (missingCore && identity.identity === null) {
     for (const issue of identity.issues) blockers.push(issue);
   }
@@ -528,7 +633,23 @@ export async function runEnvironmentInit(
       ],
       ...(identity.effectiveDatabaseHost ? { databaseHost: identity.effectiveDatabaseHost } : {}),
     });
-    if (association.kind === "ambiguous") {
+    if (mcpRecovery) {
+      if (association.kind === "ambiguous")
+        blockers.push(`${association.detail}; new secret issuance is refused`);
+      const observe = () =>
+        observeMcpPersistence(
+          root,
+          model,
+          association,
+          mcpRecovery,
+          inspection,
+          dependencies.execute,
+        );
+      recheckPersistence = observe;
+      const decision = authorizeIssuance(observe(), options.fresh);
+      persistence = decision.persistence;
+      if (decision.blocker) blockers.push(decision.blocker);
+    } else if (association.kind === "ambiguous") {
       persistence = {
         status: "unknown",
         freshAsserted: false,
@@ -564,14 +685,34 @@ export async function runEnvironmentInit(
 
   if (missing.length > 0)
     blockers.push(
-      ...recoveryInputIssues(missing, assessed, identity.identity, identity.effectiveValues),
+      ...recoveryInputIssues(
+        missing,
+        assessed,
+        identity.identity,
+        identity.effectiveValues,
+        Boolean(mcpRecovery),
+      ),
     );
   let operations: FileOperation[] = [];
   let applied = false;
   if (missing.length > 0 && blockers.length === 0 && !options.dryRun) {
-    const plan = renderMissingSet(missing, assessed, identity.identity);
+    const mcpContents = mcpRecovery
+      ? renderMcpAppRecovery(
+          mcpRecovery,
+          missing.map((reference) => reference.path),
+        )
+      : new Map<string, string>();
+    const plan = renderMissingSet(missing, assessed, identity.identity, mcpContents);
     plan.sourceDigests.push(...identity.sourceDigests);
+    if (mcpRecovery) plan.sourceDigests.push(...mcpRecovery.sourceDigests);
     const verifySources = () => {
+      if (mcpRecovery) {
+        const current = inspectComposeDeclarations(options, dependencies);
+        if (JSON.stringify(current.services) !== JSON.stringify(inspection.services))
+          throw ownershipError(
+            "the selected Compose declarations changed during environment recovery; all new files were rolled back",
+          );
+      }
       for (const [path, digest] of plan.sourceDigests) {
         if (!inspectRegularFile(path) || contentDigest(readFileSync(path, "utf8")) !== digest) {
           throw ownershipError("an environment recovery input changed during the operation", {
@@ -615,6 +756,21 @@ export async function runEnvironmentInit(
           );
         }
       }
+      if (mcpRecovery) {
+        const service = tamaServiceName(inspection, options, references);
+        if (!service) throw ownershipError("the selected Tama service is ambiguous");
+        validateRecoveredMcpApp(mcpRecovery, {
+          inspection,
+          tamaService: service,
+          execute: dependencies.execute,
+          created: new Map(
+            operations.map((operation) => [
+              operation.path,
+              "content" in operation ? operation.content : "",
+            ]),
+          ),
+        });
+      }
       if (recheckPersistence !== undefined) {
         const recheck = recheckPersistence();
         if (recheck.status === "detected" || (recheck.status === "unknown" && !options.fresh)) {
@@ -642,7 +798,7 @@ export async function runEnvironmentInit(
       relative: reference.relative,
       source: reference.source,
       action: planned ? "create" : "preserve",
-      issuance: planned ? (missingCore ? "new" : "derived") : "none",
+      issuance: planned ? (reference.role === "postgres" ? "derived" : "new") : "none",
       created,
     };
   });
@@ -661,6 +817,15 @@ export async function runEnvironmentInit(
       nextActions.push(
         "--fresh asserted an unverified persistence state; confirm the local database is empty before starting services.",
       );
+    }
+    if (mcpRecovery) {
+      nextActions.push(
+        `Load the provider fragment through its application-owned environment workflow, verify both services in prepared mode, then use ${environmentCommand("setup", selectionFromOptions(options))} --activate for the existing staged MCP App activation flow.`,
+      );
+      if (mcpRecovery.contract.topology)
+        nextActions.push(
+          "Prepare the project's local HTTPS certificates and trust with its mkcert instructions before setup; env init does not create certificates or install trust.",
+        );
     }
   }
   return {
@@ -714,6 +879,8 @@ function selectionFromOptions(options: EnvironmentCommandSelection): Environment
 
 type ContractContext = {
   valid: boolean;
+  document?: McpAppLocalContract;
+  path?: string;
   providerFragment?: string;
   providerPairs: [string, string][];
 };
@@ -729,7 +896,10 @@ async function readCurrentContract(
   if (options.contractPath === undefined && !existsSync(contractPath)) {
     return { valid: false, providerPairs: [] };
   }
-  if (!inspectRegularFile(contractPath)) return { valid: false, providerPairs: [] };
+  if (!inspectRegularFile(contractPath))
+    throw ownershipError(
+      "the selected local MCP App contract is missing; restore it before env init",
+    );
   try {
     const contract = validateMcpAppLocalContract(
       JSON.parse(readFileSync(contractPath, "utf8")) as unknown,
@@ -737,6 +907,8 @@ async function readCurrentContract(
     );
     return {
       valid: true,
+      document: contract,
+      path: contractPath,
       providerFragment: resolve(root, contract.provider.environment_file),
       providerPairs: [
         [
@@ -746,7 +918,9 @@ async function readCurrentContract(
       ],
     };
   } catch {
-    return { valid: false, providerPairs: [] };
+    throw ownershipError(
+      "the selected local MCP App contract is invalid; repair it before env init issues secrets",
+    );
   }
 }
 
@@ -755,7 +929,7 @@ function environmentReferences(
   providerFragment: string | undefined,
 ): EnvironmentFileReference[] {
   const root = inspection.root;
-  return [
+  const references: EnvironmentFileReference[] = [
     ...inspection.envReferences
       .filter((reference) => !reference.interpolated)
       .map(
@@ -784,6 +958,21 @@ function environmentReferences(
         ]
       : []),
   ];
+  const unique = new Map<string, EnvironmentFileReference>();
+  for (const reference of references) {
+    const previous = unique.get(reference.path);
+    unique.set(
+      reference.path,
+      previous
+        ? {
+            ...reference,
+            required: previous.required || reference.required,
+            services: [...new Set([...previous.services, ...reference.services])],
+          }
+        : reference,
+    );
+  }
+  return [...unique.values()];
 }
 
 /** Credential characters the core renderer can emit unquoted. */
@@ -794,10 +983,13 @@ function recoveryInputIssues(
   assessed: Map<string, Assessment | null>,
   identity: PublicRuntimeIdentity | null,
   effectiveValues: Map<string, string> | null,
+  supportsMcpRecovery = false,
 ): string[] {
   const issues: string[] = [];
   for (const reference of missing) {
     if (reference.role === "core" || reference.role === "postgres") continue;
+    if (supportsMcpRecovery && (reference.role === "provider" || reference.role === "mcp-app"))
+      continue;
     issues.push(
       `${reference.relative} requires newly issued signing material that env init does not currently reissue; restore it from a private backup`,
     );
@@ -888,6 +1080,7 @@ function renderMissingSet(
   missing: EnvironmentFileReference[],
   assessed: Map<string, Assessment | null>,
   identity: PublicRuntimeIdentity | null,
+  mcpContents = new Map<string, string>(),
 ): { operations: FileOperation[]; sourceDigests: [string, string][] } {
   const coreMissing = missing.some((reference) => reference.role === "core");
   const survivingPath = (role: string): string | null => {
@@ -937,6 +1130,12 @@ function renderMissingSet(
         );
       coreValues = parseEnvironment(coreContent, "tama/.tama.env");
     }
+    const integration = missing.find((reference) => reference.role === "core");
+    const extra = integration ? mcpContents.get(integration.path) : undefined;
+    if (extra) {
+      coreContent = `${coreContent.trimEnd()}\n\n${extra}`;
+      coreValues = parseEnvironment(coreContent, "recovered core environment");
+    }
     const semantic = coreSemanticIssues(coreValues, identity);
     if (semantic.issues.length > 0) {
       throw ownershipError(
@@ -955,7 +1154,11 @@ function renderMissingSet(
   }
   const operations: FileOperation[] = [];
   for (const reference of missing) {
-    if (reference.role !== "core" && reference.role !== "postgres") {
+    if (
+      reference.role !== "core" &&
+      reference.role !== "postgres" &&
+      !mcpContents.has(reference.path)
+    ) {
       throw ownershipError(
         `${reference.relative} requires newly issued signing material that env init does not currently reissue; restore it from a private backup`,
       );
@@ -963,7 +1166,9 @@ function renderMissingSet(
     const content =
       reference.role === "core"
         ? (coreContent ?? "")
-        : postgresEnvironment(coreValues, reference.relative);
+        : reference.role === "postgres"
+          ? postgresEnvironment(coreValues, reference.relative)
+          : (mcpContents.get(reference.path) ?? "");
     operations.push({
       action: "create",
       path: reference.path,
@@ -1046,6 +1251,7 @@ function publicIdentityFor(
   options: EnvironmentCommandSelection,
   references: EnvironmentFileReference[],
   dependencies: Dependencies,
+  runtimeOverrides?: Map<string, string>,
 ): {
   identity: PublicRuntimeIdentity | null;
   issues: string[];
@@ -1061,6 +1267,7 @@ function publicIdentityFor(
     try {
       const content = readFileSync(examplePath, "utf8");
       exampleValues = parseEnvironment(content, examplePath);
+      for (const [name, value] of runtimeOverrides ?? []) exampleValues.set(name, value);
       sourceDigests.push([examplePath, contentDigest(content)]);
     } catch {
       exampleValues = null;
@@ -1104,10 +1311,35 @@ function publicIdentityFor(
       {
         missingPaths: references
           .filter(
-            (reference) => reference.role === "core" && lstatSyncSafe(reference.path) === null,
+            (reference) =>
+              ["core", "mcp-app"].includes(reference.role) &&
+              lstatSyncSafe(reference.path) === null,
           )
           .map((reference) => reference.path),
         suppliedVariables: CORE_REQUIRED_VARIABLES,
+        suppliedVariablesByPath: new Map(
+          references.map((reference) => [
+            reference.path,
+            reference.role === "core" ? CORE_REQUIRED_VARIABLES : [],
+          ]),
+        ),
+        publicValuesByPath: runtimeOverrides?.size
+          ? new Map(
+              references
+                .filter((reference) => reference.role === "mcp-app")
+                .map((reference) => {
+                  const values = new Map(runtimeOverrides);
+                  const examplePath = `${reference.path}.example`;
+                  const port = inspectRegularFile(examplePath)
+                    ? parseEnvironment(readFileSync(examplePath, "utf8"), examplePath).get(
+                        "TAMA_PORT",
+                      )
+                    : exampleValues?.get("PORT");
+                  if (port) values.set("TAMA_PORT", port);
+                  return [reference.path, values];
+                }),
+            )
+          : undefined,
       },
       dependencies.execute,
     );
@@ -1136,10 +1368,15 @@ function publicIdentityFor(
       effectiveValues: effective.values,
       sourceDigests,
     };
+  if (runtimeOverrides?.size && references.some((reference) => reference.role === "mcp-app")) {
+    const port = effective.values.get("TAMA_PORT");
+    if (port) exampleValues?.set("TAMA_PORT", port);
+  }
   return {
     ...resolvePublicIdentity({
       exampleValues,
       inlineValues: effective.values,
+      publicOrigin: runtimeOverrides?.get("TAMA_BASE_URL"),
       publishedPort: serviceName
         ? publishedHostPort(inspection.services[serviceName]?.ports, DEFAULTS.containerPort)
         : null,
@@ -1196,6 +1433,106 @@ const DETECTED_ISSUANCE_BLOCKER =
   "local runtime data was detected, so new secret issuance is refused: changed PostgreSQL credentials would stop the application from connecting, a new TAMA_VAULT_KEY would make stored encrypted material unreadable, and new JWT or System OAuth keys would invalidate stored credentials and issued tokens. Restore the missing files from a private backup, or use a separately authorized runtime-reset process";
 const UNKNOWN_ISSUANCE_BLOCKER =
   "persistence could not be verified; pass --fresh only when the local runtime is known to be new, and restore from a private backup otherwise";
+
+/** Both sides can retain tokens or encrypted configuration that depends on lost keys. */
+function observeMcpPersistence(
+  root: string,
+  model: ReturnType<typeof loadComposeModel>,
+  tama: ReturnType<typeof associateTamaDatabase>,
+  recovery: McpAppRecovery,
+  inspection: ComposeDeclarationInspection,
+  execute?: ComposeExecute,
+): PersistenceObservation {
+  const observations: PersistenceObservation[] = [
+    tama.kind === "local"
+      ? inspectPersistence({ root, project: model.name, sources: tama.sources, execute })
+      : { status: "unknown", detail: tama.detail, checked: [] },
+  ];
+  if (!recovery.providerService)
+    observations.push({
+      status: "unknown",
+      detail: "host-provider persistence is not observable through the selected Compose project",
+      checked: [],
+    });
+  else {
+    const provider = recovery.providerService;
+    const environment = loadComposeServiceEnvironment(
+      inspection,
+      provider,
+      {
+        missingPaths: [recovery.providerPath].filter((path) => !inspectRegularFile(path)),
+        suppliedVariables: Object.values(recovery.contract.bindings),
+      },
+      execute,
+    );
+    let databaseHost: string | undefined;
+    if (environment.values.has("DATABASE_URL")) {
+      try {
+        const url = new URL(environment.values.get("DATABASE_URL") ?? "");
+        databaseHost = ["ecto:", "postgres:", "postgresql:"].includes(url.protocol)
+          ? url.hostname
+          : "unobservable";
+      } catch {
+        databaseHost = "unobservable";
+      }
+    }
+    const localDependencies = Object.keys(model.services[provider]?.depends_on ?? {}).filter(
+      (name) => postgresDataSources(model, name, model.services[name]) !== null,
+    );
+    const association =
+      databaseHost || localDependencies.length
+        ? associateTamaDatabase({
+            model,
+            tamaService: provider,
+            postgresServices: [],
+            ...(databaseHost ? { databaseHost } : {}),
+          })
+        : { kind: "none" as const, detail: "provider database is not declared" };
+    if (association.kind === "ambiguous")
+      throw ownershipError(
+        "the provider database is ambiguous; repair its current Compose dependencies or DATABASE_URL before issuing keys",
+      );
+    observations.push(
+      association.kind === "local"
+        ? inspectPersistence({ root, project: model.name, sources: association.sources, execute })
+        : {
+            status: "unknown",
+            detail:
+              "the provider database is external or cannot be associated with a local data service",
+            checked: [],
+          },
+    );
+    for (const name of localDependencies) {
+      if (association.kind === "local" && association.sources.service === name) continue;
+      const sources = postgresDataSources(model, name, model.services[name]);
+      if (sources)
+        observations.push(inspectPersistence({ root, project: model.name, sources, execute }));
+    }
+    // Direct data mounts and stopped/running provider containers remain positive
+    // evidence even when its database connection cannot be inspected.
+    observations.push(
+      inspectPersistence({
+        root,
+        project: model.name,
+        sources: providerDataSources(model, provider) ?? {
+          service: provider,
+          volumes: [],
+          binds: [],
+        },
+        execute,
+      }),
+    );
+  }
+  return {
+    status: observations.some((observation) => observation.status === "detected")
+      ? "detected"
+      : observations.some((observation) => observation.status === "unknown")
+        ? "unknown"
+        : "absent",
+    detail: observations.map((observation) => observation.detail).join("; "),
+    checked: [...new Set(observations.flatMap((observation) => observation.checked))],
+  };
+}
 
 function authorizeIssuance(
   observation: {
