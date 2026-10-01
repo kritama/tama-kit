@@ -463,6 +463,9 @@ MCP App projects without development dependencies. Run
 `npm run validate:env:runtime` with a working Docker daemon to verify fresh
 recovery, derived database-file recovery, and refusal to issue secrets against
 disposable PostgreSQL data, including volumes whose containers were removed.
+The SQL-only fixtures use `postgres:15-alpine`. To reuse a cached bootstrap
+database image locally, set
+`TAMA_ENV_ACCEPTANCE_POSTGRES_IMAGE=pgvector/pgvector:0.8.6-pg15-bookworm`.
 The published package contains ready-to-run ESM and its templates, contracts,
 and skills; installed users need neither TypeScript nor a build step.
 

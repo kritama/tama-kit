@@ -161,6 +161,11 @@ and verifies derived companion recovery preserves authentication/data. Missing
 core or integration secrets are refused with and without `--fresh`; the row
 survives and volume-only refusal is checked after removing the containers.
 Cleanup addresses only each fixture's UUID-scoped resources.
+The SQL-only fixture uses PostgreSQL 15 Alpine, with image pulling separated
+from the bounded startup check; a cached official bootstrap database image may
+be selected locally through `TAMA_ENV_ACCEPTANCE_POSTGRES_IMAGE`. SQL checks use
+TCP password authentication. macOS CI sets explicit loopback preview names and
+an isolated Docker client configuration for public fixture images.
 
 CI adds Docker acceptance on Ubuntu and macOS Intel with Node 20.12 and 24.
 The existing macOS matrix also retains installed-package checks. Intel runners

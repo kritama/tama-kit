@@ -33,7 +33,12 @@ function snapshot(root) {
 
 /** Exercise the installed executable against disposable, generated projects only. */
 export function validateEnvironmentRecovery({ cli, cwd, temporary, runtime = false }) {
-  function execute(command, args, project = cwd) {
+  const fixtureImage = process.env.TAMA_ENV_ACCEPTANCE_POSTGRES_IMAGE ?? "postgres:15-alpine";
+  assert.ok(
+    ["postgres:15-alpine", "pgvector/pgvector:0.8.6-pg15-bookworm"].includes(fixtureImage),
+    "unsupported PostgreSQL acceptance image",
+  );
+  function execute(command, args, project = cwd, timeout = 120_000) {
     const environment = { ...process.env };
     delete environment.COMPOSE_PROJECT_NAME;
     delete environment.COMPOSE_FILE;
@@ -43,16 +48,19 @@ export function validateEnvironmentRecovery({ cli, cwd, temporary, runtime = fal
       env: environment,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: 120_000,
+      timeout,
       maxBuffer: 4 * 1024 * 1024,
     });
     // Never attach child output to an assertion: Compose and CLI output may contain secrets.
-    assert.ok(!result.error, `${command} failed to execute`);
+    assert.ok(
+      !result.error,
+      `${command} ${args[0]} failed to execute (${result.error?.code ?? "unknown"})`,
+    );
     assert.equal(result.signal, null, `${command} was interrupted`);
     return result;
   }
-  function docker(args, project) {
-    const result = execute("docker", args, project);
+  function docker(args, project, timeout) {
+    const result = execute("docker", args, project, timeout);
     assert.equal(result.status, 0, `Docker ${args[0]} failed`);
     return result.stdout.trim();
   }
@@ -109,6 +117,8 @@ export function validateEnvironmentRecovery({ cli, cwd, temporary, runtime = fal
     ]);
     const composePath = join(project, "tama/compose.yaml");
     const model = parse(readFileSync(composePath, "utf8"));
+    // Persistence/authentication fixtures use PostgreSQL 15 without vector extensions.
+    model.services["tama-postgres"].image = fixtureImage;
     const identity = `tama-env-${randomUUID()}`;
     // Scope both the source and normalized name; recovery probes both names.
     model.services["tama-postgres"].volumes = runtime
@@ -226,6 +236,13 @@ export function validateEnvironmentRecovery({ cli, cwd, temporary, runtime = fal
   );
 
   if (runtime) {
+    // Pull separately so cold VM downloads do not consume the startup deadline.
+    if (
+      execute("docker", ["image", "inspect", fixtureImage, "--format", "{{.Id}}"], cwd).status !== 0
+    ) {
+      console.log("Pulling disposable PostgreSQL 15 fixture image...");
+      docker(["pull", fixtureImage], cwd, 600_000);
+    }
     for (const [fixtureProject, missing, selection] of [
       [project, corePaths, []],
       [additive.project, integrationPaths, flags],
@@ -234,7 +251,17 @@ export function validateEnvironmentRecovery({ cli, cwd, temporary, runtime = fal
       const identity = parse(readFileSync(join(fixtureProject, "compose.yaml"), "utf8")).name;
       try {
         docker(
-          [...compose, "up", "-d", "--wait", "--wait-timeout", "90", "tama-postgres"],
+          [
+            ...compose,
+            "up",
+            "-d",
+            "--pull",
+            "never",
+            "--wait",
+            "--wait-timeout",
+            "90",
+            "tama-postgres",
+          ],
           fixtureProject,
         );
         const sql = (query) =>
@@ -246,7 +273,7 @@ export function validateEnvironmentRecovery({ cli, cwd, temporary, runtime = fal
               "tama-postgres",
               "sh",
               "-c",
-              'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1"',
+              'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1"',
               "sh",
               query,
             ],
@@ -280,7 +307,7 @@ export function validateEnvironmentRecovery({ cli, cwd, temporary, runtime = fal
               container,
               "sh",
               "-c",
-              'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1"',
+              'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1"',
               "sh",
               "SELECT value FROM recovery_acceptance;",
             ],

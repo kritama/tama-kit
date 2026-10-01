@@ -130,6 +130,19 @@ jobs:
         run: |
           printf '127.0.0.1 app.localhost tama.app.localhost\n' | sudo tee -a /etc/hosts
 
+      - name: Isolate public-image Docker client configuration
+        if: runner.os == 'macOS'
+        run: |
+          fixture_docker_host="$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
+          test -n "$fixture_docker_host"
+          fixture_docker_config="$RUNNER_TEMP/tama-env-docker"
+          mkdir -p "$fixture_docker_config/cli-plugins"
+          printf '{"auths": {}}\n' > "$fixture_docker_config/config.json"
+          ln -sf "$(brew --prefix)/bin/docker-compose" "$fixture_docker_config/cli-plugins/docker-compose"
+          echo "DOCKER_HOST=$fixture_docker_host" >> "$GITHUB_ENV"
+          echo "DOCKER_CONFIG=$fixture_docker_config" >> "$GITHUB_ENV"
+          echo "DOCKER_CONTEXT=" >> "$GITHUB_ENV"
+
       - name: Verify Docker and native Compose
         run: |
           docker info
@@ -140,7 +153,9 @@ jobs:
 
       - name: Stop isolated Docker daemon
         if: always() && runner.os == 'macOS'
-        run: colima delete --data --force
+        run: |
+          unset DOCKER_CONFIG DOCKER_HOST DOCKER_CONTEXT
+          colima delete --data --force
 
   bootstrap-integration:
     name: Bootstrap integration and runtime
