@@ -125,6 +125,11 @@ jobs:
           ln -sf "$(brew --prefix)/bin/docker-compose" "$HOME/.docker/cli-plugins/docker-compose"
           colima start --runtime docker --cpu 2 --memory 4 --disk 20
 
+      - name: Configure local HTTPS preview fixture names
+        if: runner.os == 'macOS'
+        run: |
+          printf '127.0.0.1 app.localhost tama.app.localhost\n' | sudo tee -a /etc/hosts
+
       - name: Verify Docker and native Compose
         run: |
           docker info
