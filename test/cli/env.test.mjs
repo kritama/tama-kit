@@ -2082,7 +2082,7 @@ test("MCP recovery refuses a missing contract rather than issuing standard-only 
   assert.deepEqual(snapshot(root), before);
 });
 
-test("MCP recovery diagnoses missing public fields in surviving private files without repairing them", async () => {
+test("MCP recovery refuses missing public fields in surviving private files when recovery is needed", async () => {
   const { root } = mcpFixture();
   const path = join(root, "tama/.memovee.integration.env");
   writeFileSync(
@@ -2092,10 +2092,18 @@ test("MCP recovery diagnoses missing public fields in surviving private files wi
   const before = snapshot(root);
   const doctor = await runEnvironmentDoctor({ cwd: root }, { execute: fakeDocker().execute });
   assert.equal(doctor.ok, false);
+  assert.match(
+    doctor.files.find((file) => file.role === "provider").issues.join("\n"),
+    /MEMOVEE_OAUTH_SIGNING_ALGORITHM is missing/u,
+  );
+  assert.deepEqual(snapshot(root), before);
+  rmSync(join(root, "tama/.tama.postgres.env"));
+  const missingSnapshot = snapshot(root);
   const result = await recovery(root);
   assert.equal(result.ok, false);
   assert.match(result.blockers.join("\n"), /MEMOVEE_OAUTH_SIGNING_ALGORITHM is missing/u);
-  assert.deepEqual(snapshot(root), before);
+  assert.deepEqual(result.changes, []);
+  assert.deepEqual(snapshot(root), missingSnapshot);
 });
 
 test("MCP recovery rejects stale public examples and rolls back a late effective signing shadow", async () => {
@@ -2369,4 +2377,111 @@ test("MCP recovery activation guidance uses setup and preserves quoted paths and
   );
   assert.equal(help.exitCode, 0);
   assert.match(help.stdout, /--activate/u);
+});
+
+test("env init is a no-op for healthy MCP projects with shared provider fragments", async () => {
+  const { root } = mcpFixture();
+  composeProvider(root);
+  const compose = join(root, "compose.yaml");
+  const model = parse(readFileSync(compose, "utf8"));
+  model.services["provider-worker"] = {
+    image: "example/provider:dev",
+    env_file: ["./tama/.memovee.integration.env"],
+  };
+  writeFileSync(compose, stringify(model));
+  const before = snapshot(root);
+  for (const dryRun of [true, false]) {
+    const docker = fakeDocker();
+    const result = await runEnvironmentInit(
+      { cwd: root, dryRun, fresh: false },
+      { execute: docker.execute },
+    );
+    assert.equal(result.ok, true, result.blockers.join("\n"));
+    assert.deepEqual(result.blockers, []);
+    assert.deepEqual(result.changes, []);
+    assert.equal(result.persistence.status, "not-required");
+    assert.ok(result.files.every((file) => file.action === "preserve" && file.issuance === "none"));
+    assert.ok(docker.calls.every((args) => args[0] === "compose"));
+    assert.deepEqual(snapshot(root), before);
+  }
+  // Recovery still needs an explicit provider selection when a file is actually missing.
+  rmSync(join(root, "tama/.memovee.integration.env"));
+  const missingSnapshot = snapshot(root);
+  const blocked = await recovery(root);
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.blockers.join("\n"), /multiple Compose services.*--provider-service/u);
+  assert.deepEqual(blocked.changes, []);
+  assert.deepEqual(snapshot(root), missingSnapshot);
+});
+
+test("env init is a no-op for healthy MCP projects with multiple integration destinations", async () => {
+  const { root, composeFiles } = additionFixture();
+  mkdirSync(join(root, "tama/extra"));
+  writeFileSync(
+    join(root, "tama/extra/.mcp-app.env"),
+    readFileSync(join(root, "tama/.mcp-app.env")),
+    { mode: 0o600 },
+  );
+  const ignore = join(root, "tama/.gitignore");
+  writeFileSync(ignore, `${readFileSync(ignore, "utf8")}\n/extra/.mcp-app.env\n`);
+  writeFileSync(
+    join(root, "extra-compose.yaml"),
+    "services:\n  tama:\n    env_file:\n      - ./tama/extra/.mcp-app.env\n",
+  );
+  composeFiles.push("extra-compose.yaml");
+  const before = snapshot(root);
+  for (const dryRun of [true, false]) {
+    const result = await runEnvironmentInit(
+      { cwd: root, composeFiles, dryRun, fresh: false },
+      { execute: fakeDocker().execute },
+    );
+    assert.equal(result.ok, true, result.blockers.join("\n"));
+    assert.deepEqual(result.blockers, []);
+    assert.deepEqual(result.changes, []);
+    assert.equal(result.persistence.status, "not-required");
+    assert.ok(result.files.every((file) => file.action === "preserve" && file.issuance === "none"));
+    assert.deepEqual(snapshot(root), before);
+  }
+  rmSync(join(root, "tama/.memovee.integration.env"));
+  const missingSnapshot = snapshot(root);
+  const blocked = await recovery(root, { composeFiles });
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.blockers.join("\n"), /current MCP App destinations are ambiguous/u);
+  assert.deepEqual(blocked.changes, []);
+  assert.deepEqual(snapshot(root), missingSnapshot);
+});
+
+test("env init returns a sanitized blocker when MCP effective environment inspection throws", async () => {
+  const { root } = mcpFixture();
+  composeProvider(root);
+  rmSync(join(root, "tama/.memovee.integration.env"));
+  const before = snapshot(root);
+  const rawFailure = "sensitive-provider-diagnostic-must-not-be-disclosed";
+  for (const dryRun of [true, false]) {
+    const docker = fakeDocker();
+    let failedProjections = 0;
+    const execute = (command, args, options) => {
+      if (args[0] === "compose" && args.includes("-")) {
+        const projection = JSON.parse(options.input);
+        if (
+          projection.services.runtime.environment.DATABASE_URL ===
+          "ecto://provider:local@provider-db/provider"
+        ) {
+          failedProjections += 1;
+          const error = new Error(rawFailure);
+          error.stderr = rawFailure;
+          throw error;
+        }
+      }
+      return docker.execute(command, args, options);
+    };
+    const result = await runEnvironmentInit({ cwd: root, dryRun, fresh: true }, { execute });
+    assert.equal(failedProjections, 1);
+    assert.equal(result.ok, false);
+    assert.match(result.blockers.join("\n"), /MCP App effective environment.*env_file/u);
+    assert.ok(!JSON.stringify(result).includes(rawFailure));
+    assert.deepEqual(result.changes, []);
+    assert.ok(result.files.every((file) => file.action === "preserve" && !file.created));
+    assert.deepEqual(snapshot(root), before);
+  }
 });

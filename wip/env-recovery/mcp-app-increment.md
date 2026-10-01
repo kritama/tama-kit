@@ -59,6 +59,16 @@ retaining contract ownership, required status, and all declaring services. The
 regression covers both present and missing fragments and confirms doctor leaves
 project files unchanged.
 
+The [CodeRabbit finding on PR #43](https://github.com/kritama/tama-kit/pull/43#discussion_r4153492543)
+identified recovery-only checks running when no files needed creation. MCP App
+recovery and destination-ambiguity inspection now run only when supported
+required files are missing. Healthy shared-provider and multiple-integration
+layouts retain successful no-op behavior in write and dry-run modes, while
+missing-file recovery still refuses ambiguous selections. Exceptions from MCP
+App effective-environment inspection become actionable, sanitized blockers;
+raw diagnostics remain suppressed and no files are created. Three regressions
+reproduced these failures before the fix and passed afterward.
+
 ## Verification
 
 Focused regressions cover full and partial private-file loss; combined/additive
@@ -95,6 +105,15 @@ Validation of the review follow-up on 2026-10-01 passed:
 - `npm run validate:package`: existing installed-package checks passed.
 - Focused activation-guidance and doctor regressions: three passed on both
   Compose 5.1.2 and Compose 2.38.2.
+
+Validation of the PR #43 CodeRabbit follow-up on 2026-10-01 passed:
+
+- `npm test`: 441 passed, one intentional skip, zero failures (442 tests total).
+- Build/typecheck, Biome, submission validation, and existing installed-package
+  checks passed.
+- Four focused tests passed with Compose 5.1.2 and 2.38.2, covering healthy
+  no-op layouts, missing-file ambiguity, sanitized inspection failures, and
+  invalid surviving public inputs during actual recovery.
 
 ## Remaining issue #41 work
 

@@ -569,7 +569,7 @@ export async function runEnvironmentInit(
       );
   }
   let mcpRecovery: McpAppRecovery | undefined;
-  if (contract.document) {
+  if (contract.document && missing.length > 0) {
     const service = tamaServiceName(inspection, options, references);
     const core = references.find((reference) => reference.role === "core");
     const fragments = references.filter(
@@ -580,19 +580,25 @@ export async function runEnvironmentInit(
         "the current MCP App destinations are ambiguous; select one Tama service and integration fragment",
       );
     else {
-      mcpRecovery = inspectMcpAppRecovery({
-        inspection,
-        contract: contract.document,
-        contractPath: contract.path ?? "",
-        tamaService: service,
-        corePath: core.path,
-        tamaPath: fragments[0]?.path ?? core.path,
-        providerService: options.providerService,
-        missingPaths: missing.map((reference) => reference.path),
-        reissuing: newSecrets,
-        execute: dependencies.execute,
-      });
-      blockers.push(...mcpRecovery.issues);
+      try {
+        mcpRecovery = inspectMcpAppRecovery({
+          inspection,
+          contract: contract.document,
+          contractPath: contract.path ?? "",
+          tamaService: service,
+          corePath: core.path,
+          tamaPath: fragments[0]?.path ?? core.path,
+          providerService: options.providerService,
+          missingPaths: missing.map((reference) => reference.path),
+          reissuing: newSecrets,
+          execute: dependencies.execute,
+        });
+        blockers.push(...mcpRecovery.issues);
+      } catch {
+        blockers.push(
+          "the MCP App effective environment could not be inspected safely; check its env_file declarations and inputs before environment recovery",
+        );
+      }
     }
   }
   const issuance = newSecrets ? "new" : missing.length > 0 ? "derived" : "none";
