@@ -61,8 +61,7 @@ function standardRoot() {
   return root;
 }
 
-function mcpFixture() {
-  const root = temporaryDirectory("tama-env-mcp-");
+function mcpFixture(root = temporaryDirectory("tama-env-mcp-")) {
   const document = memoveeContract();
   const contractPath = writeContract(root, document);
   const prepared = preparedFor(root, {
@@ -1749,7 +1748,8 @@ test("MCP recovery restores only a host provider fragment, preserves keys and re
   );
   assertSigning(provider, "MEMOVEE_OAUTH_PRIVATE_SIGNING_KEY", "MEMOVEE_OAUTH_SIGNING_KEY_ID");
   assert.equal(statSync(join(root, "tama/.memovee.integration.env")).mode & 0o777, 0o600);
-  assert.match(result.nextActions.join("\n"), /activate/u);
+  assert.match(result.nextActions.join("\n"), /tama-kit setup --activate/u);
+  assert.doesNotMatch(result.nextActions.join("\n"), /tama-kit activate/u);
   assert.ok(!JSON.stringify(result).includes(provider.get("MEMOVEE_OAUTH_PRIVATE_SIGNING_KEY")));
   assert.equal(
     (await runEnvironmentDoctor({ cwd: root }, { execute: fakeDocker().execute })).ok,
@@ -2270,4 +2270,103 @@ test("MCP derived-only recovery preserves enabled modes and succeeds with persis
       snapshot(root).find((current) => current[0] === entry[0]),
       entry,
     );
+});
+
+test("env doctor deduplicates provider declarations and retains required contract ownership and services", async () => {
+  const { root } = mcpFixture();
+  composeProvider(root);
+  const compose = join(root, "compose.yaml");
+  const model = parse(readFileSync(compose, "utf8"));
+  const reference = { path: "./tama/.memovee.integration.env", required: false };
+  model.services.provider.env_file = [reference];
+  model.services["provider-worker"] = { image: "example/provider:dev", env_file: [reference] };
+  writeFileSync(compose, stringify(model));
+  const options = { cwd: root, providerService: "provider" };
+  const before = snapshot(root);
+  const healthy = await runEnvironmentDoctor(options, { execute: fakeDocker().execute });
+  assert.equal(healthy.ok, true, JSON.stringify(healthy));
+  const reports = healthy.files.filter((file) => file.relative === "tama/.memovee.integration.env");
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].source, "contract");
+  assert.equal(reports[0].role, "provider");
+  assert.equal(reports[0].required, true);
+  assert.deepEqual(reports[0].services, ["provider", "provider-worker"]);
+  assert.deepEqual(snapshot(root), before);
+
+  rmSync(join(root, "tama/.memovee.integration.env"));
+  const missingSnapshot = snapshot(root);
+  const missing = await runEnvironmentDoctor(options, { execute: fakeDocker().execute });
+  assert.equal(missing.ok, false);
+  const missingReports = missing.files.filter(
+    (file) => file.relative === "tama/.memovee.integration.env",
+  );
+  assert.equal(missingReports.length, 1);
+  assert.equal(missingReports[0].status, "missing");
+  assert.equal(missingReports[0].required, true);
+  assert.equal(
+    missing.nextActions.filter((action) =>
+      action.startsWith("Restore tama/.memovee.integration.env "),
+    ).length,
+    1,
+  );
+  assert.deepEqual(snapshot(root), missingSnapshot);
+});
+
+test("MCP recovery activation guidance uses setup and preserves quoted paths and ordered selectors", async () => {
+  const parent = temporaryDirectory("tama-env-activation-selection-");
+  const root = join(parent, "my project");
+  mkdirSync(root);
+  mcpFixture(root);
+  composeProvider(root);
+  const override = "runtime override.yaml";
+  writeFileSync(
+    join(root, override),
+    "services:\n  tama:\n    environment:\n      TAMA_MCP_APP_MODE: prepared\n",
+  );
+  const contract = "tama/contracts/current contract.json";
+  renameSync(join(root, "tama/contracts/mcp-app-provider-v1.json"), join(root, contract));
+  rmSync(join(root, "tama/.memovee.integration.env"));
+  const result = await runEnvironmentInit(
+    {
+      cwd: parent,
+      targetPath: "my project",
+      composeFiles: ["compose.yaml", override],
+      service: "tama",
+      environmentFile: "tama/.tama.env",
+      contractPath: contract,
+      providerService: "provider",
+      fresh: false,
+      dryRun: false,
+    },
+    { execute: fakeDocker().execute },
+  );
+  assert.equal(result.ok, true, result.blockers.join("\n"));
+  const expected =
+    "tama-kit setup 'my project' --compose compose.yaml --compose 'runtime override.yaml' --service tama --env-file tama/.tama.env --contract 'tama/contracts/current contract.json' --provider-service provider --activate";
+  assert.ok(result.nextActions.some((action) => action.includes(`then use ${expected} for`)));
+  assert.doesNotMatch(result.nextActions.join("\n"), /tama-kit activate/u);
+  // Check the actual CLI accepts the suggested subcommand and flags without starting services.
+  const help = await command(
+    [
+      "setup",
+      "my project",
+      "--compose",
+      "compose.yaml",
+      "--compose",
+      override,
+      "--service",
+      "tama",
+      "--env-file",
+      "tama/.tama.env",
+      "--contract",
+      contract,
+      "--provider-service",
+      "provider",
+      "--activate",
+      "--help",
+    ],
+    parent,
+  );
+  assert.equal(help.exitCode, 0);
+  assert.match(help.stdout, /--activate/u);
 });

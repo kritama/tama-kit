@@ -266,35 +266,7 @@ export async function runEnvironmentDoctor(
       }
     }
   }
-  const references = [
-    ...inspection.envReferences
-      .filter((reference) => !reference.interpolated)
-      .map(
-        (reference): EnvironmentFileReference => ({
-          role: classifyEnvironmentReference(
-            basename(reference.path),
-            providerFragment ? basename(providerFragment) : undefined,
-          ),
-          path: reference.path,
-          relative: relative(root, reference.path),
-          services: reference.services,
-          required: reference.required,
-          source: "compose",
-        }),
-      ),
-    ...(providerFragment
-      ? [
-          {
-            role: "provider" as const,
-            path: providerFragment,
-            relative: relative(root, providerFragment),
-            services: [] as string[],
-            required: true,
-            source: "contract" as const,
-          },
-        ]
-      : []),
-  ];
+  const references = environmentReferences(inspection, providerFragment);
   inspectGenerationHistory(root, warnings);
   const identity = publicIdentityFor(
     root,
@@ -842,7 +814,7 @@ export async function runEnvironmentInit(
     }
     if (mcpRecovery) {
       nextActions.push(
-        "Load the provider fragment through its application-owned environment workflow, verify both services in prepared mode, then use tama-kit activate for the existing staged MCP App activation flow.",
+        `Load the provider fragment through its application-owned environment workflow, verify both services in prepared mode, then use ${environmentCommand("setup", selectionFromOptions(options))} --activate for the existing staged MCP App activation flow.`,
       );
       if (mcpRecovery.contract.topology)
         nextActions.push(

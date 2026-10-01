@@ -46,6 +46,19 @@ installs trust, starts services, activates integration modes, or provisions
 Terraform. It reports the remaining provider loading, TLS, setup, private
 credential onboarding, and staged activation work.
 
+## Review follow-up on 2026-10-01
+
+Recovery activation guidance now prints `tama-kit setup ... --activate` and
+preserves the selected project, ordered Compose files, services, environment
+file, and contract. Paths with spaces are quoted. The regression also checks
+that the actual CLI accepts the suggested command and flags.
+
+`env doctor` now shares `env init`'s environment-reference deduplication. A
+provider fragment declared by both Compose and its contract has one report,
+retaining contract ownership, required status, and all declaring services. The
+regression covers both present and missing fragments and confirms doctor leaves
+project files unchanged.
+
 ## Verification
 
 Focused regressions cover full and partial private-file loss; combined/additive
@@ -70,7 +83,18 @@ changed. Validation on 2026-09-30 passed:
 
 Local validation used macOS, Node 26.3.0, and Compose 5.1.2; the older Compose
 binary was selected through an isolated Docker config. The supported CI platform
-matrix remains a separate acceptance item.
+matrix and existing runtime checks subsequently passed for `aa866e4` in
+[this CI run](https://github.com/kritama/tama-kit/actions/runs/36825640306).
+Recovery-specific runtime acceptance remains a separate item below.
+
+Validation of the review follow-up on 2026-10-01 passed:
+
+- `npm test`: 438 passed, one intentional skip, zero failures (439 tests total).
+- `npm run check` and the build/typecheck: passed.
+- `npm run validate:submission`: passed (22 positive and three negative cases).
+- `npm run validate:package`: existing installed-package checks passed.
+- Focused activation-guidance and doctor regressions: three passed on both
+  Compose 5.1.2 and Compose 2.38.2.
 
 ## Remaining issue #41 work
 
