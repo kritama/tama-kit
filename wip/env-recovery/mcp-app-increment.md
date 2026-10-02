@@ -173,13 +173,19 @@ allow Colima to run the Docker daemon; the standard macOS ARM runners keep nativ
 Compose and non-daemon package coverage. Publication reruns Docker acceptance
 before npm publish.
 
-Local real-Docker installed-package acceptance passed on 2026-10-01. CI platform
-results must be green before the remaining checkbox and issue are completed.
+Local real-Docker installed-package acceptance passed on 2026-10-01.
+All ten jobs in [CI run 36869742954](https://github.com/kritama/tama-kit/actions/runs/36869742954)
+passed for commit `83852fcf4ba71663d2bc3b880ed5caf31bac79d0`, including the four
+Docker acceptance jobs across Ubuntu/macOS Intel and Node 20.12/24. Documentation
+and acceptance fixtures were merged in [PR #44](https://github.com/kritama/tama-kit/pull/44)
+at `470e7fa`.
 
-## Remaining issue #41 work
+## Issue #41 completion
 
-- Verify the new isolated Docker runtime recovery and persisted-volume refusal
-  CI jobs across the supported Node and macOS/Linux matrix.
+All implementation, documentation, installed-package, and real-Docker acceptance
+criteria are complete and included in v0.6.0. The historical plans and review
+records above retain their original findings and validation dates.
 
-This increment does not close issue #41. Recovery is environment completion,
-not live runtime, OAuth, or Terraform verification.
+Recovery completes the supported private environment files. Live runtime,
+OAuth, provisioner credentials, and Terraform checks remain explicit follow-up
+steps for the consuming project.
