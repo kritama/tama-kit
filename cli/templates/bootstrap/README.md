@@ -8,6 +8,38 @@ Native Compose and Terraform commands below work without Tama Kit or a receipt.
 Use `tama-kit doctor` to inspect current configuration and `tama-kit setup` to
 start and verify it; rerunning bootstrap does not refresh or recreate files.
 
+## Missing private environment files after cloning
+
+Run these from the project root, carrying any current Compose overrides and
+service/env-file/contract/provider-service selections into each command:
+
+```bash
+{{ENV_DOCTOR_COMMAND}} --json
+{{ENV_INIT_COMMAND}} --dry-run --json
+{{ENV_INIT_COMMAND}} --json
+```
+
+Review preview blockers before writing. Init creates only missing supported
+required private files with mode 0600; existing files, keys and modes stay
+unchanged. Optional files are never auto-created and unsupported application files
+need manual restoration. Current Compose declarations, public examples and the
+local MCP App contract supply recovery inputs; generation receipts do not.
+
+Detected runtime data refuses new secret issuance even with `--fresh`. Unknown
+persistence requires an explicit assertion that the selected runtime/provider
+is fresh; that flag does not delete data or bypass detected data. A missing
+PostgreSQL companion can use surviving core credentials with data present.
+Restore original private files from a secure backup when retaining runtime data.
+
+For MCP App recovery, new signing material needs prepared peers. Load the provider
+fragment through the application workflow, prepare missing HTTPS certificates
+and trust separately, then follow the printed `tama-kit setup ... --activate`
+handoff after verifying prepared services. Init does not start services, create
+TLS material, activate integrations or provision Terraform. Complete private
+onboarding and review the Terraform plan as described below.
+
+## Runtime and private setup
+
 {{SETUP_CHECKLIST}}
 
 The project root owns the Docker Compose runtime. From the project root, start

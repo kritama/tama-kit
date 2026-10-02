@@ -1,6 +1,6 @@
 ---
 name: tama-kit-cli
-description: Bootstrap application repositories with a local Tama runtime, prepare and activate MCP App provider integrations, set up Tama source checkouts, and generate standalone Tama OAuth keys with the Tama Kit CLI. Use when a user asks to bootstrap or integrate an app with Tama, choose Tama Kit flags, continue a staged MCP App setup, or troubleshoot a Tama Kit command.
+description: Bootstrap application repositories with a local Tama runtime, recover missing private environment files after cloning, prepare and activate MCP App provider integrations, set up Tama source checkouts, and generate standalone Tama OAuth keys with the Tama Kit CLI. Use when a user asks to bootstrap or integrate an app with Tama, restore ignored environment files, choose Tama Kit flags, continue a staged MCP App setup, or troubleshoot a Tama Kit command.
 ---
 
 # Tama Kit CLI
@@ -18,6 +18,8 @@ Never refresh generated files or update manifest hashes to make a check pass.
 - Add MCP App to an existing standard runtime: `tama-kit generate mcp-app`.
 - Existing project configuration: `tama-kit setup` to start and verify services.
 - Read-only configuration diagnosis: `tama-kit doctor`; add `--runtime` for probes.
+- Private environment diagnosis after cloning: `tama-kit env doctor`.
+- Create missing supported private environment files: `tama-kit env init`.
 - Tama Phoenix source development: `tama-kit dev setup`.
 - Standalone System OAuth signing key: `tama-kit oauth generate-key`.
 
@@ -60,6 +62,47 @@ doctor and native commands. Local HTTPS changes the selected service's build
 and published ports through that override. The separate MCP addition receipt
 supports explicit unfinished resume; it never authorizes repairing completed output.
 
+## Recover missing private environment files
+
+For a cloned, already-bootstrapped project, inspect with `env doctor --json` and
+preview `env init --dry-run --json`. Carry the target path, ordered `--compose`
+roots/overrides, `--service`, `--env-file`, `--contract` and `--provider-service`
+selection through diagnosis, init and setup. Additive projects need their MCP App
+override after the original roots. These commands never prompt.
+
+Recovery uses current Compose environment precedence, the selected local
+contract, project-owned public examples and surviving private files. Receipts
+are history only; resume an unfinished generation with its original options
+before recovery. Do not rerun completed generators or edit receipts to recreate
+deleted environment files.
+
+When recovery is authorized, repeat the successful preview without `--dry-run`.
+Init creates only missing supported required files with mode 0600. Existing
+files, keys, modes and overlap sets stay unchanged. Repair invalid surviving
+files through the project's own workflow; optional files are never auto-created
+and unsupported application files require manual restoration. A complete healthy
+project returns a no-op. Re-run env doctor to check the recovered environment.
+
+New secret issuance refuses detected Tama/provider persisted data, even with
+`--fresh`. Restore the original secrets privately when keeping that data. For
+unknown persistence, obtain the user's fresh-runtime assertion before using
+`--fresh`; it does not reset data or bypass ambiguous database associations.
+Derived PostgreSQL companions can use surviving credentials with persisted data.
+Do not inspect real application databases to work around a refusal.
+
+Combined/additive HTTP and local HTTPS MCP App recovery needs the selected
+contract and enough public inputs, including allowed origins. New provider and
+Tama integration keys are independent and require prepared peers. Load the
+provider fragment through the application workflow, prepare missing TLS/trust
+separately, and use the printed `setup ... --activate` handoff only when activation
+is authorized.
+
+Successful recovery completes environment files, not runtime, OAuth or Terraform
+verification. Follow the reported setup, private onboarding and Terraform plan
+steps. Never print secrets, raw Compose environments or private setup URLs; empty
+provisioner credentials remain expected until private onboarding is completed.
+See the [CLI reference](references/cli-reference.md#private-environment-recovery).
+
 ## Check prerequisites
 
 Initial bootstrap dry-run needs neither Docker nor its daemon. Additive MCP App
@@ -69,6 +112,8 @@ and Compose 2.20.0 or newer (`docker --version`, `docker compose version`).
 Current-configuration inspection additionally needs Compose's native
 `config --format json --no-env-resolution` support, but no daemon. Starting or
 probing services requires `docker info --format '{{.ServerVersion}}'` to succeed.
+Env init probes persistence before issuing new secrets; failed probes leave an
+unknown state, which requires the user's explicit fresh-runtime assertion.
 A failed daemon check must not block a generation dry run. Let the user install
 or initialize missing tools; do not install or start Docker on their behalf.
 Local HTTPS generation needs mkcert; CA trust is an explicit host operation.

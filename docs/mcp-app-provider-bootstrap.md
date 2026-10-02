@@ -95,7 +95,37 @@ Inspection requires Compose support for `config --format json` and
 `--no-env-resolution`; it does not require a running daemon. Current setup does
 not infer arbitrary application restart commands from configuration.
 
-## Staged activation and recovery
+## Recover missing environment fragments after cloning
+
+With the current Compose files, local contract and public examples present, use
+`tama-kit env doctor --json`, then `tama-kit env init --dry-run --json`. Review the
+blockers and repeat init without `--dry-run` to recover missing required files.
+Carry the project path, ordered Compose roots/overrides, Tama service/env-file,
+contract and Compose provider selection through each command. Additive projects
+must include their MCP App override after the original roots.
+
+Recovery supports combined HTTP/local HTTPS core environments and separate
+additive `.mcp-app.env` fragments. It uses current contract bindings and public
+examples, preserving surviving files, keys, modes and overlap sets. Missing
+public origins, allowed origins or contract inputs are blockers. Receipts do not
+authorize recovery; resume an unfinished generation explicitly first.
+
+Issuing missing signing material checks Tama and provider persistence and requires
+prepared peers. Detected data refuses issuance even with `--fresh`; use a secure
+backup of the original secrets when retaining that data. Unknown persistence,
+including host providers, needs an explicit fresh-runtime assertion. New provider
+access-token and Tama introspection keypairs are independent. A missing derived
+PostgreSQL companion can retain surviving credentials without issuing keys.
+
+After recovery, make the application load its provider fragment, prepare missing
+local HTTPS certificates/trust through the project's mkcert workflow, and verify
+both services in prepared mode before staged activation. Keep public HTTPS origins
+separate from Docker upstream ports. Init never creates TLS, starts services,
+activates modes, supplies provisioner credentials or provisions Terraform.
+See [environment recovery](environment-recovery.md) for selections, public inputs,
+persistence refusal and safe `--fresh` use.
+
+## Staged activation and mode rollback
 
 1. Implement the provider's OAuth contract and load its private fragment.
 2. Start it in prepared mode. Complete private root-user setup and Terraform
