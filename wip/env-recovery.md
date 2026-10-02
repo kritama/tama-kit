@@ -1,15 +1,18 @@
 # Private environment recovery for issue #41
 
-Status: implementation merged; final acceptance fixtures implemented. Standard core/PostgreSQL
-recovery was merged in [PR #42](https://github.com/kritama/tama-kit/pull/42).
-Combined/additive MCP App HTTP/HTTPS recovery was merged in
-[PR #43](https://github.com/kritama/tama-kit/pull/43) at `7471651`, including
-both-sided persistence checks, prepared-only new signing material, and public
-integration examples. Documentation and CLI/generated guidance are completed on
-`feature/issue-41-env-recovery-docs`. See the [MCP App increment](env-recovery/mcp-app-increment.md)
-for scope and verification. Installed-package env acceptance and isolated real
-Docker recovery/refusal fixtures are implemented on that branch. Local acceptance
-passes; the supported CI matrix must pass before issue #41 closes.
+Status: complete. Standard core/PostgreSQL recovery was merged in
+[PR #42](https://github.com/kritama/tama-kit/pull/42). Combined/additive MCP App
+HTTP/HTTPS recovery was merged in [PR #43](https://github.com/kritama/tama-kit/pull/43)
+at `7471651`. Documentation, CLI/generated guidance, installed-package acceptance,
+and isolated real-Docker recovery/refusal checks were merged in
+[PR #44](https://github.com/kritama/tama-kit/pull/44) at `470e7fa`.
+
+All ten jobs in [CI run 36869742954](https://github.com/kritama/tama-kit/actions/runs/36869742954)
+passed for acceptance commit `83852fcf4ba71663d2bc3b880ed5caf31bac79d0`, including
+Docker recovery and persisted-volume refusal on Ubuntu and macOS Intel with
+Node 20.12 and 24. See the [MCP App increment](env-recovery/mcp-app-increment.md)
+for scope and historical verification. All issue #41 acceptance criteria are
+complete and included in the v0.6.0 release.
 
 Inspected `kritama/tama-kit` develop at
 `a3f3008722be7fc4e962f002ef4606ab467f849c` on 2026-09-29, and
@@ -320,5 +323,5 @@ Acceptance checklist:
 - [x] Public recovery examples, README and generated setup guidance, CLI help,
   and the packaged CLI skill/reference document the complete recovery workflow.
 - [x] Installed-package acceptance explicitly exercises `env doctor` and `env init`.
-- [ ] Isolated Docker recovery and persisted-volume refusal checks pass the
+- [x] Isolated Docker recovery and persisted-volume refusal checks pass the
   repository's supported Node and macOS/Linux platform matrix.
