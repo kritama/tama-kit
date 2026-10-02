@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateEnvironmentRecovery } from "./lib/env-recovery-acceptance.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const temporary = mkdtempSync(join(realpathSync(tmpdir()), "tama-kit-package-"));
@@ -42,6 +43,11 @@ try {
     "bin/tama-kit.mjs",
     "cli/workflows/bootstrap.mjs",
     "cli/workflows/mcp-app-runtime.mjs",
+    "cli/workflows/environment.mjs",
+    "cli/bootstrap/mcp-app-recovery.mjs",
+    "cli/bootstrap/persistence.mjs",
+    "cli/commands/env.mjs",
+    "cli/domain/environment.mjs",
     "cli/workflows/scaffold-write.mjs",
     "cli/workflows/activation.mjs",
     "cli/domain/runtime.mjs",
@@ -60,6 +66,7 @@ try {
     "cli/bootstrap/contracts/mcp-app-bootstrap-v1.json",
     "skills/graph-builder/SKILL.md",
     "skills/graph-builder/references/deterministic-primitives.md",
+    "skills/graph-builder/references/external-integrations.md",
     "skills/graph-audit/SKILL.md",
     "skills/graph-audit/references/deterministic-primitives.md",
     "skills/tama-kit-cli/SKILL.md",
@@ -100,6 +107,8 @@ try {
     ["setup", "--help"],
     ["generate", "mcp-app", "--help"],
     ["doctor", "--help"],
+    ["env", "doctor", "--help"],
+    ["env", "init", "--help"],
     ["dev", "setup", "--help"],
     ["oauth", "generate-key", "--help"],
     ["bootstrap", project, "--dry-run", "--json", "--skills", "local"],
@@ -178,8 +187,14 @@ try {
     ),
   );
   assert.equal(inspected.configuration.status, "valid");
+  const recovery = validateEnvironmentRecovery({
+    cli: installed,
+    cwd: consumer,
+    temporary,
+    runtime: process.argv.includes("--runtime"),
+  });
   console.log(
-    `Installed ${metadata.name}@${metadata.version}: ESM, assets, plans, terminal preview/cancellation, aliases, help, additive generation/setup, and private-key output verified without development dependencies.`,
+    `Installed ${metadata.name}@${metadata.version}: ESM, assets, plans, terminal preview/cancellation, aliases, help, additive generation/setup, private-key output, and ${recovery} verified without development dependencies.`,
   );
 } finally {
   rmSync(temporary, { recursive: true, force: true });

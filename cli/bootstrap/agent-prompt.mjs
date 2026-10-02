@@ -1,6 +1,7 @@
 // @ts-check
 
 import { relative } from "node:path";
+import { environmentCommand } from "../domain/environment.mjs";
 import { formatComposePsCommand, formatComposeUpCommand } from "./compose-command.mjs";
 import { BOOTSTRAP_PATHS } from "./constants.mjs";
 
@@ -10,6 +11,13 @@ import { BOOTSTRAP_PATHS } from "./constants.mjs";
  */
 export function formatAgentSetupPrompt(plan, { setupUrl } = {}) {
   const composeFile = relative(plan.root, plan.composeFile);
+  const environmentSelection = {
+    compose: [composeFile],
+    service: "tama",
+    ...(plan.localHttps?.providerService
+      ? { providerService: plan.localHttps.providerService }
+      : {}),
+  };
   const composeUp = formatComposeUpCommand(
     composeFile,
     plan.localHttps ? "caddy" : "tama",
@@ -36,6 +44,7 @@ export function formatAgentSetupPrompt(plan, { setupUrl } = {}) {
     "Read tama/AGENTS.md and tama/README.md first. Use the graph-builder skill if it is available; otherwise continue from the repository instructions.",
     "",
     "You are authorized to run the safe local setup and validation commands below without asking first:",
+    `Before startup, run \`${environmentCommand("doctor", environmentSelection)} --json\`. If required private files are missing, preview \`${environmentCommand("init", environmentSelection)} --dry-run --json\` and follow the environment recovery policy in tama/README.md. Preserve surviving keys, resolve blockers before startup, and never use --fresh to bypass detected runtime data.`,
     `1. From the project root, run \`${composeUp}\`.`,
     `2. Run \`${composePs}\` and wait until Tama responds successfully at ${plan.localHttps?.healthUrl ?? `http://localhost:${plan.port}/`}. If startup fails, inspect bounded Compose status and logs and explain the failure.`,
     setupUrl

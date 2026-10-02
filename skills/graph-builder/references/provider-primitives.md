@@ -232,9 +232,12 @@ a model at all.
 
 ### `tama_thought_tool`
 
-Attach an action to a thought. Confirm the action's specification, method, path,
-input corpus, output handling, and owning space bridge when it causes an
-external side effect.
+Attach an action to a thought. Resolve the action through `data "tama_action"`
+from the Terraform-managed specification and bind `action_id` to that data
+source rather than a copied remote ID; a declared specification alone does not
+enable the tool. See [external integrations](external-integrations.md). Confirm
+the action's specification, method, path, input corpus, output handling, and
+owning space bridge when it causes an external side effect.
 
 ### `tama_thought_tool_modifier`
 
@@ -309,6 +312,15 @@ the repository's retention policy rather than omitting it accidentally.
 Register an external API schema in its owning space. Treat schema completion or
 failure waits as deployment prerequisites.
 
+When this state owns the integration, declare the specification here together
+with its `data "http"` OpenAPI document source; never provision it out of band
+through Tama's API. Keep the three identities distinct: `endpoint` is the
+document URL, the `servers` entry of the document names the API source endpoint
+the actions call, and `version` follows the application's versioning
+convention, not the OpenAPI format version. Read [external
+integrations](external-integrations.md) for ownership rules, conditional
+activation, and adoption of existing specifications.
+
 ### `tama_source_identity`
 
 Bind credentials to a specification and define their validation request. Never
@@ -321,9 +333,10 @@ with different provider quotas.
 
 ### Actions and modifiers
 
-Use `data "tama_action"` to resolve actions from specifications. Use action
-modifiers only when the graph deliberately transforms a request or response;
-verify that modifiers preserve identifiers used by downstream relations.
+Use `data "tama_action"` to resolve actions from the Terraform-managed
+specification ID. Use action modifiers only when the graph deliberately
+transforms a request or response; verify that modifiers preserve identifiers
+used by downstream relations.
 
 ## Supporting graph resources
 
@@ -368,8 +381,9 @@ the Terraform resource is statically present.
 ### `tama_source`
 
 Use a source to represent an external execution endpoint associated with a
-specification. Source identity, validation, limits, and actions must agree on
-the same specification contract.
+specification. Resolve it with `data "tama_source"` from the specification ID
+and the slug of the imported document `servers` entry. Source identity,
+validation, limits, and actions must agree on the same specification contract.
 
 ## Operational semantics
 

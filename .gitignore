@@ -12,3 +12,14 @@ __pycache__/
 /cli/bootstrap/current-config.mjs
 
 /cli/commands/generate.mjs
+
+/cli/bootstrap/compose-inspection.mjs
+
+/cli/commands/env.mjs
+
+/cli/bootstrap/persistence.mjs
+
+/cli/bootstrap/mcp-app-recovery.mjs
+
+# Intentionally violating CLI best-practice fixtures (agent skill evals)
+.agents/skills/nodejs-cli-best-practices/evals/

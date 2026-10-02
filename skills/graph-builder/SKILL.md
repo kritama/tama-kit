@@ -60,6 +60,7 @@ Read only the references that match the request:
 - For a new repository, a missing global module, or any use of global schemas, corpora, or space IDs, read [global foundation](references/global-foundation.md).
 - For routed conversations, shared reply chains, direct forwarding, or action terminals, read [conversation graphs](references/conversation-graphs.md).
 - For crawlers, extraction, relations, generation, embeddings, indexing, or batch reprocessing, read [ingestion and indexing](references/ingestion-and-indexing.md).
+- For API-backed integrations — OpenAPI specifications, sources, actions, and thought-tool bindings, including synchronous action terminals — read [external integrations](references/external-integrations.md).
 - For helper-module selection, read [Tama base modules](references/tama-base-modules.md).
 - For deterministic persisted rendering, scalar path routing, or durable MCP result terminals, read [deterministic graph primitives](references/deterministic-primitives.md).
 - For raw resources, control edges, or trusted context-to-tool argument injection, read [provider primitives](references/provider-primitives.md).
@@ -83,6 +84,8 @@ contract does not require a root reply.
 8. Keep shared reply generation in the root messaging space when that is the repository architecture. Attach branch-specific prompts with path directives rather than cloning reply chains.
 9. For sibling domain graphs, use a parity matrix but preserve independent class IDs, actions, relations, and lifecycle controls.
 10. Update prompts, schemas, listener filters, documentation, and tests in the same change as their Terraform edges. Every JSON schema passed to `tama_class.schema_json` must include non-empty top-level `title` and `description` fields; property-level descriptions do not satisfy this class contract. Check the decoded schemas before apply because ordinary Terraform validation may not exercise Tama's remote schema validation.
+
+For every API-backed integration — crawler, indexer, or synchronous tool/action terminal — declare the OpenAPI document source and `tama_specification` in the Terraform state that owns the integration, then resolve actions and sources from that specification. Never substitute a specification provisioned out of band through Tama's API for Terraform ownership, and never copy a remote action or source ID into reusable graph configuration. When the integration is deliberately owned by another state, consume it through an explicit documented dependency. Read [external integrations](references/external-integrations.md) for the document, source, and version identities, conditional activation, and safe adoption of existing specifications.
 
 ## Manage existing graphs safely
 

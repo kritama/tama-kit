@@ -92,6 +92,72 @@ jobs:
       - name: Validate installed CLI package
         run: npm run validate:package
 
+  env-recovery:
+    name: Environment recovery (${{ matrix.os }}, Node ${{ matrix.node }})
+    needs: test
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15-intel]
+        node: ["20.12.0", "24"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # macos-latest uses ARM runners without nested virtualization support.
+      # Colima's own integration jobs use macos-15-intel for a real daemon.
+      - name: Start isolated Docker daemon on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install colima docker docker-compose
+          mkdir -p "$HOME/.docker/cli-plugins"
+          ln -sf "$(brew --prefix)/bin/docker-compose" "$HOME/.docker/cli-plugins/docker-compose"
+          colima start --runtime docker --cpu 2 --memory 4 --disk 20
+
+      - name: Configure local HTTPS preview fixture names
+        if: runner.os == 'macOS'
+        run: |
+          printf '127.0.0.1 app.localhost tama.app.localhost\n' | sudo tee -a /etc/hosts
+
+      - name: Isolate public-image Docker client configuration
+        if: runner.os == 'macOS'
+        run: |
+          fixture_docker_host="$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
+          test -n "$fixture_docker_host"
+          fixture_docker_config="$RUNNER_TEMP/tama-env-docker"
+          mkdir -p "$fixture_docker_config/cli-plugins"
+          # An explicit anonymous entry also prevents native credential-helper autodetection.
+          printf '{"auths": {"https://index.docker.io/v1/": {}}}\n' > "$fixture_docker_config/config.json"
+          ln -sf "$(brew --prefix)/bin/docker-compose" "$fixture_docker_config/cli-plugins/docker-compose"
+          echo "DOCKER_HOST=$fixture_docker_host" >> "$GITHUB_ENV"
+          echo "DOCKER_CONFIG=$fixture_docker_config" >> "$GITHUB_ENV"
+          echo "DOCKER_CONTEXT=" >> "$GITHUB_ENV"
+
+      - name: Verify Docker and native Compose
+        run: |
+          docker info
+          docker compose version
+
+      - name: Validate installed env recovery and persisted-data refusal
+        run: npm run validate:env:runtime
+
+      - name: Stop isolated Docker daemon
+        if: always() && runner.os == 'macOS'
+        run: |
+          unset DOCKER_CONFIG DOCKER_HOST DOCKER_CONTEXT
+          colima delete --data --force
+
   bootstrap-integration:
     name: Bootstrap integration and runtime
     needs: test

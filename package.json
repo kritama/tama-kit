@@ -1,6 +1,6 @@
 {
   "name": "@kritama/tama-kit",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Bootstrap Tama runtimes and MCP App OAuth integrations, and build, manage, and audit Tama Terraform graphs.",
   "keywords": [
     "codex-plugin",
@@ -69,7 +69,8 @@
     "prevalidate:bootstrap:runtime": "npm run build",
     "prevalidate:mcp-app:runtime": "npm run build",
     "prevalidate:memovee:runtime": "npm run build",
-    "validate:package": "node scripts/validate-cli-package.mjs"
+    "validate:package": "node scripts/validate-cli-package.mjs",
+    "validate:env:runtime": "node scripts/validate-cli-package.mjs --runtime"
   },
   "publishConfig": {
     "access": "public"

@@ -9,6 +9,9 @@
 | `setup --dry-run` | Inspect configuration and preview activation when requested | None |
 | `doctor [path]` | Inspect Compose, bindings and Terraform readiness | None |
 | `doctor --runtime` | Also probe existing services | None |
+| `env doctor [path]` | Inspect declared private environment files | None |
+| `env init [path]` | Recover missing supported required environment files | Exclusive new private files only |
+| `env init --dry-run` | Preview recovery and blockers | None; no keys generated |
 | `dev setup [path]` | Native Tama Phoenix checkout setup | Separate development workflow |
 | `oauth generate-key` | Generate a standalone System OAuth key | New explicit output only |
 
@@ -69,7 +72,76 @@ Use native Compose and Terraform commands to inspect details privately.
 `--json` and non-TTY execution never prompt; `--non-interactive` disables
 terminal questions. `--no-color` suppresses styling. `--help` is read-only.
 Current inspection requires native Compose JSON and `--no-env-resolution`
-support. Only service startup or runtime inspection requires the Docker daemon.
+support. Read-only configuration inspection does not need a running daemon.
+Env init probes persistence before new secret issuance; failed probes leave an
+unknown state requiring an explicit fresh-runtime assertion. Startup and runtime
+probes require the daemon to be reachable.
+
+## Private environment recovery
+
+Use this after cloning a bootstrapped project whose ignored private files are
+absent. These commands never prompt, regardless of JSON or terminal mode:
+
+```bash
+tama-kit env doctor --json
+tama-kit env init --dry-run --json
+tama-kit env init --json
+tama-kit env doctor --json
+```
+
+Inspect blockers before writing. Supported roles are core `.tama.env`, derived
+`.tama.postgres.env`, additive `.mcp-app.env`, and the provider fragment named by
+the selected local MCP App contract. Init creates only missing required files
+with mode 0600; existing files and keys are preserved. Optional absent files are
+informational and never auto-created. Other application files need manual
+restoration; invalid existing files need repair through the project workflow.
+
+Both commands accept a project path and ordered repeatable `--compose`,
+`--service`, `--env-file`, `--contract`, and `--provider-service`. Paths are relative
+to that project root. Preserve this selection in every command; additive projects
+need their MCP App override after the base roots. Select a provider when multiple
+Compose services load its fragment. A host provider has no provider-service flag.
+Proxy/CA/Terraform options apply to `setup`/`doctor`, not `env` commands.
+
+Current Compose env-file/inline precedence, local contracts, public examples and
+surviving private files supply recovery inputs. Receipts do not describe desired
+configuration. Resume incomplete generation explicitly before recovering files;
+completed generation never recreates deleted output. Standard public inputs
+come from `.tama.env.example`; combined integration inputs live there too.
+Additive projects use `.mcp-app.env.example`, and provider fragments have sibling
+examples. Missing or conflicting public identity, origins or contract bindings
+block recovery instead of being guessed.
+
+New secret issuance checks Tama persistence and, for MCP App, provider database,
+data mounts and running/stopped provider containers. Detected persistence refuses
+issuance even with `--fresh`; restore original private files when retaining data.
+Unknown persistence requires the caller's explicit fresh-runtime assertion:
+
+```bash
+tama-kit env init --fresh --dry-run --json
+tama-kit env init --fresh --json
+```
+
+Carry the current selection into these commands. `--fresh` neither resets data
+nor bypasses detected data or ambiguous associations. Derived-only PostgreSQL
+recovery can retain surviving credentials with data present. Init rechecks inputs
+and persistence inside the transaction; failures roll back newly created files.
+
+New integration signing material is independent on provider and Tama sides and
+requires prepared peers. Existing keys, modes and overlap sets are preserved;
+enabled/conflicting peers block new issuance. Follow the provider loader and
+`setup ... --activate` handoff after prepared verification. Local HTTPS needs its
+own certificate/trust preparation. Init never starts services, creates TLS,
+activates integration modes, supplies provisioner credentials or runs Terraform.
+
+`env doctor --json` reports file role/source/status, declaring services, sanitized
+issues, `changes: []` and `persistence.status: not-checked`. Init reports file
+create/preserve actions, new/derived/none issuance, persistence, blockers, changes
+and next actions. Dry-run reports planned destinations without creating keys or
+files. Results never contain private file contents. Successful results exit 0;
+unsatisfied required files or init blockers exit 4. Other CLI errors retain their
+category and exit code. Empty provisioner credentials are expected until private
+onboarding; successful environment completion does not verify runtime readiness.
 
 ## MCP App handoff
 
