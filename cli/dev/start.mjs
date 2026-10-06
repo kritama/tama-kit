@@ -4,7 +4,7 @@ import { startupError } from "../errors.mjs";
 import { CapturedProcessError, runCapturedProcess } from "../shared/captured-process.mjs";
 import { processEnvironment } from "../shared/environment.mjs";
 import { runProcess } from "../shared/process.mjs";
-import { devSetupDiagnostic } from "./diagnostics.mjs";
+import { devSetupDiagnostic, lockedProvider } from "./diagnostics.mjs";
 
 /** @param {unknown} error */
 function errorMessage(error) {
@@ -32,11 +32,17 @@ async function runDevSubprocess(phase, label, command, args, options) {
   } catch (error) {
     const diagnostic =
       error instanceof CapturedProcessError
-        ? devSetupDiagnostic(phase, { stdout: error.stdout, stderr: error.stderr })
+        ? devSetupDiagnostic(
+            phase,
+            { stdout: error.stdout, stderr: error.stderr },
+            phase === "foundation" ? { provider: lockedProvider(options.cwd) } : undefined,
+          )
         : undefined;
+    // root is retained internally so the JSON re-projector can verify the
+    // provider record against the checkout's own lock file before publishing.
     throw startupError(
       `${label} failed: ${errorMessage(error)}`,
-      diagnostic ? { diagnostic } : undefined,
+      diagnostic ? { diagnostic, root: options.cwd } : undefined,
     );
   }
 }
