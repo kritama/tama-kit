@@ -83,13 +83,18 @@ const APPLY_EVIDENCE =
 const INIT_EVIDENCE =
   /tofu init|terraform init|initializ\w+ (?:the |any )?(?:providers|backend|infrastructure)|initializ\w+ provider plugins|openTofu has been (?:successfully )?initialized|Terraform has been (?:successfully )?initialized/iu;
 
-/** Strict `provider "registry.opentofu.org/ns/name"` lockfile block header. */
-const LOCK_PROVIDER_HEADER =
-  /provider\s+"(registry\.opentofu\.org\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)"\s*\{/g;
+/** Top-level `provider "<source>"` block header (any registry/source). */
+const LOCK_PROVIDER_HEADER = /\bprovider\s+"([^"\n]+)"\s*\{/uy;
 
-/** Top-level `version = "x.y.z"` attribute inside a provider block body. */
-const LOCK_VERSION_ATTRIBUTE =
-  /^\s*version\s*=\s"(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z][0-9A-Za-z.-]*)?)"\s*$/mu;
+/** Every top-level `version` assignment inside a provider block body. */
+const LOCK_VERSION_ASSIGNMENT = /^\s*version\s*=\s*(.*)$/gmu;
+
+/** Quoted semver right-hand side; the only accepted version value. */
+const LOCK_VERSION_VALUE = /^"(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z][0-9A-Za-z.-]*)?)"$/u;
+
+/** Conservative metadata policy for the emitted provider record. */
+const LOCK_SOURCE_POLICY =
+  /^registry\.opentofu\.org\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/u;
 
 /**
  * Strip hash, double-slash, and C-style block comments while preserving
@@ -179,32 +184,80 @@ function findMatchingBrace(text, openIndex) {
 }
 
 /**
- * Parse the single provider record from lockfile content. Fails closed: any
- * missing, unbalanced, ambiguous (not exactly one provider), or malformed
- * record yields undefined. Only the quoted top-level `version` attribute of
- * each provider block is considered; constraints, hashes, comments, strings,
- * and text in other provider blocks can never be read as a selected version.
+ * Extract the selected version from a provider block body, requiring
+ * exactly one legitimate top-level `version` assignment. Duplicate, missing,
+ * unquoted, or malformed assignments make the record ambiguous; constraints,
+ * hashes, comments, strings, and nested blocks can never be read as the
+ * version.
+ * @param {string} source quoted provider source from the header
+ * @param {string} text comment-stripped lockfile content
+ * @param {number} open index of the block's opening brace
+ * @param {number} close index of the block's closing brace
+ * @returns {{source: string, version: string | null}}
+ */
+function readProviderRecord(source, text, open, close) {
+  const body = text.slice(open + 1, close);
+  const nested = body.search(/\{/u);
+  const topLevel = nested === -1 ? body : body.slice(0, nested);
+  const assignments = [...topLevel.matchAll(LOCK_VERSION_ASSIGNMENT)];
+  if (assignments.length !== 1) return { source, version: null };
+  const value =
+    /** @type {string} */ (assignments[0][1]).trim().match(LOCK_VERSION_VALUE)?.[1] ?? null;
+  return { source, version: value };
+}
+
+/**
+ * Parse the single provider record from lockfile content. Every real
+ * top-level `provider` block is counted regardless of registry or source;
+ * headers inside comments, quoted strings, or non-provider blocks do not
+ * count. Metadata is emitted only when exactly one block exists, it has
+ * exactly one legitimate top-level quoted version assignment, and its
+ * source and version pass the conservative policy. Any missing, unbalanced,
+ * ambiguous, or unsupported lockfile fails closed to undefined.
  * @param {string} content
  * @returns {{source: string, version: string} | undefined}
  */
 function parseLockedProvider(content) {
   const text = stripHclComments(content);
-  const records = [];
-  const header = new RegExp(LOCK_PROVIDER_HEADER.source, "g");
-  for (const match of text.matchAll(header)) {
-    const open = match.index + match[0].length - 1;
-    const close = findMatchingBrace(text, open);
-    if (close === -1) return undefined;
-    const body = text.slice(open + 1, close);
-    const nested = body.search(/\{/u);
-    const topLevel = nested === -1 ? body : body.slice(0, nested);
-    const version = /** @type {RegExpMatchArray | null} */ (
-      topLevel.match(LOCK_VERSION_ATTRIBUTE)
-    )?.[1];
-    records.push({ source: /** @type {string} */ (match[1]), version });
+  const providers = [];
+  let i = 0;
+  let inString = false;
+  while (i < text.length) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === "\\" && i + 1 < text.length) i += 2;
+      else if (ch === '"') inString = false;
+      i += 1;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      i += 1;
+      continue;
+    }
+    LOCK_PROVIDER_HEADER.lastIndex = i;
+    const header = LOCK_PROVIDER_HEADER.exec(text);
+    if (header) {
+      const open = i + header[0].length - 1;
+      const close = findMatchingBrace(text, open);
+      if (close === -1) return undefined;
+      providers.push(readProviderRecord(/** @type {string} */ (header[1]), text, open, close));
+      i = close + 1;
+      continue;
+    }
+    if (ch === "{") {
+      const close = findMatchingBrace(text, i);
+      if (close === -1) return undefined;
+      i = close + 1;
+      continue;
+    }
+    if (ch === "}") return undefined;
+    i += 1;
   }
-  if (records.length !== 1 || records[0].version === undefined) return undefined;
-  return { source: records[0].source, version: records[0].version };
+  if (providers.length !== 1) return undefined;
+  const only = providers[0];
+  if (!only.version || !LOCK_SOURCE_POLICY.test(only.source)) return undefined;
+  return { source: only.source, version: only.version };
 }
 
 /**

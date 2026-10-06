@@ -275,11 +275,68 @@ test("lockedProvider fails closed for ambiguous, malformed, or misleading lockfi
       "}",
       "",
     ].join("\n"),
+    [
+      'provider "registry.opentofu.org/upmaru/tama" {',
+      '  version = "0.7.0"',
+      '  version = "9.9.9"',
+      "}",
+      "",
+    ].join("\n"),
+    [
+      'provider "registry.opentofu.org/upmaru/tama" {',
+      '  version = "0.7.0"',
+      "  version = 9.9.9",
+      "}",
+      "",
+    ].join("\n"),
+    [
+      'provider "registry.opentofu.org/upmaru/tama" {',
+      '  version     = "0.7.0"',
+      "}",
+      'provider "registry.terraform.io/hashicorp/null" {',
+      '  version     = "3.2.4"',
+      "}",
+      "",
+    ].join("\n"),
+    ['provider "registry.terraform.io/hashicorp/null" {', '  version     = "3.2.4"', "}", ""].join(
+      "\n",
+    ),
     "TAMA_CLIENT_SECRET=registry.opentofu.org/private/probe-secret 1.2.3-private-secret\n",
   ]) {
     assert.equal(lockedProvider(lockRootWith(content)), undefined, content);
   }
   assert.equal(lockedProvider(temporaryDirectory("tama-kit-no-lock-")), undefined);
+});
+
+test("lockedProvider does not count headers inside comments or non-provider blocks", () => {
+  assert.deepEqual(
+    lockedProvider(
+      lockRootWith(
+        [
+          ...VALID_LOCKFILE.split("\n"),
+          '# provider "registry.terraform.io/evil/x" {',
+          '  # version = "1.0.0"',
+          '  // version = "2.0.0"',
+          "# }",
+          "",
+        ].join("\n"),
+      ),
+    ),
+    LOCK_PROVIDER,
+  );
+  assert.deepEqual(
+    lockedProvider(
+      lockRootWith(
+        [
+          "locals {",
+          '  note = "provider registry.terraform.io/evil/x is not installed"',
+          "}",
+          ...VALID_LOCKFILE.split("\n"),
+        ].join("\n"),
+      ),
+    ),
+    LOCK_PROVIDER,
+  );
 });
 
 test("foundation diagnostic strips ANSI and control sequences before recognizing patterns", () => {
@@ -429,7 +486,18 @@ function fakeTamaProject(mode) {
       "",
     ].join("\n"),
   );
-  writeFileSync(join(root, "scripts", "setup", ".terraform.lock.hcl"), VALID_LOCKFILE);
+  writeFileSync(
+    join(root, "scripts", "setup", ".terraform.lock.hcl"),
+    mode === "ambiguous"
+      ? [
+          'provider "registry.opentofu.org/upmaru/tama" {',
+          '  version = "0.7.0"',
+          '  version = "9.9.9"',
+          "}",
+          "",
+        ].join("\n")
+      : VALID_LOCKFILE,
+  );
   writeFileSync(
     join(root, "scripts", "setup.sh"),
     "#!/bin/sh\nset -e\ntofu init -lockfile=readonly\ntofu apply -input=false\n",
@@ -562,6 +630,25 @@ test("dev setup JSON foundation failure projects sanitized diagnostics and never
     } finally {
       process.env.PATH = originalPath;
     }
+  }
+});
+
+test("dev setup JSON emits no provider metadata for an ambiguous lockfile", async () => {
+  const root = fakeTamaProject("ambiguous");
+  await prepareProject(root);
+  const originalPath = process.env.PATH;
+  try {
+    process.env.PATH = `${join(root, "bin")}:${originalPath}`;
+    const { code, output, errors } = await runDevSetupJson(root);
+    assert.equal(code, 6);
+    assert.deepEqual(errors, []);
+    const payload = JSON.parse(output[0]);
+    assert.equal(payload.error.diagnostic.subphase, "tofu-apply");
+    assert.equal(payload.error.diagnostic.reason, "provider-checksum-mismatch");
+    assert.equal(payload.error.diagnostic.provider, undefined);
+    assertNoSecrets(output[0]);
+  } finally {
+    process.env.PATH = originalPath;
   }
 });
 
