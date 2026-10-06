@@ -1,12 +1,44 @@
 // @ts-check
 
 import { startupError } from "../errors.mjs";
+import { CapturedProcessError, runCapturedProcess } from "../shared/captured-process.mjs";
 import { processEnvironment } from "../shared/environment.mjs";
 import { runProcess } from "../shared/process.mjs";
+import { devSetupDiagnostic } from "./diagnostics.mjs";
 
 /** @param {unknown} error */
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Run a development setup subprocess. In quiet (JSON) mode both streams are
+ * captured internally with bounds so the diagnostic projector can recognize
+ * safe phase facts; in interactive mode the child streams are inherited so
+ * the user sees the full subprocess output.
+ * @param {"database"|"mix-setup"|"tool-install"|"foundation"} phase
+ * @param {string} label public failure label, message text unchanged
+ * @param {string} command
+ * @param {string[]} args
+ * @param {{cwd: string, env?: NodeJS.ProcessEnv, quiet: boolean}} options
+ */
+async function runDevSubprocess(phase, label, command, args, options) {
+  try {
+    if (options.quiet) {
+      await runCapturedProcess(command, args, { cwd: options.cwd, env: options.env });
+    } else {
+      await runProcess(command, args, { cwd: options.cwd, env: options.env, stdio: "inherit" });
+    }
+  } catch (error) {
+    const diagnostic =
+      error instanceof CapturedProcessError
+        ? devSetupDiagnostic(phase, { stdout: error.stdout, stderr: error.stderr })
+        : undefined;
+    throw startupError(
+      `${label} failed: ${errorMessage(error)}`,
+      diagnostic ? { diagnostic } : undefined,
+    );
+  }
 }
 
 /** @param {string} command @param {string[]} args @param {string} cwd */
@@ -33,14 +65,10 @@ export async function ensureOpenTofu(plan, { quiet = false } = {}) {
       "OpenTofu is required; install the version declared in .tool-versions or install mise",
     );
   }
-  try {
-    await runProcess("mise", ["install", "opentofu"], {
-      cwd: plan.root,
-      stdio: quiet ? "ignore" : "inherit",
-    });
-  } catch (error) {
-    throw startupError(`OpenTofu installation failed: ${errorMessage(error)}`);
-  }
+  await runDevSubprocess("tool-install", "OpenTofu installation", "mise", ["install", "opentofu"], {
+    cwd: plan.root,
+    quiet,
+  });
   if (
     !(await commandSucceeds("mise", ["exec", "opentofu", "--", "tofu", "--version"], plan.root))
   ) {
@@ -51,32 +79,22 @@ export async function ensureOpenTofu(plan, { quiet = false } = {}) {
 
 /** @param {import("../types.mjs").DevSetupPlan} plan @param {{quiet?: boolean}} [options] */
 export async function startDevDatabase(plan, { quiet = false } = {}) {
-  try {
-    await runProcess(
-      "docker",
-      ["compose", "-f", plan.composeFile, "up", "-d", "--wait", "postgres"],
-      {
-        cwd: plan.root,
-        env: processEnvironment(plan.environment),
-        stdio: quiet ? "ignore" : "inherit",
-      },
-    );
-  } catch (error) {
-    throw startupError(`isolated PostgreSQL startup failed: ${errorMessage(error)}`);
-  }
+  await runDevSubprocess(
+    "database",
+    "isolated PostgreSQL startup",
+    "docker",
+    ["compose", "-f", plan.composeFile, "up", "-d", "--wait", "postgres"],
+    { cwd: plan.root, env: processEnvironment(plan.environment), quiet },
+  );
 }
 
 /** @param {import("../types.mjs").DevSetupPlan} plan @param {{quiet?: boolean}} [options] */
 export async function runMixSetup(plan, { quiet = false } = {}) {
-  try {
-    await runProcess("bash", ["-c", "source .envrc && mix setup"], {
-      cwd: plan.root,
-      env: processEnvironment(plan.environment),
-      stdio: quiet ? "ignore" : "inherit",
-    });
-  } catch (error) {
-    throw startupError(`mix setup failed: ${errorMessage(error)}`);
-  }
+  await runDevSubprocess("mix-setup", "mix setup", "bash", ["-c", "source .envrc && mix setup"], {
+    cwd: plan.root,
+    env: processEnvironment(plan.environment),
+    quiet,
+  });
 }
 
 /** @param {import("../types.mjs").DevSetupPlan} plan */
@@ -101,20 +119,16 @@ export async function runTestFoundationSetup(plan, { quiet = false, tofuRunner }
     return "preserved";
   }
   const resolvedTofuRunner = tofuRunner ?? (await ensureOpenTofu(plan, { quiet }));
-  try {
-    const command = "source .envrc && MIX_ENV=test mix cmd ./scripts/setup.sh";
-    const executable = resolvedTofuRunner === "mise" ? "mise" : "bash";
-    const args =
-      resolvedTofuRunner === "mise"
-        ? ["exec", "opentofu", "--", "bash", "-c", command]
-        : ["-c", command];
-    await runProcess(executable, args, {
-      cwd: plan.root,
-      env: processEnvironment(plan.environment),
-      stdio: quiet ? "ignore" : "inherit",
-    });
-    return "created";
-  } catch (error) {
-    throw startupError(`test foundation setup failed: ${errorMessage(error)}`);
-  }
+  const command = "source .envrc && MIX_ENV=test mix cmd ./scripts/setup.sh";
+  const executable = resolvedTofuRunner === "mise" ? "mise" : "bash";
+  const args =
+    resolvedTofuRunner === "mise"
+      ? ["exec", "opentofu", "--", "bash", "-c", command]
+      : ["-c", command];
+  await runDevSubprocess("foundation", "test foundation setup", executable, args, {
+    cwd: plan.root,
+    env: processEnvironment(plan.environment),
+    quiet,
+  });
+  return "created";
 }
