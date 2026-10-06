@@ -83,9 +83,129 @@ const APPLY_EVIDENCE =
 const INIT_EVIDENCE =
   /tofu init|terraform init|initializ\w+ (?:the |any )?(?:providers|backend|infrastructure)|initializ\w+ provider plugins|openTofu has been (?:successfully )?initialized|Terraform has been (?:successfully )?initialized/iu;
 
-/** Strict `provider "registry.opentofu.org/ns/name" x.y.z {` lockfile record. */
-const LOCK_PROVIDER_RECORD =
-  /^provider\s+"(registry\.opentofu\.org\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)"\s+(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z][0-9A-Za-z.-]*)?)\s*\{/gmu;
+/** Strict `provider "registry.opentofu.org/ns/name"` lockfile block header. */
+const LOCK_PROVIDER_HEADER =
+  /provider\s+"(registry\.opentofu\.org\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)"\s*\{/g;
+
+/** Top-level `version = "x.y.z"` attribute inside a provider block body. */
+const LOCK_VERSION_ATTRIBUTE =
+  /^\s*version\s*=\s"(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z][0-9A-Za-z.-]*)?)"\s*$/mu;
+
+/**
+ * Strip hash, double-slash, and C-style block comments while preserving
+ * quoted strings and newlines, so comment or string text can never be
+ * mistaken for lockfile syntax.
+ * @param {string} input
+ * @returns {string}
+ */
+function stripHclComments(input) {
+  let out = "";
+  /** @type {"code"|"string"|"line"|"block"} */
+  let state = "code";
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (state === "string") {
+      out += ch;
+      if (ch === "\\" && i + 1 < input.length) {
+        out += input[++i];
+        continue;
+      }
+      if (ch === '"') state = "code";
+      continue;
+    }
+    if (state === "line") {
+      if (ch === "\n") {
+        out += ch;
+        state = "code";
+      }
+      continue;
+    }
+    if (state === "block") {
+      if (ch === "\n") out += ch;
+      if (ch === "*" && input[i + 1] === "/") {
+        i += 1;
+        state = "code";
+      }
+      continue;
+    }
+    if (ch === '"') {
+      state = "string";
+      out += ch;
+      continue;
+    }
+    if (ch === "#" || (ch === "/" && input[i + 1] === "/")) {
+      state = "line";
+      continue;
+    }
+    if (ch === "/" && input[i + 1] === "*") {
+      state = "block";
+      i += 1;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+/**
+ * @param {string} text comment-stripped lockfile content
+ * @param {number} openIndex index of the block's opening brace
+ * @returns {number} index of the matching closing brace, or -1 when unbalanced
+ */
+function findMatchingBrace(text, openIndex) {
+  let depth = 0;
+  let inString = false;
+  for (let i = openIndex; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === "\\" && i + 1 < text.length) {
+        i += 1;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Parse the single provider record from lockfile content. Fails closed: any
+ * missing, unbalanced, ambiguous (not exactly one provider), or malformed
+ * record yields undefined. Only the quoted top-level `version` attribute of
+ * each provider block is considered; constraints, hashes, comments, strings,
+ * and text in other provider blocks can never be read as a selected version.
+ * @param {string} content
+ * @returns {{source: string, version: string} | undefined}
+ */
+function parseLockedProvider(content) {
+  const text = stripHclComments(content);
+  const records = [];
+  const header = new RegExp(LOCK_PROVIDER_HEADER.source, "g");
+  for (const match of text.matchAll(header)) {
+    const open = match.index + match[0].length - 1;
+    const close = findMatchingBrace(text, open);
+    if (close === -1) return undefined;
+    const body = text.slice(open + 1, close);
+    const nested = body.search(/\{/u);
+    const topLevel = nested === -1 ? body : body.slice(0, nested);
+    const version = /** @type {RegExpMatchArray | null} */ (
+      topLevel.match(LOCK_VERSION_ATTRIBUTE)
+    )?.[1];
+    records.push({ source: /** @type {string} */ (match[1]), version });
+  }
+  if (records.length !== 1 || records[0].version === undefined) return undefined;
+  return { source: records[0].source, version: records[0].version };
+}
 
 /**
  * Read the single provider record from the checkout's repository-owned
@@ -103,14 +223,7 @@ export function lockedProvider(root) {
   } catch {
     return undefined;
   }
-  const records = [];
-  for (const match of content.matchAll(LOCK_PROVIDER_RECORD)) {
-    records.push({
-      source: /** @type {string} */ (match[1]),
-      version: /** @type {string} */ (match[2]),
-    });
-  }
-  return records.length === 1 ? records[0] : undefined;
+  return parseLockedProvider(content);
 }
 
 /**

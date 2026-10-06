@@ -32,6 +32,21 @@ function assertNoSecrets(serialized) {
 
 const LOCK_PROVIDER = { source: "registry.opentofu.org/upmaru/tama", version: "0.7.0" };
 
+// Realistic synthetic OpenTofu dependency lock file (public HCL format).
+const VALID_LOCKFILE = [
+  '# This file is maintained automatically by "tofu init".',
+  "# Manual edits may be lost in future updates.",
+  "",
+  'provider "registry.opentofu.org/upmaru/tama" {',
+  '  version     = "0.7.0"',
+  '  constraints = "~> 0.3, ~> 0.5"',
+  "  hashes = [",
+  '    "h1:synthetic-checksum=",',
+  "  ]",
+  "}",
+  "",
+].join("\n");
+
 // Authentic representative OpenTofu 1.10 read-only init output: a nonfatal
 // lock warning followed by a successful read-only init.
 const READONLY_INIT_OUTPUT = [
@@ -194,32 +209,76 @@ test("secret-shaped provider syntax in captured output never reaches the diagnos
   }
 });
 
-test("lockedProvider parses only the single strict record from the repository lock file", () => {
-  const root = temporaryDirectory("tama-kit-locked-provider-");
-  const lockDir = join(root, "scripts", "setup");
-  mkdirSync(lockDir, { recursive: true });
-  writeFileSync(
-    join(lockDir, ".terraform.lock.hcl"),
-    'provider "registry.opentofu.org/upmaru/tama" 0.7.0 {\n  "h1:abc="\n}\n',
+test("lockedProvider parses the quoted version attribute of a single valid HCL provider block", () => {
+  assert.deepEqual(lockedProvider(lockRoot()), LOCK_PROVIDER);
+  assert.deepEqual(
+    lockedProvider(
+      lockRootWith(
+        [
+          'provider "registry.opentofu.org/upmaru/tama" {',
+          '  version = "0.7.0" # selected by init',
+          "}",
+          "",
+        ].join("\n"),
+      ),
+    ),
+    LOCK_PROVIDER,
   );
-  assert.deepEqual(lockedProvider(root), LOCK_PROVIDER);
-  writeFileSync(
-    join(lockDir, ".terraform.lock.hcl"),
+  assert.deepEqual(
+    lockedProvider(
+      lockRootWith(
+        [
+          'provider "registry.opentofu.org/upmaru/tama" {',
+          '  version = "0.7.0"',
+          "  nested {",
+          '    version = "9.9.9"',
+          "  }",
+          "}",
+          "",
+        ].join("\n"),
+      ),
+    ),
+    LOCK_PROVIDER,
+  );
+});
+
+test("lockedProvider fails closed for ambiguous, malformed, or misleading lockfiles", () => {
+  assert.equal(
+    lockedProvider(
+      lockRootWith(
+        [
+          ...VALID_LOCKFILE.split("\n"),
+          'provider "registry.opentofu.org/other/second" {',
+          '  version     = "1.2.3"',
+          "}",
+          "",
+        ].join("\n"),
+      ),
+    ),
+    undefined,
+  );
+  for (const content of [
+    ['provider "registry.opentofu.org/upmaru/tama" {', '  constraints = "~> 0.3"', "}", ""].join(
+      "\n",
+    ),
+    ['provider "registry.opentofu.org/upmaru/tama" {', "  version = 0.7.0", "}", ""].join("\n"),
+    ['provider "registry.opentofu.org/upmaru/tama" {', '# version = "0.7.0"', "}", ""].join("\n"),
+    ['provider "registry.opentofu.org/upmaru/tama" {', '/* version = "0.7.0" */', "}", ""].join(
+      "\n",
+    ),
+    ['provider "registry.opentofu.org/upmaru/tama" {', '  version     = "0.7.0"', ""].join("\n"),
     [
-      'provider "registry.opentofu.org/upmaru/tama" 0.7.0 {',
-      '  "h1:abc="',
-      "}",
-      'provider "registry.opentofu.org/private/probe-secret" 1.2.3-private-secret {',
+      'provider "registry.opentofu.org/upmaru/tama" {',
+      "  hashes = [",
+      '    "h1:version=1.2.3=",',
+      "  ]",
       "}",
       "",
     ].join("\n"),
-  );
-  assert.equal(lockedProvider(root), undefined);
-  writeFileSync(
-    join(lockDir, ".terraform.lock.hcl"),
     "TAMA_CLIENT_SECRET=registry.opentofu.org/private/probe-secret 1.2.3-private-secret\n",
-  );
-  assert.equal(lockedProvider(root), undefined);
+  ]) {
+    assert.equal(lockedProvider(lockRootWith(content)), undefined, content);
+  }
   assert.equal(lockedProvider(temporaryDirectory("tama-kit-no-lock-")), undefined);
 });
 
@@ -269,13 +328,15 @@ test("non-foundation development phases project fixed allowlisted diagnostics", 
 });
 
 function lockRoot() {
-  const root = temporaryDirectory("tama-kit-safe-diagnostic-");
+  return lockRootWith(VALID_LOCKFILE);
+}
+
+/** @param {string} content */
+function lockRootWith(content) {
+  const root = temporaryDirectory("tama-kit-locked-provider-");
   const lockDir = join(root, "scripts", "setup");
   mkdirSync(lockDir, { recursive: true });
-  writeFileSync(
-    join(lockDir, ".terraform.lock.hcl"),
-    'provider "registry.opentofu.org/upmaru/tama" 0.7.0 {\n  "h1:abc="\n}\n',
-  );
+  writeFileSync(join(lockDir, ".terraform.lock.hcl"), content);
   return root;
 }
 
@@ -368,10 +429,7 @@ function fakeTamaProject(mode) {
       "",
     ].join("\n"),
   );
-  writeFileSync(
-    join(root, "scripts", "setup", ".terraform.lock.hcl"),
-    'provider "registry.opentofu.org/upmaru/tama" 0.7.0 {\n  "h1:verified="\n}\n',
-  );
+  writeFileSync(join(root, "scripts", "setup", ".terraform.lock.hcl"), VALID_LOCKFILE);
   writeFileSync(
     join(root, "scripts", "setup.sh"),
     "#!/bin/sh\nset -e\ntofu init -lockfile=readonly\ntofu apply -input=false\n",
