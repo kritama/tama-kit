@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
 /** @typedef {"database"|"mix-setup"|"tool-install"|"foundation"} DevSetupPhase */
-/** @typedef {"database-startup-failed"|"mix-setup-failed"|"opentofu-install-failed"|"provider-checksum-mismatch"|"lockfile-update-required"|"foundation-failed"} DevSetupReason */
+/** @typedef {"database-startup-failed"|"mix-setup-failed"|"opentofu-install-failed"|"opentofu-unavailable"|"opentofu-unusable"|"provider-checksum-mismatch"|"lockfile-update-required"|"foundation-failed"} DevSetupReason */
 
 /** Recognized development setup phases; also the allowlist for JSON output. */
 export const DEV_SETUP_PHASES = ["database", "mix-setup", "tool-install", "foundation"];
@@ -12,18 +12,37 @@ export const DEV_SETUP_PHASES = ["database", "mix-setup", "tool-install", "found
 /**
  * Sanitized development setup diagnostic: explicit operation/phase, stable
  * reason, optional evidence-based OpenTofu subphase and provider identity,
- * and a static remediation. Never contains raw subprocess output; the
- * provider record, when present, comes only from the checkout's
- * repository-owned dependency lock file, never from captured output.
+ * an optional allowlisted spawn error code, and a static remediation.
+ * Never contains raw subprocess output; the provider record, when present,
+ * comes only from the checkout's repository-owned dependency lock file,
+ * never from captured output.
  * @typedef {{
  *   operation: string,
  *   phase: DevSetupPhase,
  *   subphase?: "tofu-init"|"tofu-apply",
  *   reason: string,
  *   provider?: {source: string, version: string},
+ *   spawnFailure?: string,
  *   remediation: string,
  * }} DevSetupDiagnostic
  */
+
+/** Node spawn errnos that are safe to publish as a spawnFailure fact. */
+export const SPAWN_ERROR_CODES = new Set([
+  "E2BIG",
+  "EACCES",
+  "EIO",
+  "ELOOP",
+  "EMFILE",
+  "ENAMETOOLONG",
+  "ENFILE",
+  "ENOENT",
+  "ENOMEM",
+  "ENOSPC",
+  "ENOTDIR",
+  "EPERM",
+  "ETXTBSY",
+]);
 
 /** @type {Record<DevSetupReason, string>} */
 const REMEDIATIONS = Object.freeze({
@@ -33,6 +52,10 @@ const REMEDIATIONS = Object.freeze({
     "Mix setup failed. Re-run 'tama-kit dev setup' without --json to see the full Mix output, and verify the development database is reachable.",
   "opentofu-install-failed":
     "OpenTofu installation through mise failed. Install the OpenTofu version declared in .tool-versions manually or re-run 'mise install opentofu', then re-run 'tama-kit dev setup'.",
+  "opentofu-unavailable":
+    "OpenTofu is not installed and mise is not available, so the test foundation cannot be provisioned. Install the OpenTofu version declared in .tool-versions, or install mise and re-run 'tama-kit dev setup'.",
+  "opentofu-unusable":
+    "mise installed OpenTofu but it could not be executed. Re-run 'mise install opentofu' to repair the mise toolchain, verify 'mise exec opentofu -- tofu --version', then re-run 'tama-kit dev setup'.",
   "provider-checksum-mismatch":
     "OpenTofu rejected a provider checksum recorded in the dependency lockfile. From the Tama root, keep the lockfile's selected provider version and refresh only its verified checksums for this platform, for example on macOS arm64: 'tofu -chdir=scripts/setup providers lock -platform=darwin_arm64 registry.opentofu.org/upmaru/tama'. Review the signature information and the lock diff, re-run 'tofu -chdir=scripts/setup init -lockfile=readonly', then re-run 'tama-kit dev setup'. Do not delete the lockfile, disable checksum verification, or use a writable init.",
   "lockfile-update-required":
@@ -65,19 +88,17 @@ const PROVIDER_REASONS = new Set(["provider-checksum-mismatch", "lockfile-update
  * Allowlisted patterns, checked against ANSI-stripped bounded tails. Only
  * normalized facts are projected; arbitrary subprocess text is never echoed.
  *
- * The lockfile patterns track OpenTofu's read-only init wording: the fatal
- * "Error: Provider dependency changes detected ... the lock file is read-only"
- * failure and the nonfatal "Warning: Provider lock file not updated" warning.
- * A warning (or any lock message) never explains a failure once apply output
- * is present, because init then completed and a later apply error has its
- * own cause.
+ * Only fatal lockfile failures can select the lockfile reason: OpenTofu's
+ * read-only init error "Error: Provider dependency changes detected ... the
+ * lock file is read-only" and the inconsistent-lock-file wording. The
+ * nonfatal "Warning: Provider lock file not updated" warning must never
+ * explain a failure by itself, whether or not later apply output is
+ * present: when init succeeds, any later error has its own cause.
  */
 const CHECKSUM_EVIDENCE =
   /invalid (?:dependency |provider )?checksum|checksum (?:mismatch|verification failed)|does not match (?:any )?(?:of the )?checksums?/iu;
 const LOCK_ERROR_EVIDENCE =
   /provider dependency changes detected|lock file is read-only|inconsistent dependency lock file|not in lock file/iu;
-const LOCK_WARNING_EVIDENCE =
-  /provider lock file not updated|provider (?:selections|dependencies) were detected, but not saved/iu;
 const APPLY_EVIDENCE =
   /tofu apply|terraform apply|openTofu has planned \d+ actions|applying |planned \d+ (?:resource|action)|apply (?:complete|finished)/iu;
 const INIT_EVIDENCE =
@@ -283,53 +304,75 @@ export function lockedProvider(root) {
  * Project an allowlisted development diagnostic from bounded internal
  * subprocess tails. Output selects only the stable reason and, when there
  * is direct evidence, the OpenTofu subphase; provider metadata is included
- * only when the caller supplies the checkout's locked provider record.
+ * only when the caller supplies the checkout's locked provider record, and
+ * the spawn failure code only when it is an allowlisted Node errno. An
+ * empty capture (spawn failure) still yields the stable phase diagnostic.
  * @param {DevSetupPhase} phase
  * @param {{stdout: string, stderr: string}} captured bounded captured tails
- * @param {{provider?: {source: string, version: string}}} [trusted] caller-supplied trusted lock record
+ * @param {{provider?: {source: string, version: string}, spawnFailure?: string}} [trusted] caller-supplied trusted facts
  * @returns {DevSetupDiagnostic}
  */
 export function devSetupDiagnostic(phase, captured, trusted = {}) {
   const operation = PHASE_OPERATIONS[phase];
+  /** @type {DevSetupDiagnostic} */
+  let diagnostic;
   if (phase === "database" || phase === "mix-setup" || phase === "tool-install") {
     const reason = /** @type {DevSetupReason} */ (
       PHASE_REASONS[/** @type {"database"|"mix-setup"|"tool-install"} */ (phase)]
     );
-    return { operation, phase, reason, remediation: REMEDIATIONS[reason] };
-  }
-
-  const output = stripVTControlCharacters(
-    `${captured.stdout.slice(-16 * 1024)}\n${captured.stderr.slice(-16 * 1024)}`,
-  );
-  /** @type {DevSetupDiagnostic} */
-  const diagnostic = {
-    operation,
-    phase: "foundation",
-    reason: "foundation-failed",
-    remediation: REMEDIATIONS["foundation-failed"],
-  };
-  const applyEvidence = APPLY_EVIDENCE.test(output);
-  /** @type {"provider-checksum-mismatch"|"lockfile-update-required"|undefined} */
-  let reason;
-  if (CHECKSUM_EVIDENCE.test(output)) reason = "provider-checksum-mismatch";
-  else if (
-    !applyEvidence &&
-    (LOCK_ERROR_EVIDENCE.test(output) || LOCK_WARNING_EVIDENCE.test(output))
-  )
-    reason = "lockfile-update-required";
-  if (reason) {
-    diagnostic.reason = reason;
-    diagnostic.remediation = REMEDIATIONS[reason];
-    diagnostic.subphase = applyEvidence
-      ? "tofu-apply"
-      : INIT_EVIDENCE.test(output)
-        ? "tofu-init"
-        : undefined;
-    if (trusted.provider?.source && trusted.provider?.version) {
-      diagnostic.provider = { source: trusted.provider.source, version: trusted.provider.version };
+    diagnostic = { operation, phase, reason, remediation: REMEDIATIONS[reason] };
+  } else {
+    const output = stripVTControlCharacters(
+      `${captured.stdout.slice(-16 * 1024)}\n${captured.stderr.slice(-16 * 1024)}`,
+    );
+    diagnostic = {
+      operation,
+      phase: "foundation",
+      reason: "foundation-failed",
+      remediation: REMEDIATIONS["foundation-failed"],
+    };
+    const applyEvidence = APPLY_EVIDENCE.test(output);
+    /** @type {"provider-checksum-mismatch"|"lockfile-update-required"|undefined} */
+    let reason;
+    if (CHECKSUM_EVIDENCE.test(output)) reason = "provider-checksum-mismatch";
+    else if (!applyEvidence && LOCK_ERROR_EVIDENCE.test(output))
+      reason = "lockfile-update-required";
+    if (reason) {
+      diagnostic.reason = reason;
+      diagnostic.remediation = REMEDIATIONS[reason];
+      diagnostic.subphase = applyEvidence
+        ? "tofu-apply"
+        : INIT_EVIDENCE.test(output)
+          ? "tofu-init"
+          : undefined;
+      if (trusted.provider?.source && trusted.provider?.version) {
+        diagnostic.provider = {
+          source: trusted.provider.source,
+          version: trusted.provider.version,
+        };
+      }
     }
   }
+  if (typeof trusted.spawnFailure === "string" && SPAWN_ERROR_CODES.has(trusted.spawnFailure)) {
+    diagnostic.spawnFailure = trusted.spawnFailure;
+  }
   return diagnostic;
+}
+
+/**
+ * Stable diagnostic for OpenTofu availability failures detected by the
+ * probes in ensureOpenTofu (no subprocess output is available there).
+ * @param {"opentofu-unavailable"|"opentofu-unusable"} reason
+ * @returns {DevSetupDiagnostic | undefined}
+ */
+export function toolInstallDiagnostic(reason) {
+  if (reason !== "opentofu-unavailable" && reason !== "opentofu-unusable") return undefined;
+  return {
+    operation: PHASE_OPERATIONS["tool-install"],
+    phase: "tool-install",
+    reason,
+    remediation: REMEDIATIONS[reason],
+  };
 }
 
 /** @param {unknown} value @returns {value is Record<string, unknown>} */
@@ -370,6 +413,12 @@ export function safeDevSetupDiagnostic(details) {
   };
   if (diagnostic.subphase === "tofu-init" || diagnostic.subphase === "tofu-apply") {
     result.subphase = diagnostic.subphase;
+  }
+  if (
+    typeof diagnostic.spawnFailure === "string" &&
+    SPAWN_ERROR_CODES.has(diagnostic.spawnFailure)
+  ) {
+    result.spawnFailure = diagnostic.spawnFailure;
   }
   if (PROVIDER_REASONS.has(typedReason)) {
     const root = isRecord(details) && isText(details.root) ? details.root : undefined;

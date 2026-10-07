@@ -7,6 +7,7 @@ import {
   lockedProvider,
   safeDevSetupDiagnostic,
 } from "../../cli/dev/diagnostics.mjs";
+import { ensureOpenTofu, startDevDatabase } from "../../cli/dev/start.mjs";
 import { run } from "../../cli/index.mjs";
 import { CapturedProcessError, runCapturedProcess } from "../../cli/shared/captured-process.mjs";
 import { temporaryDirectory } from "../helpers/temporary.mjs";
@@ -160,20 +161,36 @@ test("foundation diagnostic recognizes checksum mismatch with apply evidence on 
   }
 });
 
-test("foundation diagnostic recognizes authentic read-only lockfile failures", () => {
-  for (const output of [READONLY_INIT_OUTPUT, READONLY_INIT_ERROR_OUTPUT]) {
+test("foundation diagnostic recognizes an authentic fatal read-only init failure", () => {
+  const diagnostic = devSetupDiagnostic(
+    "foundation",
+    { stdout: READONLY_INIT_ERROR_OUTPUT, stderr: "" },
+    {
+      provider: LOCK_PROVIDER,
+    },
+  );
+  assert.equal(diagnostic.subphase, "tofu-init");
+  assert.equal(diagnostic.reason, "lockfile-update-required");
+  assert.deepEqual(diagnostic.provider, LOCK_PROVIDER);
+  assert.match(diagnostic.remediation, /lockfile=readonly/u);
+  assert.doesNotMatch(diagnostic.remediation, /without the .?-lockfile=readonly.? flag/u);
+});
+
+test("foundation diagnostic does not blame a nonfatal readonly warning for a later failure without apply evidence", () => {
+  for (const output of [
+    READONLY_INIT_OUTPUT,
+    `${READONLY_INIT_OUTPUT}\nError: dial tcp 127.0.0.1:55432: connect: connection refused`,
+    `${READONLY_INIT_OUTPUT}\nError: some later command failed`,
+  ]) {
     const diagnostic = devSetupDiagnostic(
       "foundation",
       { stdout: output, stderr: "" },
-      {
-        provider: LOCK_PROVIDER,
-      },
+      { provider: LOCK_PROVIDER },
     );
-    assert.equal(diagnostic.subphase, "tofu-init");
-    assert.equal(diagnostic.reason, "lockfile-update-required");
-    assert.deepEqual(diagnostic.provider, LOCK_PROVIDER);
-    assert.match(diagnostic.remediation, /lockfile=readonly/u);
-    assert.doesNotMatch(diagnostic.remediation, /without the .?-lockfile=readonly.? flag/u);
+    assert.equal(diagnostic.reason, "foundation-failed");
+    assert.equal(diagnostic.subphase, undefined);
+    assert.equal(diagnostic.provider, undefined);
+    assertNoSecrets(JSON.stringify(diagnostic));
   }
 });
 
@@ -456,6 +473,115 @@ test("safe dev diagnostic projection rejects unknown or unsafe nested details", 
   assert.equal(withExtras?.operation, "test-foundation-setup");
   assert.equal(withExtras?.subphase, "tofu-apply");
   assertNoSecrets(JSON.stringify(withExtras));
+  const withSpawn = safeDevSetupDiagnostic({
+    diagnostic: {
+      phase: "database",
+      reason: "database-startup-failed",
+      spawnFailure: "ENOENT",
+      nested: { raw: "arbitrary-private-output" },
+    },
+  });
+  assert.equal(withSpawn?.spawnFailure, "ENOENT");
+  assertNoSecrets(JSON.stringify(withSpawn));
+  assert.equal(
+    safeDevSetupDiagnostic({
+      diagnostic: {
+        phase: "database",
+        reason: "database-startup-failed",
+        spawnFailure: "arbitrary-private-error",
+      },
+    })?.spawnFailure,
+    undefined,
+  );
+});
+
+test("development subprocess spawn failures carry a safe phase diagnostic with a trusted error code", async () => {
+  const plan = {
+    root: temporaryDirectory("tama-kit-docker-spawn-"),
+    composeFile: join("unused", "compose.yml"),
+    environment: new Map(),
+  };
+  const bin = join(plan.root, "bin");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, "docker"), "#!/bin/sh\nexit 0\n");
+  const originalPath = process.env.PATH;
+  try {
+    process.env.PATH = "/nonexistent-tama-kit-path";
+    await assert.rejects(startDevDatabase(plan, { quiet: true }), (error) => {
+      assert.equal(error.exitCode, 6);
+      assert.match(error.message, /isolated PostgreSQL startup failed: spawn docker ENOENT/u);
+      const diagnostic = safeDevSetupDiagnostic(error.details);
+      assert.deepEqual(diagnostic, {
+        operation: "docker-compose-up",
+        phase: "database",
+        reason: "database-startup-failed",
+        spawnFailure: "ENOENT",
+        remediation: diagnostic?.remediation,
+      });
+      return true;
+    });
+
+    chmodSync(join(bin, "docker"), 0o600);
+    process.env.PATH = bin;
+    await assert.rejects(startDevDatabase(plan, { quiet: true }), (error) => {
+      assert.equal(error.exitCode, 6);
+      assert.match(error.message, /isolated PostgreSQL startup failed: spawn docker EACCES/u);
+      const diagnostic = safeDevSetupDiagnostic(error.details);
+      assert.equal(diagnostic?.phase, "database");
+      assert.equal(diagnostic?.reason, "database-startup-failed");
+      assert.equal(diagnostic?.spawnFailure, "EACCES");
+      return true;
+    });
+  } finally {
+    process.env.PATH = originalPath;
+  }
+});
+
+test("ensureOpenTofu attaches stable tool-install diagnostics for missing and unusable tooling", async () => {
+  const plan = {
+    root: temporaryDirectory("tama-kit-tofu-probe-"),
+    composeFile: join("unused", "compose.yml"),
+    environment: new Map(),
+  };
+  const originalPath = process.env.PATH;
+  try {
+    process.env.PATH = "/nonexistent-tama-kit-path";
+    await assert.rejects(ensureOpenTofu(plan), (error) => {
+      assert.equal(error.exitCode, 6);
+      assert.match(error.message, /OpenTofu is required/u);
+      const diagnostic = safeDevSetupDiagnostic(error.details);
+      assert.deepEqual(diagnostic, {
+        operation: "opentofu-install",
+        phase: "tool-install",
+        reason: "opentofu-unavailable",
+        remediation: diagnostic?.remediation,
+      });
+      assert.match(diagnostic?.remediation ?? "", /mise/u);
+      return true;
+    });
+
+    const bin = join(plan.root, "bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(
+      join(bin, "mise"),
+      `#!${process.execPath}
+if (process.argv.includes("exec")) process.exit(1);
+process.exit(0);
+`,
+    );
+    chmodSync(join(bin, "mise"), 0o755);
+    process.env.PATH = bin;
+    await assert.rejects(ensureOpenTofu(plan), (error) => {
+      assert.equal(error.exitCode, 6);
+      assert.match(error.message, /could not execute it/u);
+      const diagnostic = safeDevSetupDiagnostic(error.details);
+      assert.equal(diagnostic?.phase, "tool-install");
+      assert.equal(diagnostic?.reason, "opentofu-unusable");
+      return true;
+    });
+  } finally {
+    process.env.PATH = originalPath;
+  }
 });
 
 function fakeTamaProject(mode) {
@@ -541,9 +667,11 @@ process.exit(1);
     mode === "generic"
       ? 'console.log("Initializing provider plugins...");\nconsole.log("OpenTofu has been successfully initialized!");'
       : `console.log(${JSON.stringify(READONLY_INIT_OUTPUT)});`;
-  writeFileSync(
-    join(bin, "tofu"),
-    `#!${process.execPath}
+  const hasTofu = mode !== "no-opentofu" && mode !== "unusable-opentofu";
+  if (hasTofu) {
+    writeFileSync(
+      join(bin, "tofu"),
+      `#!${process.execPath}
 const { appendFileSync } = require("node:fs");
 const { join } = require("node:path");
 appendFileSync(join(process.cwd(), ".tofu-calls.log"), process.argv.slice(2).join(" ") + "\\n");
@@ -560,8 +688,20 @@ if (args.includes("apply")) {
 }
 process.exit(0);
 `,
-  );
-  for (const name of ["docker", "mix", "tofu"]) chmodSync(join(bin, name), 0o755);
+    );
+  }
+  const executables = hasTofu ? ["docker", "mix", "tofu"] : ["docker", "mix"];
+  if (mode === "unusable-opentofu") {
+    writeFileSync(
+      join(bin, "mise"),
+      `#!${process.execPath}
+if (process.argv.includes("exec")) process.exit(1);
+process.exit(0);
+`,
+    );
+    executables.push("mise");
+  }
+  for (const name of executables) chmodSync(join(bin, name), 0o755);
   return root;
 }
 
@@ -695,5 +835,71 @@ test("dev setup JSON completes with a single success document when the fake foun
     assertNoSecrets(output[0]);
   } finally {
     process.env.PATH = originalPath;
+  }
+});
+
+test("dev setup JSON missing-executable failure carries a safe spawn diagnostic", async () => {
+  const root = fakeTamaProject("generic");
+  await prepareProject(root);
+  const originalPath = process.env.PATH;
+  try {
+    // Only the fake executables plus /usr/bin (git) remain reachable, so
+    // 'bash' cannot spawn.
+    process.env.PATH = [join(root, "bin"), "/usr/bin"].join(":");
+    const { code, output, errors } = await runDevSetupJson(root);
+    assert.equal(code, 6);
+    assert.deepEqual(errors, []);
+    const payload = JSON.parse(output[0]);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.error.category, "startup");
+    assert.match(payload.error.message, /mix setup failed: spawn bash ENOENT/u);
+    assert.deepEqual(payload.error.diagnostic, {
+      operation: "mix-setup",
+      phase: "mix-setup",
+      reason: "mix-setup-failed",
+      spawnFailure: "ENOENT",
+      remediation: payload.error.diagnostic.remediation,
+    });
+    assertNoSecrets(output[0]);
+  } finally {
+    process.env.PATH = originalPath;
+  }
+});
+
+test("dev setup JSON OpenTofu availability failures carry tool-install diagnostics", async () => {
+  const cases = [
+    ["no-opentofu", /OpenTofu is required/u, "opentofu-unavailable"],
+    ["unusable-opentofu", /could not execute it/u, "opentofu-unusable"],
+  ];
+  for (const [mode, message, reason] of cases) {
+    const root = fakeTamaProject(mode);
+    await prepareProject(root);
+    const originalPath = process.env.PATH;
+    try {
+      // bin plus git (usr/bin) and bash (bin) only, so real tofu/mise are
+      // never found.
+      process.env.PATH = [join(root, "bin"), "/usr/bin", "/bin"].join(":");
+      const { code, output, errors } = await runDevSetupJson(root);
+      assert.equal(code, 6, mode);
+      assert.deepEqual(errors, [], mode);
+      const payload = JSON.parse(output[0]);
+      assert.equal(payload.ok, false, mode);
+      assert.equal(payload.error.category, "startup", mode);
+      assert.equal(payload.error.exitCode, 6, mode);
+      assert.match(payload.error.message, message, mode);
+      assert.deepEqual(
+        payload.error.diagnostic,
+        {
+          operation: "opentofu-install",
+          phase: "tool-install",
+          reason,
+          remediation: payload.error.diagnostic.remediation,
+        },
+        mode,
+      );
+      assertNoSecrets(output[0]);
+    } finally {
+      process.env.PATH = originalPath;
+    }
   }
 });

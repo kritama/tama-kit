@@ -4,11 +4,28 @@ import { startupError } from "../errors.mjs";
 import { CapturedProcessError, runCapturedProcess } from "../shared/captured-process.mjs";
 import { processEnvironment } from "../shared/environment.mjs";
 import { runProcess } from "../shared/process.mjs";
-import { devSetupDiagnostic, lockedProvider } from "./diagnostics.mjs";
+import { devSetupDiagnostic, lockedProvider, toolInstallDiagnostic } from "./diagnostics.mjs";
 
 /** @param {unknown} error */
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Trusted Node spawn errno (ENOENT, EACCES, ...); only allowlisted values
+ * are accepted downstream. Arbitrary error text is never forwarded.
+ * @param {unknown} error
+ */
+function spawnErrorCode(error) {
+  if (
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    typeof error.code === "string"
+  ) {
+    return error.code;
+  }
+  return undefined;
 }
 
 /**
@@ -30,20 +47,25 @@ async function runDevSubprocess(phase, label, command, args, options) {
       await runProcess(command, args, { cwd: options.cwd, env: options.env, stdio: "inherit" });
     }
   } catch (error) {
+    // Always attach a safe phase diagnostic: when the child was captured,
+    // project from its bounded tails; when the executable could not spawn
+    // (ENOENT/EACCES/...), project the static phase diagnostic plus the
+    // allowlisted spawn errno. The message itself is unchanged.
+    const trusted = phase === "foundation" ? { provider: lockedProvider(options.cwd) } : {};
     const diagnostic =
       error instanceof CapturedProcessError
-        ? devSetupDiagnostic(
+        ? devSetupDiagnostic(phase, { stdout: error.stdout, stderr: error.stderr }, trusted)
+        : devSetupDiagnostic(
             phase,
-            { stdout: error.stdout, stderr: error.stderr },
-            phase === "foundation" ? { provider: lockedProvider(options.cwd) } : undefined,
-          )
-        : undefined;
+            { stdout: "", stderr: "" },
+            { ...trusted, spawnFailure: spawnErrorCode(error) },
+          );
     // root is retained internally so the JSON re-projector can verify the
     // provider record against the checkout's own lock file before publishing.
-    throw startupError(
-      `${label} failed: ${errorMessage(error)}`,
-      diagnostic ? { diagnostic, root: options.cwd } : undefined,
-    );
+    throw startupError(`${label} failed: ${errorMessage(error)}`, {
+      diagnostic,
+      root: options.cwd,
+    });
   }
 }
 
@@ -69,6 +91,7 @@ export async function ensureOpenTofu(plan, { quiet = false } = {}) {
   if (!(await commandSucceeds("mise", ["--version"], plan.root))) {
     throw startupError(
       "OpenTofu is required; install the version declared in .tool-versions or install mise",
+      { diagnostic: toolInstallDiagnostic("opentofu-unavailable") },
     );
   }
   await runDevSubprocess("tool-install", "OpenTofu installation", "mise", ["install", "opentofu"], {
@@ -78,7 +101,9 @@ export async function ensureOpenTofu(plan, { quiet = false } = {}) {
   if (
     !(await commandSucceeds("mise", ["exec", "opentofu", "--", "tofu", "--version"], plan.root))
   ) {
-    throw startupError("mise installed OpenTofu but could not execute it");
+    throw startupError("mise installed OpenTofu but could not execute it", {
+      diagnostic: toolInstallDiagnostic("opentofu-unusable"),
+    });
   }
   return "mise";
 }

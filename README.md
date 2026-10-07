@@ -301,8 +301,11 @@ When `tama-kit dev setup --json` fails, the JSON envelope includes a
 sanitized `diagnostic` object with the failed phase, a stable reason, an
 OpenTofu `tofu-init`/`tofu-apply` subphase only when the output provides
 evidence, an optional provider source/version taken from the checkout's
-repository-owned lock file (only when it pins exactly one provider), and a
-static remediation. In JSON mode Tama Kit captures subprocess stdout and
+repository-owned lock file (only when it pins exactly one provider), an
+allowlisted `spawnFailure` code when a subprocess executable could not be
+started, and a static remediation. OpenTofu or mise availability failures
+report a `tool-install` phase with `opentofu-unavailable` or
+`opentofu-unusable`. In JSON mode Tama Kit captures subprocess stdout and
 stderr only internally, with bounded tails, and never includes raw output,
 credentials, or secret values in the JSON document or error messages; it
 never infers provider identity from captured output. Run without `--json`
