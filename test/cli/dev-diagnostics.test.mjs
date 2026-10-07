@@ -210,6 +210,7 @@ test("foundation diagnostic does not blame a nonfatal lock warning for a later u
 test("generic checksum output cannot select provider repair guidance", () => {
   for (const output of [
     "Mix dependency checksum mismatch\nError: database connection refused",
+    "Provider authentication checksum mismatch\nError: application connection refused",
     `${READONLY_INIT_OUTPUT}\nHex checksum verification failed\nError: another command failed`,
     "Application data does not match any checksums\nError: setup failed",
   ]) {

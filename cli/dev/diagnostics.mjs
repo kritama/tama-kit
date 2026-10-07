@@ -98,7 +98,7 @@ const PROVIDER_REASONS = new Set(["provider-checksum-mismatch", "lockfile-update
 // Generic checksum output from Mix or application logs is insufficient:
 // require a provider checksum failure or OpenTofu's cached/local package error.
 const CHECKSUM_EVIDENCE =
-  /invalid provider checksum|invalid checksum for [^\r\n]{0,256}\bprovider|provider[^\r\n]{0,256}\bchecksum (?:mismatch|verification failed)|provider package (?:does not|doesn't) match (?:any )?(?:of the )?(?:expected )?checksums?|the (?:cached|local) package for [^\r\n]{1,2048} (?:does not|doesn't) match (?:any )?(?:of the )?checksums?/iu;
+  /invalid provider checksum|invalid checksum for [^\r\n]{0,256}\bprovider|provider (?:package|plugin)[^\r\n]{0,256}\bchecksum (?:mismatch|verification failed)|provider package (?:does not|doesn't) match (?:any )?(?:of the )?(?:expected )?checksums?|the (?:cached|local) package for [^\r\n]{1,2048} (?:does not|doesn't) match (?:any )?(?:of the )?checksums?/iu;
 const LOCK_ERROR_EVIDENCE =
   /provider dependency changes detected|lock file is read-only|inconsistent dependency lock file|not in lock file/iu;
 const APPLY_EVIDENCE =
