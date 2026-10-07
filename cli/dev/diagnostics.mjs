@@ -55,7 +55,7 @@ const REMEDIATIONS = Object.freeze({
   "opentofu-unavailable":
     "OpenTofu is not installed and mise is not available, so the test foundation cannot be provisioned. Install the OpenTofu version declared in .tool-versions, or install mise and re-run 'tama-kit dev setup'.",
   "opentofu-unusable":
-    "mise installed OpenTofu but it could not be executed. Re-run 'mise install opentofu' to repair the mise toolchain, verify 'mise exec opentofu -- tofu --version', then re-run 'tama-kit dev setup'.",
+    "mise is installed but could not be used to run OpenTofu. Verify the mise installation with 'mise --version', re-run 'mise install opentofu' to repair the toolchain, confirm 'mise exec opentofu -- tofu --version', then re-run 'tama-kit dev setup'.",
   "provider-checksum-mismatch":
     "OpenTofu rejected a provider checksum recorded in the dependency lockfile. From the Tama root, keep the lockfile's selected provider version and refresh only its verified checksums for this platform, for example on macOS arm64: 'tofu -chdir=scripts/setup providers lock -platform=darwin_arm64 registry.opentofu.org/upmaru/tama'. Review the signature information and the lock diff, re-run 'tofu -chdir=scripts/setup init -lockfile=readonly', then re-run 'tama-kit dev setup'. Do not delete the lockfile, disable checksum verification, or use a writable init.",
   "lockfile-update-required":

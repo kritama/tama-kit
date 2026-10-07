@@ -80,6 +80,26 @@ async function commandSucceeds(command, args, cwd) {
 }
 
 /**
+ * Probe a command once and classify the outcome so a present-but-broken
+ * tool is never reported as missing. Only a spawn ENOENT means the
+ * executable is absent; permission errors, symlink loops, and nonzero
+ * exits all mean it is present but not working.
+ * @param {string} command @param {string[]} args @param {string} cwd
+ * @returns {Promise<"working" | "present" | "missing">}
+ */
+async function probeCommand(command, args, cwd) {
+  try {
+    await runProcess(command, args, { cwd, stdio: "ignore" });
+    return "working";
+  } catch (error) {
+    if (error !== null && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return "missing";
+    }
+    return "present";
+  }
+}
+
+/**
  * @param {import("../types.mjs").DevSetupPlan} plan
  * @param {{quiet?: boolean}} [options]
  * @returns {Promise<"direct" | "mise">}
@@ -88,11 +108,17 @@ export async function ensureOpenTofu(plan, { quiet = false } = {}) {
   if (await commandSucceeds("tofu", ["--version"], plan.root)) {
     return "direct";
   }
-  if (!(await commandSucceeds("mise", ["--version"], plan.root))) {
-    throw startupError(
-      "OpenTofu is required; install the version declared in .tool-versions or install mise",
-      { diagnostic: toolInstallDiagnostic("opentofu-unavailable") },
-    );
+  const mise = await probeCommand("mise", ["--version"], plan.root);
+  if (mise !== "working") {
+    if (mise === "missing") {
+      throw startupError(
+        "OpenTofu is required; install the version declared in .tool-versions or install mise",
+        { diagnostic: toolInstallDiagnostic("opentofu-unavailable") },
+      );
+    }
+    throw startupError("OpenTofu is required, but the installed mise could not be executed", {
+      diagnostic: toolInstallDiagnostic("opentofu-unusable"),
+    });
   }
   await runDevSubprocess("tool-install", "OpenTofu installation", "mise", ["install", "opentofu"], {
     cwd: plan.root,

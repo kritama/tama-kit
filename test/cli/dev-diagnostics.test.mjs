@@ -579,6 +579,24 @@ process.exit(0);
       assert.equal(diagnostic?.reason, "opentofu-unusable");
       return true;
     });
+
+    // mise present but broken: 'mise --version' exits nonzero, so the
+    // failure is reported as unusable mise, never as missing mise.
+    writeFileSync(
+      join(bin, "mise"),
+      `#!${process.execPath}
+process.exit(1);
+`,
+    );
+    await assert.rejects(ensureOpenTofu(plan), (error) => {
+      assert.equal(error.exitCode, 6);
+      assert.match(error.message, /the installed mise could not be executed/u);
+      const diagnostic = safeDevSetupDiagnostic(error.details);
+      assert.equal(diagnostic?.phase, "tool-install");
+      assert.equal(diagnostic?.reason, "opentofu-unusable");
+      assert.doesNotMatch(diagnostic?.remediation ?? "", /install mise/u);
+      return true;
+    });
   } finally {
     process.env.PATH = originalPath;
   }
@@ -667,7 +685,7 @@ process.exit(1);
     mode === "generic"
       ? 'console.log("Initializing provider plugins...");\nconsole.log("OpenTofu has been successfully initialized!");'
       : `console.log(${JSON.stringify(READONLY_INIT_OUTPUT)});`;
-  const hasTofu = mode !== "no-opentofu" && mode !== "unusable-opentofu";
+  const hasTofu = mode !== "no-opentofu" && mode !== "unusable-opentofu" && mode !== "broken-mise";
   if (hasTofu) {
     writeFileSync(
       join(bin, "tofu"),
@@ -691,10 +709,14 @@ process.exit(0);
     );
   }
   const executables = hasTofu ? ["docker", "mix", "tofu"] : ["docker", "mix"];
-  if (mode === "unusable-opentofu") {
+  if (mode === "unusable-opentofu" || mode === "broken-mise") {
     writeFileSync(
       join(bin, "mise"),
-      `#!${process.execPath}
+      mode === "broken-mise"
+        ? `#!${process.execPath}
+process.exit(1);
+`
+        : `#!${process.execPath}
 if (process.argv.includes("exec")) process.exit(1);
 process.exit(0);
 `,
@@ -873,6 +895,7 @@ test("dev setup JSON OpenTofu availability failures carry tool-install diagnosti
   const cases = [
     ["no-opentofu", /OpenTofu is required/u, "opentofu-unavailable"],
     ["unusable-opentofu", /could not execute it/u, "opentofu-unusable"],
+    ["broken-mise", /the installed mise could not be executed/u, "opentofu-unusable"],
   ];
   for (const [mode, message, reason] of cases) {
     const root = fakeTamaProject(mode);
