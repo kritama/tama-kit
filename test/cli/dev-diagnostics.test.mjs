@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import {
@@ -841,34 +840,27 @@ test("dev setup JSON completes with a single success document when the fake foun
 
 test("dev setup JSON spawn failure carries a safe spawn diagnostic", async () => {
   const root = fakeTamaProject("generic");
-  // A non-executable 'bash' shadows the system shell on the restricted
-  // PATH, so the mix-setup subprocess fails deterministically with a
-  // spawn EACCES error on every platform.
-  const shadowedBash = join(root, "bin", "bash");
-  writeFileSync(shadowedBash, "#!/bin/sh\nexit 1\n");
-  chmodSync(shadowedBash, 0o600);
-  // The workflow validates prerequisites with execFileSync before any
-  // setup subprocess, so the git directory is the only system path
-  // needed; it is platform-dependent (/usr/bin on Linux, /bin or
-  // /usr/bin on macOS).
-  const gitDir = execFileSync("bash", ["-c", 'dirname "$(command -v git)"'], {
-    encoding: "utf8",
-  }).trim();
+  // A symlink loop named 'bash' shadows the system shell: PATH lookup
+  // finds it first on every platform, and access() of a symlink loop
+  // fails with ELOOP (unlike ENOENT, which lookup would keep searching
+  // past), so the mix-setup subprocess always fails with a spawn error
+  // instead of reaching a real shell.
+  symlinkSync("bash", join(root, "bin", "bash"));
   const originalPath = process.env.PATH;
   try {
-    process.env.PATH = [join(root, "bin"), gitDir].join(":");
+    process.env.PATH = [join(root, "bin"), originalPath].join(":");
     const { code, output, errors } = await runDevSetupJson(root);
     assert.equal(code, 6);
     assert.deepEqual(errors, []);
     const payload = JSON.parse(output[0]);
     assert.equal(payload.ok, false);
     assert.equal(payload.error.category, "startup");
-    assert.match(payload.error.message, /mix setup failed: spawn bash EACCES/u);
+    assert.match(payload.error.message, /mix setup failed: spawn (?:bash )?ELOOP/u);
     assert.deepEqual(payload.error.diagnostic, {
       operation: "mix-setup",
       phase: "mix-setup",
       reason: "mix-setup-failed",
-      spawnFailure: "EACCES",
+      spawnFailure: "ELOOP",
       remediation: payload.error.diagnostic.remediation,
     });
     assertNoSecrets(output[0]);
