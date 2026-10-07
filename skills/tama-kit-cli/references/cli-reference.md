@@ -12,7 +12,7 @@
 | `env doctor [path]` | Inspect declared private environment files | None |
 | `env init [path]` | Recover missing supported required environment files | Exclusive new private files only |
 | `env init --dry-run` | Preview recovery and blockers | None; no keys generated |
-| `dev setup [path]` | Native Tama Phoenix checkout setup | Separate development workflow |
+| `dev setup [path]` | Native Tama Phoenix checkout setup | Separate development workflow; `--json` failures carry a sanitized `diagnostic` (phase, reason, subphase, remediation), and OpenTofu lockfile repair is manual via `providers lock` |
 | `oauth generate-key` | Generate a standalone System OAuth key | New explicit output only |
 
 ## Fresh generation

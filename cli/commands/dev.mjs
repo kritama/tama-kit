@@ -3,6 +3,7 @@
 import { relative } from "node:path";
 import { parseArgs } from "node:util";
 
+import { safeDevSetupDiagnostic } from "../dev/diagnostics.mjs";
 import { readDevSetupUrl } from "../dev/environment.mjs";
 import { createDevSetupPlan, publicDevSetupPlan } from "../dev/plan.mjs";
 import { CLIError, EXIT_CODES, usageError } from "../errors.mjs";
@@ -207,6 +208,10 @@ export async function runDev(argv, io) {
       error instanceof CLIError
         ? error
         : new CLIError(error instanceof Error ? error.message : String(error));
+    // Only the allowlisted dev diagnostic is serialized; unrelated nested
+    // details from planning errors are never published.
+    const diagnostic =
+      cliError.category === "startup" ? safeDevSetupDiagnostic(cliError.details) : undefined;
     io.stdout(
       JSON.stringify({
         ok: false,
@@ -214,6 +219,7 @@ export async function runDev(argv, io) {
           category: cliError.category,
           exitCode: cliError.exitCode,
           message: cliError.message,
+          ...(diagnostic ? { diagnostic } : {}),
         },
       }),
     );
