@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
@@ -838,26 +839,36 @@ test("dev setup JSON completes with a single success document when the fake foun
   }
 });
 
-test("dev setup JSON missing-executable failure carries a safe spawn diagnostic", async () => {
+test("dev setup JSON spawn failure carries a safe spawn diagnostic", async () => {
   const root = fakeTamaProject("generic");
-  await prepareProject(root);
+  // A non-executable 'bash' shadows the system shell on the restricted
+  // PATH, so the mix-setup subprocess fails deterministically with a
+  // spawn EACCES error on every platform.
+  const shadowedBash = join(root, "bin", "bash");
+  writeFileSync(shadowedBash, "#!/bin/sh\nexit 1\n");
+  chmodSync(shadowedBash, 0o600);
+  // The workflow validates prerequisites with execFileSync before any
+  // setup subprocess, so the git directory is the only system path
+  // needed; it is platform-dependent (/usr/bin on Linux, /bin or
+  // /usr/bin on macOS).
+  const gitDir = execFileSync("bash", ["-c", 'dirname "$(command -v git)"'], {
+    encoding: "utf8",
+  }).trim();
   const originalPath = process.env.PATH;
   try {
-    // Only the fake executables plus /usr/bin (git) remain reachable, so
-    // 'bash' cannot spawn.
-    process.env.PATH = [join(root, "bin"), "/usr/bin"].join(":");
+    process.env.PATH = [join(root, "bin"), gitDir].join(":");
     const { code, output, errors } = await runDevSetupJson(root);
     assert.equal(code, 6);
     assert.deepEqual(errors, []);
     const payload = JSON.parse(output[0]);
     assert.equal(payload.ok, false);
     assert.equal(payload.error.category, "startup");
-    assert.match(payload.error.message, /mix setup failed: spawn bash ENOENT/u);
+    assert.match(payload.error.message, /mix setup failed: spawn bash EACCES/u);
     assert.deepEqual(payload.error.diagnostic, {
       operation: "mix-setup",
       phase: "mix-setup",
       reason: "mix-setup-failed",
-      spawnFailure: "ENOENT",
+      spawnFailure: "EACCES",
       remediation: payload.error.diagnostic.remediation,
     });
     assertNoSecrets(output[0]);
