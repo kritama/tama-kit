@@ -295,6 +295,51 @@ canonical Memovee integration topology, use:
 npx @kritama/tama-kit dev setup --port 4001 --postgres-port 55432 --json
 ```
 
+### Development setup diagnostics and provider lock repair
+
+When `tama-kit dev setup --json` fails, the JSON envelope includes a
+sanitized `diagnostic` object with the failed phase, a stable reason, an
+OpenTofu `tofu-init`/`tofu-apply` subphase only when the output provides
+evidence, an optional provider source/version taken from the checkout's
+repository-owned lock file (only when it pins exactly one provider), an
+allowlisted `spawnFailure` code when a subprocess executable could not be
+started, and a static remediation. OpenTofu or mise availability failures
+report a `tool-install` phase with `opentofu-unavailable` or
+`opentofu-unusable`. In JSON mode Tama Kit captures subprocess stdout and
+stderr only internally, with bounded tails, and never includes raw output,
+credentials, or secret values in the JSON document or error messages; it
+never infers provider identity from captured output. Run without `--json`
+to see the full subprocess output.
+
+Test foundation provisioning runs `tofu init -lockfile=readonly` and Tama Kit
+never updates the repository-owned dependency lockfile, retries with a
+writable init, or repairs the lock automatically. If the diagnostic reports
+`provider-checksum-mismatch` or `lockfile-update-required`, repair the lock
+deliberately and manually from the Tama root:
+
+1. Inspect the provider version already selected by
+   `scripts/setup/.terraform.lock.hcl` and keep that exact version.
+2. Refresh only the verified checksums for that version and your platform,
+   for example on macOS arm64:
+
+   ```bash
+   tofu -chdir=scripts/setup providers lock -platform=darwin_arm64 registry.opentofu.org/upmaru/tama
+   ```
+
+3. Review the signature information and the lock diff, and confirm the
+   selected provider version and the existing checksums are unchanged. If the
+   lock update fails or changes the version, stop and investigate rather than
+   weakening verification.
+4. Re-verify the lock, then retry setup:
+
+   ```bash
+   tofu -chdir=scripts/setup init -lockfile=readonly
+   npx @kritama/tama-kit dev setup --json
+   ```
+
+Do not delete the lockfile, run an upgrade, disable checksum verification,
+or retry with a writable init.
+
 ## Generate a staging OAuth key
 
 For environments that bootstrap does not manage, such as a staging deployment
