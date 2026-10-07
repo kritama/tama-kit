@@ -57,9 +57,9 @@ const REMEDIATIONS = Object.freeze({
   "opentofu-unusable":
     "mise is installed but could not be used to run OpenTofu. Verify the mise installation with 'mise --version', re-run 'mise install opentofu' to repair the toolchain, confirm 'mise exec opentofu -- tofu --version', then re-run 'tama-kit dev setup'.",
   "provider-checksum-mismatch":
-    "OpenTofu rejected a provider checksum recorded in the dependency lockfile. From the Tama root, keep the lockfile's selected provider version and refresh only its verified checksums for this platform, for example on macOS arm64: 'tofu -chdir=scripts/setup providers lock -platform=darwin_arm64 registry.opentofu.org/upmaru/tama'. Review the signature information and the lock diff, re-run 'tofu -chdir=scripts/setup init -lockfile=readonly', then re-run 'tama-kit dev setup'. Do not delete the lockfile, disable checksum verification, or use a writable init.",
+    "OpenTofu rejected a provider checksum recorded in the dependency lockfile. From the Tama root, keep the lockfile's selected provider version and refresh only its verified checksums for this platform, for example on macOS arm64: 'tofu -chdir=scripts/setup providers lock -platform=darwin_arm64 registry.opentofu.org/upmaru/tama'. When OpenTofu is available only through mise, prefix both repair and verification commands with 'mise exec opentofu --', for example 'mise exec opentofu -- tofu -chdir=scripts/setup providers lock -platform=darwin_arm64 registry.opentofu.org/upmaru/tama' and 'mise exec opentofu -- tofu -chdir=scripts/setup init -lockfile=readonly'. Review the signature information and the lock diff, re-run 'tofu -chdir=scripts/setup init -lockfile=readonly', then re-run 'tama-kit dev setup'. Do not delete the lockfile, disable checksum verification, or use a writable init.",
   "lockfile-update-required":
-    "Test foundation provisioning runs 'tofu init -lockfile=readonly' and cannot update the dependency lockfile. Review the tofu report from the Tama root, deliberately lock the selected provider version for your platform with 'tofu -chdir=scripts/setup providers lock', re-verify with 'tofu -chdir=scripts/setup init -lockfile=readonly', then re-run 'tama-kit dev setup'. Do not follow tofu's suggestion to re-run a writable init.",
+    "Test foundation provisioning runs 'tofu init -lockfile=readonly' and cannot update the dependency lockfile. Review the tofu report from the Tama root, deliberately lock the selected provider version for your platform with 'tofu -chdir=scripts/setup providers lock', re-verify with 'tofu -chdir=scripts/setup init -lockfile=readonly', then re-run 'tama-kit dev setup'. When OpenTofu is available only through mise, use 'mise exec opentofu -- tofu -chdir=scripts/setup providers lock' and 'mise exec opentofu -- tofu -chdir=scripts/setup init -lockfile=readonly'. Do not follow tofu's suggestion to re-run a writable init.",
   "foundation-failed":
     "Tama's test foundation setup script failed. Re-run 'tama-kit dev setup' without --json to see the full Mix and OpenTofu output, and verify the development database is running.",
 });
@@ -95,8 +95,10 @@ const PROVIDER_REASONS = new Set(["provider-checksum-mismatch", "lockfile-update
  * explain a failure by itself, whether or not later apply output is
  * present: when init succeeds, any later error has its own cause.
  */
+// Generic checksum output from Mix or application logs is insufficient:
+// require a provider checksum failure or OpenTofu's cached/local package error.
 const CHECKSUM_EVIDENCE =
-  /invalid (?:dependency |provider )?checksum|checksum (?:mismatch|verification failed)|does not match (?:any )?(?:of the )?checksums?/iu;
+  /invalid provider checksum|invalid checksum for [^\r\n]{0,256}\bprovider|provider[^\r\n]{0,256}\bchecksum (?:mismatch|verification failed)|provider package (?:does not|doesn't) match (?:any )?(?:of the )?(?:expected )?checksums?|the (?:cached|local) package for [^\r\n]{1,2048} (?:does not|doesn't) match (?:any )?(?:of the )?checksums?/iu;
 const LOCK_ERROR_EVIDENCE =
   /provider dependency changes detected|lock file is read-only|inconsistent dependency lock file|not in lock file/iu;
 const APPLY_EVIDENCE =

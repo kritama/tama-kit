@@ -153,6 +153,7 @@ test("foundation diagnostic recognizes checksum mismatch with apply evidence on 
     assert.deepEqual(withLock.provider, LOCK_PROVIDER);
     assert.match(withLock.remediation, /providers lock -platform=/u);
     assert.match(withLock.remediation, /init -lockfile=readonly/u);
+    assert.match(withLock.remediation, /mise exec opentofu -- tofu/u);
     assertNoSecrets(JSON.stringify(withLock));
     // Captured output is never mined for provider metadata.
     const withoutLock = devSetupDiagnostic("foundation", { stdout, stderr });
@@ -173,6 +174,7 @@ test("foundation diagnostic recognizes an authentic fatal read-only init failure
   assert.equal(diagnostic.reason, "lockfile-update-required");
   assert.deepEqual(diagnostic.provider, LOCK_PROVIDER);
   assert.match(diagnostic.remediation, /lockfile=readonly/u);
+  assert.match(diagnostic.remediation, /mise exec opentofu -- tofu/u);
   assert.doesNotMatch(diagnostic.remediation, /without the .?-lockfile=readonly.? flag/u);
 });
 
@@ -205,10 +207,38 @@ test("foundation diagnostic does not blame a nonfatal lock warning for a later u
   assertNoSecrets(JSON.stringify(diagnostic));
 });
 
+test("generic checksum output cannot select provider repair guidance", () => {
+  for (const output of [
+    "Mix dependency checksum mismatch\nError: database connection refused",
+    `${READONLY_INIT_OUTPUT}\nHex checksum verification failed\nError: another command failed`,
+    "Application data does not match any checksums\nError: setup failed",
+  ]) {
+    const diagnostic = devSetupDiagnostic(
+      "foundation",
+      { stdout: output, stderr: "" },
+      { provider: LOCK_PROVIDER },
+    );
+    assert.equal(diagnostic.reason, "foundation-failed");
+    assert.equal(diagnostic.provider, undefined);
+    assert.equal(diagnostic.subphase, undefined);
+  }
+});
+
+test("OpenTofu's cached provider package mismatch is recognized", () => {
+  const diagnostic = devSetupDiagnostic("foundation", {
+    stdout: "tofu apply",
+    stderr:
+      "Error: Required plugins are not installed\n" +
+      "the cached package for registry.opentofu.org/upmaru/tama 0.7.0 (in .terraform/providers) does not match any of the checksums recorded in the dependency lock file",
+  });
+  assert.equal(diagnostic.reason, "provider-checksum-mismatch");
+  assert.equal(diagnostic.subphase, "tofu-apply");
+});
+
 test("secret-shaped provider syntax in captured output never reaches the diagnostic", () => {
   const secretOutput =
     "TAMA_CLIENT_SECRET=registry.opentofu.org/private/probe-secret 1.2.3-private-secret\n" +
-    "Error: checksum verification failed";
+    "Error: Invalid provider checksum";
   const withoutLock = devSetupDiagnostic("foundation", { stdout: secretOutput, stderr: "" });
   assert.equal(withoutLock.reason, "provider-checksum-mismatch");
   assert.equal(withoutLock.provider, undefined);
@@ -675,11 +705,13 @@ process.exit(1);
   const applyOutput =
     mode === "generic"
       ? 'console.error("mix error: arbitrary-private-output");'
-      : mode === "unrelated"
-        ? "console.log(\"OpenTofu has planned 3 actions!\");\nconsole.error('Error: dial tcp 127.0.0.1:55432: connect: connection refused');"
-        : mode === "ok"
-          ? 'console.log("OpenTofu has planned 3 actions!");\nconsole.log("Apply complete! Resources: 3 added, 0 changed, 0 destroyed.");'
-          : checksumOutput;
+      : mode === "unrelated-checksum"
+        ? 'console.log("Mix dependency checksum mismatch");\nconsole.error("Error: database connection refused");'
+        : mode === "unrelated"
+          ? "console.log(\"OpenTofu has planned 3 actions!\");\nconsole.error('Error: dial tcp 127.0.0.1:55432: connect: connection refused');"
+          : mode === "ok"
+            ? 'console.log("OpenTofu has planned 3 actions!");\nconsole.log("Apply complete! Resources: 3 added, 0 changed, 0 destroyed.");'
+            : checksumOutput;
   const applyExit = mode === "ok" ? 0 : 1;
   const initOutput =
     mode === "generic"
@@ -815,7 +847,7 @@ test("dev setup JSON emits no provider metadata for an ambiguous lockfile", asyn
 });
 
 test("dev setup JSON generic and unrelated apply failures omit unproven subphase and provider facts", async () => {
-  for (const mode of ["generic", "unrelated"]) {
+  for (const mode of ["generic", "unrelated", "unrelated-checksum"]) {
     const root = fakeTamaProject(mode);
     await prepareProject(root);
     const originalPath = process.env.PATH;
