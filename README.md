@@ -326,6 +326,12 @@ deliberately and manually from the Tama root:
    tofu -chdir=scripts/setup providers lock -platform=darwin_arm64 registry.opentofu.org/upmaru/tama
    ```
 
+   When OpenTofu is available only through mise, use:
+
+   ```bash
+   mise exec opentofu -- tofu -chdir=scripts/setup providers lock -platform=darwin_arm64 registry.opentofu.org/upmaru/tama
+   ```
+
 3. Review the signature information and the lock diff, and confirm the
    selected provider version and the existing checksums are unchanged. If the
    lock update fails or changes the version, stop and investigate rather than
@@ -335,6 +341,12 @@ deliberately and manually from the Tama root:
    ```bash
    tofu -chdir=scripts/setup init -lockfile=readonly
    npx @kritama/tama-kit dev setup --json
+   ```
+
+   For mise-managed OpenTofu, the verification command is:
+
+   ```bash
+   mise exec opentofu -- tofu -chdir=scripts/setup init -lockfile=readonly
    ```
 
 Do not delete the lockfile, run an upgrade, disable checksum verification,
